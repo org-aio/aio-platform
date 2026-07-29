@@ -1,0 +1,52 @@
+[package]
+name = "az-studio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "AIO full-stack zero-code Studio, compiler, publisher, renderer, and Vibe editor."
+workspace = "../../.."
+
+[dependencies]
+anyhow.workspace = true
+automod.workspace = true
+dioxus.workspace = true
+hex.workspace = true
+rudi.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tw-merge.workspace = true
+uuid.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dioxus = { workspace = true, features = ["web", "launch", "hooks", "document"] }
+dioxus-web = "0.7.9"
+futures-util = "0.3.31"
+gloo-net = { version = "0.6.0", features = ["http", "json", "eventsource"] }
+gloo-timers = { version = "0.3.0", features = ["futures"] }
+js-sys = "0.3.82"
+wasm-bindgen = "0.2.105"
+web-sys = { version = "0.3.82", features = ["Document", "Element", "HtmlElement", "Location", "UrlSearchParams", "Window", "History"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+arc-swap.workspace = true
+async-stream = "0.3.6"
+async-trait.workspace = true
+axum.workspace = true
+az-plugin-core.workspace = true
+futures-util = "0.3.31"
+matchit.workspace = true
+rig-core = "0.36.0"
+sqlx.workspace = true
+tokio.workspace = true
+toasty.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true
