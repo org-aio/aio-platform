@@ -2,14 +2,15 @@
 #![forbid(unsafe_code)]
 
 mod compiler;
-mod component;
-mod component_index;
-mod component_kind;
-mod components;
+#[cfg(not(target_arch = "wasm32"))]
+mod convention_file;
 mod definition;
+#[cfg(not(target_arch = "wasm32"))]
+mod form_state;
 mod image;
+#[cfg(target_arch = "wasm32")]
+mod page_runtime;
 mod patch;
-mod renderer;
 mod studio_contract;
 mod vm;
 
@@ -41,20 +42,18 @@ pub mod program_store;
 pub mod studio_http;
 
 pub use compiler::{
-    CompileFailure, CompilerStage, Diagnostic, DiagnosticSeverity, ProgramCompiler, content_hash,
-    preview_render_plan,
+    CompileFailure, CompilerStage, Diagnostic, DiagnosticSeverity, ProgramCompiler, compile_page,
+    content_hash, convention_page_module_name, convention_page_path,
 };
-pub use component::{
-    ComponentCatalogEntry, ComponentDefinition, ComponentEventSpec, ComponentPropertySpec,
-    ComponentRenderContext, ComponentSpec, DynDynamicComponentProvider, DynamicComponentEvent,
-    DynamicComponentProvider,
-};
-pub use component_index::{ComponentIndex, IndexedComponent};
-pub use component_kind::{ComponentBehavior, ComponentPropertyKind, ComponentShape};
+#[cfg(not(target_arch = "wasm32"))]
+pub use convention_file::ConventionFileGenerator;
 pub use definition::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub use form_state::FormStateExtractor;
 pub use image::*;
+#[cfg(target_arch = "wasm32")]
+pub use page_runtime::*;
 pub use patch::*;
-pub use renderer::{DynamicRenderData, DynamicRenderer};
 pub use studio_contract::*;
 pub use vm::*;
 

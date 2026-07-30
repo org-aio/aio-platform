@@ -5,11 +5,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    ApplicationImage, BytecodeInstruction, BytecodeSegment, CapabilityCatalog, ChildrenConstraint,
-    CompiledDataSource, CompiledExpressionIndex, CompiledModel, CompiledRoute, ComponentCatalog,
-    ComponentNode, DefinitionState, EffectKind, FunctionDefinition, FunctionNode, FunctionNodeKind,
-    GraphEdge, ImageTarget, Instruction, ModelDefinition, PROGRAM_SCHEMA_VERSION,
-    ProgramDefinition, RenderNode, RenderPlan, SymbolId, validate_route_path,
+    BytecodeInstruction, BytecodeSegment, CapabilityCatalog, CompiledExpressionIndex,
+    CompiledModel, CompiledPage, CompiledPageRenderer, CompiledRoute, CompiledTable, CompiledTree,
+    DefinitionState, EffectKind, FieldDefinition, FunctionDefinition, FunctionNode,
+    FunctionNodeKind, GraphEdge, ImageTarget, Instruction, ModelDefinition, PROGRAM_SCHEMA_VERSION,
+    PageDefinition, PageRendererDefinition, ProgramDefinition, ProgramImage, SymbolId,
+    TableDefinition, validate_route_path,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -67,20 +68,14 @@ impl std::error::Error for CompileFailure {}
 /// 固定阶段、确定性输出的 ProgramGraph 编译器。
 pub struct ProgramCompiler<'a> {
     compiler_version: &'a str,
-    components: &'a ComponentCatalog,
     capabilities: &'a CapabilityCatalog,
 }
 
 impl<'a> ProgramCompiler<'a> {
     #[must_use]
-    pub fn new(
-        compiler_version: &'a str,
-        components: &'a ComponentCatalog,
-        capabilities: &'a CapabilityCatalog,
-    ) -> Self {
+    pub fn new(compiler_version: &'a str, capabilities: &'a CapabilityCatalog) -> Self {
         Self {
             compiler_version,
-            components,
             capabilities,
         }
     }
@@ -90,12 +85,12 @@ impl<'a> ProgramCompiler<'a> {
         definition: &ProgramDefinition,
         revision_id: impl Into<String>,
         target: ImageTarget,
-    ) -> Result<ApplicationImage, CompileFailure> {
+    ) -> Result<ProgramImage, CompileFailure> {
         let mut diagnostics = Vec::new();
         self.validate_schema(definition, &mut diagnostics);
         let symbols = self.resolve_symbols(definition, &mut diagnostics);
         self.infer_types(definition, &mut diagnostics);
-        self.link_components_and_capabilities(definition, &symbols, &mut diagnostics);
+        self.link_pages_and_capabilities(definition, &symbols, &mut diagnostics);
         self.check_effects_and_permissions(definition, &mut diagnostics);
         self.check_loop_bounds(definition, &mut diagnostics);
         let dependencies = self.analyze_dependencies(definition, &symbols, &mut diagnostics);
@@ -127,11 +122,11 @@ impl<'a> ProgramCompiler<'a> {
                 None,
             )],
         })?;
-        Ok(ApplicationImage {
+        Ok(ProgramImage {
             schema_version: PROGRAM_SCHEMA_VERSION,
             compiler_version: self.compiler_version.to_owned(),
             content_hash,
-            application_id: definition.id,
+            program_id: definition.id,
             name: definition.name.clone(),
             title: definition.title.clone(),
             revision_id: revision_id.into(),
@@ -222,6 +217,7 @@ impl<'a> ProgramCompiler<'a> {
                         Some(field.id),
                     ));
                 }
+                validate_field_options(field, diagnostics);
             }
         }
     }
@@ -250,13 +246,6 @@ impl<'a> ProgramCompiler<'a> {
         for page in &definition.pages {
             insert_symbol(&mut symbols, page.id, diagnostics);
             check_state(page.id, &page.state, diagnostics);
-            collect_component_symbols(&page.root, &mut symbols, diagnostics);
-            for state in &page.page_state {
-                insert_symbol(&mut symbols, state.id, diagnostics);
-            }
-            for source in &page.data_sources {
-                insert_symbol(&mut symbols, source.id, diagnostics);
-            }
         }
         for function in &definition.functions {
             insert_symbol(&mut symbols, function.id, diagnostics);
@@ -291,10 +280,7 @@ impl<'a> ProgramCompiler<'a> {
             }
         }
         for page in &definition.pages {
-            validate_component_references(&page.root, &symbols, diagnostics);
-            for source in &page.data_sources {
-                check_reference(source.function_id, &symbols, diagnostics, source.id);
-            }
+            validate_page_references(page, &symbols, diagnostics);
         }
         for route in &definition.routes {
             check_reference(route.page_id, &symbols, diagnostics, route.id);
@@ -340,15 +326,13 @@ impl<'a> ProgramCompiler<'a> {
         }
     }
 
-    fn link_components_and_capabilities(
+    fn link_pages_and_capabilities(
         &self,
         definition: &ProgramDefinition,
         symbols: &BTreeSet<SymbolId>,
         diagnostics: &mut Vec<Diagnostic>,
     ) {
-        for page in &definition.pages {
-            self.link_component(&page.root, symbols, diagnostics);
-        }
+        self.validate_page_metadata(definition, symbols, diagnostics);
         for function in &definition.functions {
             for node in &function.graph.nodes {
                 if let FunctionNodeKind::Capability {
@@ -374,109 +358,14 @@ impl<'a> ProgramCompiler<'a> {
         }
     }
 
-    fn link_component(
+    fn validate_page_metadata(
         &self,
-        node: &ComponentNode,
-        symbols: &BTreeSet<SymbolId>,
+        definition: &ProgramDefinition,
+        _symbols: &BTreeSet<SymbolId>,
         diagnostics: &mut Vec<Diagnostic>,
     ) {
-        let Some(contract) = self.components.components.get(&node.component) else {
-            diagnostics.push(diagnostic(
-                "COMPONENT_NOT_LINKED",
-                CompilerStage::Linking,
-                format!("组件未由 Rudi Provider 注册: {}", node.component),
-                Some(node.id),
-            ));
-            return;
-        };
-        for property in node.properties.keys() {
-            if !contract.properties.contains_key(property) {
-                diagnostics.push(diagnostic(
-                    "COMPONENT_PROPERTY_UNKNOWN",
-                    CompilerStage::Linking,
-                    format!("组件 {} 不支持属性 {property}", node.component),
-                    Some(node.id),
-                ));
-            }
-        }
-        for (name, property) in &contract.properties {
-            if property.required && !node.properties.contains_key(name) {
-                diagnostics.push(diagnostic(
-                    "COMPONENT_PROPERTY_REQUIRED",
-                    CompilerStage::Linking,
-                    format!("组件 {} 缺少必填属性 {name}", node.component),
-                    Some(node.id),
-                ));
-            }
-            if let Some(crate::PropertyValue::Literal { value }) = node.properties.get(name) {
-                if !literal_matches_type(value, &property.value_type) {
-                    diagnostics.push(diagnostic(
-                        "COMPONENT_PROPERTY_TYPE",
-                        CompilerStage::Types,
-                        format!("组件 {} 的属性 {name} 类型不匹配", node.component),
-                        Some(node.id),
-                    ));
-                }
-                if !property.choices.is_empty()
-                    && value
-                        .as_str()
-                        .is_none_or(|value| !property.choices.iter().any(|choice| choice == value))
-                {
-                    diagnostics.push(diagnostic(
-                        "COMPONENT_PROPERTY_CHOICE",
-                        CompilerStage::Types,
-                        format!("组件 {} 的属性 {name} 选项无效", node.component),
-                        Some(node.id),
-                    ));
-                }
-            }
-        }
-        for (event, function_id) in &node.events {
-            if !contract.events.contains_key(event) {
-                diagnostics.push(diagnostic(
-                    "COMPONENT_EVENT_UNKNOWN",
-                    CompilerStage::Linking,
-                    format!("组件 {} 不支持事件 {event}", node.component),
-                    Some(node.id),
-                ));
-            }
-            check_reference(*function_id, symbols, diagnostics, node.id);
-        }
-        match &contract.children {
-            ChildrenConstraint::None if !node.children.is_empty() => diagnostics.push(diagnostic(
-                "COMPONENT_CHILDREN_FORBIDDEN",
-                CompilerStage::Linking,
-                format!("组件 {} 不允许子节点", node.component),
-                Some(node.id),
-            )),
-            ChildrenConstraint::Range { minimum, maximum }
-                if node.children.len() < *minimum as usize
-                    || node.children.len() > *maximum as usize =>
-            {
-                diagnostics.push(diagnostic(
-                    "COMPONENT_CHILDREN_RANGE",
-                    CompilerStage::Linking,
-                    format!("组件 {} 的子节点数量不在允许范围内", node.component),
-                    Some(node.id),
-                ));
-            }
-            ChildrenConstraint::Components { canonical_ids }
-                if node
-                    .children
-                    .iter()
-                    .any(|child| !canonical_ids.contains(&child.component)) =>
-            {
-                diagnostics.push(diagnostic(
-                    "COMPONENT_CHILD_TYPE",
-                    CompilerStage::Linking,
-                    format!("组件 {} 包含不允许的子组件", node.component),
-                    Some(node.id),
-                ));
-            }
-            _ => {}
-        }
-        for child in &node.children {
-            self.link_component(child, symbols, diagnostics);
+        for page in &definition.pages {
+            validate_page_renderer(definition, page, diagnostics);
         }
     }
 
@@ -571,13 +460,7 @@ impl<'a> ProgramCompiler<'a> {
     ) -> BTreeMap<SymbolId, Vec<SymbolId>> {
         let mut dependencies = BTreeMap::new();
         for page in &definition.pages {
-            let mut values = page
-                .data_sources
-                .iter()
-                .map(|source| source.function_id)
-                .collect::<BTreeSet<_>>();
-            collect_component_dependencies(&page.root, &mut values);
-            dependencies.insert(page.id, values.into_iter().collect());
+            dependencies.insert(page.id, page_model_dependencies(page));
         }
         for function in &definition.functions {
             let values = function
@@ -626,6 +509,27 @@ impl<'a> ProgramCompiler<'a> {
                     .enumerate()
                     .map(|(slot, field)| (slot as u32, field.name.clone()))
                     .collect::<BTreeMap<_, _>>();
+                let field_titles = model
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .map(|(slot, field)| (slot as u32, field.title.clone()))
+                    .collect::<BTreeMap<_, _>>();
+                let field_options = model
+                    .fields
+                    .iter()
+                    .filter_map(|field| {
+                        field_slots
+                            .get(&field.id)
+                            .map(|slot| (*slot, field.options.clone()))
+                    })
+                    .collect::<BTreeMap<_, _>>();
+                let required_fields = model
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(slot, field)| field.required.then_some(slot as u32))
+                    .collect::<Vec<_>>();
                 let expression_indexes = model
                     .indexes
                     .iter()
@@ -652,9 +556,13 @@ impl<'a> ProgramCompiler<'a> {
                     CompiledModel {
                         id: model.id,
                         name: model.name.clone(),
+                        title: model.title.clone(),
                         field_slots,
                         field_types,
                         field_names,
+                        field_titles,
+                        field_options,
+                        required_fields,
                         expression_indexes,
                     },
                 )
@@ -667,7 +575,7 @@ impl<'a> ProgramCompiler<'a> {
         definition: &ProgramDefinition,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> (
-        BTreeMap<SymbolId, RenderPlan>,
+        BTreeMap<SymbolId, CompiledPage>,
         BTreeMap<SymbolId, BytecodeSegment>,
         BTreeMap<SymbolId, BytecodeSegment>,
         Vec<CompiledRoute>,
@@ -675,7 +583,7 @@ impl<'a> ProgramCompiler<'a> {
         let pages = definition
             .pages
             .iter()
-            .map(|page| (page.id, preview_render_plan(page)))
+            .map(|page| (page.id, compile_page(definition, page)))
             .collect();
         let mut client_functions = BTreeMap::new();
         let mut server_functions = BTreeMap::new();
@@ -704,7 +612,7 @@ impl<'a> ProgramCompiler<'a> {
     fn smoke_test(
         &self,
         _definition: &ProgramDefinition,
-        pages: &BTreeMap<SymbolId, RenderPlan>,
+        pages: &BTreeMap<SymbolId, CompiledPage>,
         routes: &[CompiledRoute],
         diagnostics: &mut Vec<Diagnostic>,
     ) {
@@ -713,7 +621,7 @@ impl<'a> ProgramCompiler<'a> {
                 diagnostics.push(diagnostic(
                     "SMOKE_ROUTE_PAGE_MISSING",
                     CompilerStage::SmokeTest,
-                    format!("路由 {} 的页面未进入 RenderPlan", route.path),
+                    format!("路由 {} 的页面未进入编译产物", route.path),
                     Some(route.id),
                 ));
             }
@@ -721,29 +629,102 @@ impl<'a> ProgramCompiler<'a> {
     }
 }
 
+fn validate_field_options(field: &FieldDefinition, diagnostics: &mut Vec<Diagnostic>) {
+    let validation = &field.options.validation;
+    if validation
+        .min_length
+        .zip(validation.max_length)
+        .is_some_and(|(minimum, maximum)| minimum > maximum)
+    {
+        diagnostics.push(diagnostic(
+            "FIELD_LENGTH_RANGE_INVALID",
+            CompilerStage::Schema,
+            format!("字段 {} 的最小长度不能大于最大长度", field.name),
+            Some(field.id),
+        ));
+    }
+    if validation
+        .minimum
+        .zip(validation.maximum)
+        .is_some_and(|(minimum, maximum)| minimum > maximum)
+    {
+        diagnostics.push(diagnostic(
+            "FIELD_NUMBER_RANGE_INVALID",
+            CompilerStage::Schema,
+            format!("字段 {} 的最小值不能大于最大值", field.name),
+            Some(field.id),
+        ));
+    }
+    if let Some(pattern) = validation.pattern.as_deref()
+        && let Err(error) = regex::Regex::new(pattern)
+    {
+        diagnostics.push(diagnostic(
+            "FIELD_PATTERN_INVALID",
+            CompilerStage::Schema,
+            format!("字段 {} 的正则表达式无效: {error}", field.name),
+            Some(field.id),
+        ));
+    }
+}
+
 #[must_use]
-pub fn preview_render_plan(page: &crate::PageDefinition) -> RenderPlan {
-    RenderPlan {
-        page_id: page.id,
+pub fn compile_page(definition: &ProgramDefinition, page: &PageDefinition) -> CompiledPage {
+    let renderer = match &page.renderer {
+        PageRendererDefinition::ConventionFile => CompiledPageRenderer::ConventionFile {
+            module_name: convention_page_module_name(&definition.name, &page.name),
+            expected_path: convention_page_path(&definition.name, &page.name),
+        },
+        PageRendererDefinition::TreeTable { tree, table } => CompiledPageRenderer::TreeTable {
+            tree: CompiledTree {
+                model_id: tree.model_id.unwrap_or(page.id),
+                label_field_id: tree.label_field_id.unwrap_or(page.id),
+                parent_field_id: tree.parent_field_id,
+                table_relation_field_id: tree.table_relation_field_id.unwrap_or(page.id),
+            },
+            table: compile_table(table, page.id),
+        },
+        PageRendererDefinition::CrudTable { table } => CompiledPageRenderer::CrudTable {
+            table: compile_table(table, page.id),
+        },
+    };
+    CompiledPage {
+        id: page.id,
         name: page.name.clone(),
         title: page.title.clone(),
-        root: lower_render_node(&page.root),
-        page_state: page
-            .page_state
-            .iter()
-            .map(|value| (value.id, value.initial_value.clone()))
-            .collect(),
-        data_sources: page
-            .data_sources
-            .iter()
-            .map(|source| CompiledDataSource {
-                id: source.id,
-                name: source.name.clone(),
-                function_id: source.function_id,
-                parameters: source.parameters.clone(),
-            })
-            .collect(),
+        renderer,
     }
+}
+
+fn compile_table(table: &TableDefinition, fallback: SymbolId) -> CompiledTable {
+    CompiledTable {
+        model_id: table.model_id.unwrap_or(fallback),
+        page_size: table.page_size,
+    }
+}
+
+#[must_use]
+pub fn convention_page_module_name(program_name: &str, page_name: &str) -> String {
+    let program_name = rust_module_segment(program_name);
+    let page_name = rust_module_segment(page_name);
+    format!("{program_name}__{page_name}")
+}
+
+#[must_use]
+pub fn convention_page_path(program_name: &str, page_name: &str) -> String {
+    let module_name = convention_page_module_name(program_name, page_name);
+    format!("src/pages/{module_name}.rs")
+}
+
+fn rust_module_segment(value: &str) -> String {
+    let mut output = String::new();
+    for character in value.chars() {
+        if character.is_ascii_alphanumeric() {
+            output.push(character.to_ascii_lowercase());
+        } else if !output.ends_with('_') {
+            output.push('_');
+        }
+    }
+    output.trim_matches('_').to_owned()
 }
 
 fn diagnostic(
@@ -820,18 +801,6 @@ fn collect_menu_symbols(
     }
 }
 
-fn collect_component_symbols(
-    component: &ComponentNode,
-    symbols: &mut BTreeSet<SymbolId>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    insert_symbol(symbols, component.id, diagnostics);
-    check_state(component.id, &component.state, diagnostics);
-    for child in &component.children {
-        collect_component_symbols(child, symbols, diagnostics);
-    }
-}
-
 fn validate_menu_references(
     menu: &crate::MenuDefinition,
     symbols: &BTreeSet<SymbolId>,
@@ -845,6 +814,15 @@ fn validate_menu_references(
     }
     for permission in &menu.required_permissions {
         check_reference(*permission, symbols, diagnostics, menu.id);
+    }
+    for access in [
+        &menu.row_actions.detail,
+        &menu.row_actions.edit,
+        &menu.row_actions.delete,
+    ] {
+        if let crate::MenuActionAccess::Permission { permission_id } = access {
+            check_reference(*permission_id, symbols, diagnostics, menu.id);
+        }
     }
     for child in &menu.children {
         validate_menu_references(child, symbols, diagnostics);
@@ -863,35 +841,159 @@ fn published_menus(menus: &[crate::MenuDefinition]) -> Vec<crate::MenuDefinition
         .collect()
 }
 
-fn validate_component_references(
-    component: &ComponentNode,
+fn validate_page_references(
+    page: &PageDefinition,
     symbols: &BTreeSet<SymbolId>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    for value in component
-        .properties
-        .values()
-        .chain(component.content.iter())
-    {
-        match value {
-            crate::PropertyValue::PageState { state_id } => {
-                check_reference(*state_id, symbols, diagnostics, component.id)
-            }
-            crate::PropertyValue::DataSource { source_id, path } => {
-                check_reference(*source_id, symbols, diagnostics, component.id);
-                for field_id in path {
-                    check_reference(*field_id, symbols, diagnostics, component.id);
-                }
-            }
-            crate::PropertyValue::Literal { .. } | crate::PropertyValue::EventValue { .. } => {}
+    let mut references = Vec::new();
+    match &page.renderer {
+        PageRendererDefinition::ConventionFile => {}
+        PageRendererDefinition::CrudTable { table } => {
+            collect_table_references(table, &mut references)
+        }
+        PageRendererDefinition::TreeTable { tree, table } => {
+            collect_table_references(table, &mut references);
+            references.extend(
+                [
+                    tree.model_id,
+                    tree.label_field_id,
+                    tree.parent_field_id,
+                    tree.table_relation_field_id,
+                ]
+                .into_iter()
+                .flatten(),
+            );
         }
     }
-    for function in component.events.values() {
-        check_reference(*function, symbols, diagnostics, component.id);
+    for reference in references {
+        check_reference(reference, symbols, diagnostics, page.id);
     }
-    for child in &component.children {
-        validate_component_references(child, symbols, diagnostics);
+}
+
+fn collect_table_references(table: &TableDefinition, references: &mut Vec<SymbolId>) {
+    references.extend(table.model_id);
+}
+
+fn validate_page_renderer(
+    definition: &ProgramDefinition,
+    page: &PageDefinition,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match &page.renderer {
+        PageRendererDefinition::ConventionFile => {}
+        PageRendererDefinition::CrudTable { table } => {
+            validate_table(definition, page.id, table, diagnostics);
+        }
+        PageRendererDefinition::TreeTable { tree, table } => {
+            validate_table(definition, page.id, table, diagnostics);
+            let Some(tree_model_id) = tree.model_id else {
+                diagnostics.push(diagnostic(
+                    "TREE_MODEL_REQUIRED",
+                    CompilerStage::Linking,
+                    "左树右表页面必须选择树模型",
+                    Some(page.id),
+                ));
+                return;
+            };
+            validate_model_fields(
+                definition,
+                page.id,
+                tree_model_id,
+                [tree.label_field_id, tree.parent_field_id]
+                    .into_iter()
+                    .flatten(),
+                diagnostics,
+            );
+            let Some(table_model_id) = table.model_id else {
+                return;
+            };
+            validate_model_fields(
+                definition,
+                page.id,
+                table_model_id,
+                tree.table_relation_field_id,
+                diagnostics,
+            );
+            if tree.label_field_id.is_none() || tree.table_relation_field_id.is_none() {
+                diagnostics.push(diagnostic(
+                    "TREE_FIELDS_REQUIRED",
+                    CompilerStage::Linking,
+                    "左树右表页面必须选择树标题字段和表关联字段",
+                    Some(page.id),
+                ));
+            }
+        }
     }
+}
+
+fn validate_table(
+    definition: &ProgramDefinition,
+    page_id: SymbolId,
+    table: &TableDefinition,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if !(1..=200).contains(&table.page_size) {
+        diagnostics.push(diagnostic(
+            "TABLE_PAGE_SIZE_INVALID",
+            CompilerStage::Bounds,
+            "表格每页条数必须在 1..=200",
+            Some(page_id),
+        ));
+    }
+    let Some(model_id) = table.model_id else {
+        diagnostics.push(diagnostic(
+            "TABLE_MODEL_REQUIRED",
+            CompilerStage::Linking,
+            "表格页面必须选择数据模型",
+            Some(page_id),
+        ));
+        return;
+    };
+    validate_model_fields(
+        definition,
+        page_id,
+        model_id,
+        std::iter::empty(),
+        diagnostics,
+    );
+}
+
+fn validate_model_fields(
+    definition: &ProgramDefinition,
+    page_id: SymbolId,
+    model_id: SymbolId,
+    fields: impl IntoIterator<Item = SymbolId>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(model) = definition.models.iter().find(|model| model.id == model_id) else {
+        return;
+    };
+    for field_id in fields {
+        if model.fields.iter().all(|field| field.id != field_id) {
+            diagnostics.push(diagnostic(
+                "PAGE_FIELD_MODEL_MISMATCH",
+                CompilerStage::Linking,
+                format!("字段 {field_id} 不属于模型 {}", model.name),
+                Some(page_id),
+            ));
+        }
+    }
+}
+
+fn page_model_dependencies(page: &PageDefinition) -> Vec<SymbolId> {
+    let mut values = BTreeSet::new();
+    match &page.renderer {
+        PageRendererDefinition::ConventionFile => {}
+        PageRendererDefinition::CrudTable { table } => {
+            values.extend(table.model_id);
+        }
+        PageRendererDefinition::TreeTable { tree, table } => {
+            values.extend(tree.model_id);
+            values.extend(table.model_id);
+        }
+    }
+    values.into_iter().collect()
 }
 
 fn validate_function_references(
@@ -934,23 +1036,6 @@ fn ports_are_compatible(from: &FunctionNode, to: &FunctionNode) -> bool {
         )
 }
 
-fn literal_matches_type(value: &serde_json::Value, expected: &crate::ValueType) -> bool {
-    match expected {
-        crate::ValueType::Any => true,
-        crate::ValueType::Null => value.is_null(),
-        crate::ValueType::Boolean => value.is_boolean(),
-        crate::ValueType::Integer => value.as_i64().is_some(),
-        crate::ValueType::Decimal => value.is_number(),
-        crate::ValueType::Text | crate::ValueType::File => value.is_string(),
-        crate::ValueType::TimestampMs => value.as_i64().is_some(),
-        crate::ValueType::Object { .. } => value.is_object(),
-        crate::ValueType::List { .. } => value.is_array(),
-        crate::ValueType::Optional { value: inner } => {
-            value.is_null() || literal_matches_type(value, inner)
-        }
-    }
-}
-
 fn is_data_identifier(value: &str) -> bool {
     let mut bytes = value.bytes();
     let Some(first) = bytes.next() else {
@@ -974,14 +1059,10 @@ fn function_effects(
 
 fn node_effects(kind: &FunctionNodeKind, capabilities: &CapabilityCatalog) -> Vec<EffectKind> {
     match kind {
-        FunctionNodeKind::SetState { .. } | FunctionNodeKind::Refresh { .. } => {
-            vec![EffectKind::ClientState]
-        }
         FunctionNodeKind::Navigate { .. } => vec![EffectKind::Navigation],
-        FunctionNodeKind::Confirm { .. }
-        | FunctionNodeKind::OpenDialog { .. }
-        | FunctionNodeKind::CloseDialog { .. }
-        | FunctionNodeKind::Notify { .. } => vec![EffectKind::UserPrompt],
+        FunctionNodeKind::Confirm { .. } | FunctionNodeKind::Notify { .. } => {
+            vec![EffectKind::UserPrompt]
+        }
         FunctionNodeKind::ReadRecord { .. } | FunctionNodeKind::QueryRecords { .. } => {
             vec![EffectKind::DatabaseRead]
         }
@@ -1028,31 +1109,6 @@ fn reaches(
         next.iter()
             .any(|value| reaches(*value, target, graph, visited, false))
     })
-}
-
-fn collect_component_dependencies(component: &ComponentNode, values: &mut BTreeSet<SymbolId>) {
-    values.extend(component.events.values().copied());
-    for child in &component.children {
-        collect_component_dependencies(child, values);
-    }
-}
-
-fn lower_render_node(node: &ComponentNode) -> RenderNode {
-    RenderNode {
-        id: node.id,
-        component: node.component.clone(),
-        properties: node.properties.clone(),
-        content: node.content.clone(),
-        events: node.events.clone(),
-        children: node.children.iter().map(lower_render_node).collect(),
-        style: node.style.clone(),
-        responsive_visibility: node
-            .style
-            .responsive
-            .iter()
-            .filter_map(|(breakpoint, style)| style.visible.map(|visible| (*breakpoint, visible)))
-            .collect(),
-    }
 }
 
 fn lower_function(
@@ -1126,9 +1182,6 @@ fn lower_function(
                 max_items: *max_items,
                 body_function_id: *body_function_id,
             },
-            FunctionNodeKind::SetState { state_id } => Instruction::SetState {
-                state_id: *state_id,
-            },
             FunctionNodeKind::ValidateForm { rules } => Instruction::ValidateForm {
                 rule_count: rules.len() as u32,
             },
@@ -1152,17 +1205,8 @@ fn lower_function(
                 route_id: *route_id,
             },
             FunctionNodeKind::Confirm { .. } => Instruction::Confirm,
-            FunctionNodeKind::OpenDialog { component_id } => Instruction::OpenDialog {
-                component_id: *component_id,
-            },
-            FunctionNodeKind::CloseDialog { component_id } => Instruction::CloseDialog {
-                component_id: *component_id,
-            },
             FunctionNodeKind::Notify { level } => Instruction::Notify {
                 level: format!("{level:?}").to_lowercase(),
-            },
-            FunctionNodeKind::Refresh { source_id } => Instruction::Refresh {
-                source_id: *source_id,
             },
             FunctionNodeKind::Capability {
                 capability_id,
@@ -1297,365 +1341,168 @@ pub fn content_hash(definition: &ProgramDefinition) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-    use std::time::{Duration, Instant};
-
-    use serde_json::json;
-
     use super::*;
     use crate::{
-        ComponentContract, ComponentStyle, DefinitionState, EffectKind, FunctionGraph,
-        FunctionNodeEditor, GraphEdge, MenuDefinition, ModelDefinition, NotificationLevel,
-        PageDefinition, PermissionDefinition, ProgramDefinition,
+        DefinitionState, FieldDefinition, MenuActionAccess, MenuDefinition, MenuRowActions,
+        ModelDefinition, PageRendererDefinition, RouteDefinition, TableDefinition, TreeDefinition,
+        ValueType,
     };
 
-    fn test_catalog() -> ComponentCatalog {
-        ComponentCatalog {
-            components: BTreeMap::from([(
-                "layout.section".to_owned(),
-                ComponentContract {
-                    canonical_id: "layout.section".to_owned(),
-                    properties: BTreeMap::new(),
-                    events: BTreeMap::new(),
-                    children: ChildrenConstraint::Any,
+    fn model(name: &str, title: &str) -> ModelDefinition {
+        ModelDefinition {
+            id: SymbolId::new(),
+            name: name.to_owned(),
+            title: title.to_owned(),
+            state: DefinitionState::Known,
+            fields: vec![
+                FieldDefinition {
+                    id: SymbolId::new(),
+                    name: "name".to_owned(),
+                    title: "名称".to_owned(),
+                    value_type: ValueType::Text,
+                    state: DefinitionState::Known,
+                    required: true,
+                    options: crate::FieldOptions {
+                        filterable: true,
+                        ..crate::FieldOptions::default()
+                    },
+                    relation_model_id: None,
                 },
-            )]),
+                FieldDefinition {
+                    id: SymbolId::new(),
+                    name: "category_id".to_owned(),
+                    title: "分类".to_owned(),
+                    value_type: ValueType::Text,
+                    state: DefinitionState::Known,
+                    required: false,
+                    options: crate::FieldOptions::default(),
+                    relation_model_id: None,
+                },
+            ],
+            indexes: Vec::new(),
         }
     }
 
-    fn valid_program() -> ProgramDefinition {
+    fn crud_program() -> ProgramDefinition {
         let mut program = ProgramDefinition::empty("inventory", "资产");
+        let model = model("asset", "资产");
         let page_id = SymbolId::new();
         program.pages.push(PageDefinition {
             id: page_id,
-            name: "assets".to_owned(),
-            title: "资产".to_owned(),
+            name: "asset_list".to_owned(),
+            title: "资产列表".to_owned(),
             state: DefinitionState::Known,
-            root: ComponentNode {
-                id: SymbolId::new(),
-                component: "layout.section".to_owned(),
-                state: DefinitionState::Known,
-                properties: BTreeMap::new(),
-                content: None,
-                events: BTreeMap::new(),
-                children: Vec::new(),
-                style: ComponentStyle::default(),
+            renderer: PageRendererDefinition::CrudTable {
+                table: TableDefinition {
+                    model_id: Some(model.id),
+                    page_size: 20,
+                },
             },
-            page_state: Vec::new(),
-            data_sources: Vec::new(),
         });
-        program.routes.push(crate::RouteDefinition {
+        program.routes.push(RouteDefinition {
             id: SymbolId::new(),
-            name: "assets".to_owned(),
+            name: "asset_list".to_owned(),
             path: "/assets".to_owned(),
             page_id,
             state: DefinitionState::Known,
             required_permissions: Vec::new(),
         });
+        program.menus.push(MenuDefinition {
+            id: SymbolId::new(),
+            name: "assets".to_owned(),
+            title: "资产".to_owned(),
+            state: DefinitionState::Known,
+            icon: None,
+            page_id: Some(page_id),
+            enabled: true,
+            children: Vec::new(),
+            required_permissions: Vec::new(),
+            row_actions: MenuRowActions {
+                detail: MenuActionAccess::Public,
+                edit: MenuActionAccess::Public,
+                delete: MenuActionAccess::Hidden,
+            },
+        });
+        program.models.push(model);
         program
     }
 
     #[test]
+    fn compiles_crud_page_from_model_metadata() -> anyhow::Result<()> {
+        let program = crud_program();
+        let image = ProgramCompiler::new("test", &CapabilityCatalog::default()).compile(
+            &program,
+            "revision-1",
+            ImageTarget::Universal,
+        )?;
+        let page = &image.pages[&program.pages[0].id];
+        assert!(matches!(
+            page.renderer,
+            CompiledPageRenderer::CrudTable { .. }
+        ));
+        assert_eq!(image.models[&program.models[0].id].title, "资产");
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_builtin_page_without_model() {
+        let mut program = crud_program();
+        program.pages[0].renderer = PageRendererDefinition::CrudTable {
+            table: TableDefinition::default(),
+        };
+        let error = ProgramCompiler::new("test", &CapabilityCatalog::default())
+            .compile(&program, "revision-1", ImageTarget::Universal)
+            .expect_err("缺少模型必须被拒绝");
+        assert!(
+            error
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "TABLE_MODEL_REQUIRED")
+        );
+    }
+
+    #[test]
+    fn compiles_tree_table_with_explicit_relation() -> anyhow::Result<()> {
+        let mut program = crud_program();
+        let tree_model = model("category", "分类");
+        let table_model = program.models[0].clone();
+        program.pages[0].renderer = PageRendererDefinition::TreeTable {
+            tree: TreeDefinition {
+                model_id: Some(tree_model.id),
+                label_field_id: Some(tree_model.fields[0].id),
+                parent_field_id: Some(tree_model.fields[1].id),
+                table_relation_field_id: Some(table_model.fields[1].id),
+            },
+            table: TableDefinition {
+                model_id: Some(table_model.id),
+                page_size: 20,
+            },
+        };
+        program.models.push(tree_model);
+        ProgramCompiler::new("test", &CapabilityCatalog::default()).compile(
+            &program,
+            "revision-1",
+            ImageTarget::Universal,
+        )?;
+        Ok(())
+    }
+
+    #[test]
     fn content_hash_is_deterministic() -> anyhow::Result<()> {
-        let program = valid_program();
+        let program = crud_program();
         assert_eq!(content_hash(&program)?, content_hash(&program)?);
         Ok(())
     }
 
     #[test]
-    fn incomplete_reachable_definition_is_rejected() {
-        let mut program = valid_program();
-        program.pages[0].state = DefinitionState::Hole {
-            expected: "页面标题".to_owned(),
-        };
-        let components = test_catalog();
-        let capabilities = CapabilityCatalog::default();
-        let compiler = ProgramCompiler::new("test", &components, &capabilities);
-        let failure = compiler
-            .compile(&program, "revision-1", ImageTarget::Universal)
-            .err()
-            .map(|value| value.diagnostics)
-            .unwrap_or_default();
-        assert!(
-            failure
-                .iter()
-                .any(|value| value.code == "DEFINITION_INCOMPLETE")
-        );
-    }
-
-    #[test]
-    fn disabled_menu_is_not_published_or_validated_as_reachable() -> anyhow::Result<()> {
-        let mut program = valid_program();
-        program.menus.push(MenuDefinition {
-            id: SymbolId::new(),
-            name: "draft-menu".to_owned(),
-            title: "未启用菜单".to_owned(),
-            state: DefinitionState::Hole {
-                expected: "页面绑定".to_owned(),
-            },
-            icon: None,
-            page_id: Some(SymbolId::new()),
-            enabled: false,
-            children: Vec::new(),
-            required_permissions: vec![SymbolId::new()],
-        });
-        let components = test_catalog();
-        let capabilities = CapabilityCatalog::default();
-        let compiler = ProgramCompiler::new("test", &components, &capabilities);
-
-        let image = compiler.compile(&program, "revision-1", ImageTarget::Universal)?;
-
-        assert!(image.menus.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn unknown_component_is_rejected() {
-        let mut program = valid_program();
-        program.pages[0].root.component = "unknown".to_owned();
-        let components = test_catalog();
-        let capabilities = CapabilityCatalog::default();
-        let compiler = ProgramCompiler::new("test", &components, &capabilities);
-        let failure = compiler
-            .compile(&program, "revision-1", ImageTarget::Universal)
-            .err()
-            .map(|value| value.diagnostics)
-            .unwrap_or_default();
-        assert!(
-            failure
-                .iter()
-                .any(|value| value.code == "COMPONENT_NOT_LINKED")
-        );
-    }
-
-    #[test]
-    fn constants_are_lowered_into_image() -> anyhow::Result<()> {
-        let mut program = valid_program();
-        let function_id = SymbolId::new();
-        program.functions.push(FunctionDefinition {
-            id: function_id,
-            name: "answer".to_owned(),
-            title: "答案".to_owned(),
-            state: DefinitionState::Known,
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-            graph: FunctionGraph {
-                nodes: vec![FunctionNode {
-                    id: SymbolId::new(),
-                    name: "value".to_owned(),
-                    state: DefinitionState::Known,
-                    editor: FunctionNodeEditor::default(),
-                    kind: FunctionNodeKind::Constant {
-                        value: json!(42),
-                        value_type: crate::ValueType::Integer,
-                    },
-                }],
-                edges: Vec::new(),
-            },
-            required_permissions: Vec::new(),
-        });
-        let components = test_catalog();
-        let capabilities = CapabilityCatalog::default();
-        let compiler = ProgramCompiler::new("test", &components, &capabilities);
-        let image = compiler.compile(&program, "revision-1", ImageTarget::Universal)?;
-        let segment = image.client_functions.get(&function_id);
+    fn convention_path_is_a_safe_rust_module_path() {
         assert_eq!(
-            segment.map(|value| value.constants.as_slice()),
-            Some([json!(42)].as_slice())
+            convention_page_module_name("aio-first-party", "API Keys"),
+            "aio_first_party__api_keys"
         );
-        Ok(())
-    }
-
-    #[test]
-    fn server_effect_nodes_are_split_from_client_effects() -> anyhow::Result<()> {
-        let mut program = valid_program();
-        let model_id = SymbolId::new();
-        program.models.push(ModelDefinition {
-            id: model_id,
-            name: "asset".to_owned(),
-            title: "资产".to_owned(),
-            state: DefinitionState::Known,
-            fields: Vec::new(),
-            indexes: Vec::new(),
-        });
-        let permission_id = SymbolId::new();
-        program.permissions.push(PermissionDefinition {
-            id: permission_id,
-            name: "asset-write".to_owned(),
-            title: "资产写入".to_owned(),
-            allowed_effects: vec![EffectKind::DatabaseWrite, EffectKind::UserPrompt],
-        });
-        let function_id = SymbolId::new();
-        let value_node_id = SymbolId::new();
-        let create_node_id = SymbolId::new();
-        let notify_node_id = SymbolId::new();
-        program.functions.push(FunctionDefinition {
-            id: function_id,
-            name: "create-asset".to_owned(),
-            title: "创建资产".to_owned(),
-            state: DefinitionState::Known,
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-            graph: FunctionGraph {
-                nodes: vec![
-                    FunctionNode {
-                        id: value_node_id,
-                        name: "payload".to_owned(),
-                        state: DefinitionState::Known,
-                        editor: FunctionNodeEditor::default(),
-                        kind: FunctionNodeKind::Constant {
-                            value: json!({"name": "server"}),
-                            value_type: crate::ValueType::Any,
-                        },
-                    },
-                    FunctionNode {
-                        id: create_node_id,
-                        name: "create".to_owned(),
-                        state: DefinitionState::Known,
-                        editor: FunctionNodeEditor::default(),
-                        kind: FunctionNodeKind::CreateRecord { model_id },
-                    },
-                    FunctionNode {
-                        id: notify_node_id,
-                        name: "notify".to_owned(),
-                        state: DefinitionState::Known,
-                        editor: FunctionNodeEditor::default(),
-                        kind: FunctionNodeKind::Notify {
-                            level: NotificationLevel::Success,
-                        },
-                    },
-                ],
-                edges: vec![
-                    GraphEdge {
-                        id: SymbolId::new(),
-                        from_node: value_node_id,
-                        from_port: "value".to_owned(),
-                        to_node: create_node_id,
-                        to_port: "value".to_owned(),
-                    },
-                    GraphEdge {
-                        id: SymbolId::new(),
-                        from_node: create_node_id,
-                        from_port: "value".to_owned(),
-                        to_node: notify_node_id,
-                        to_port: "value".to_owned(),
-                    },
-                ],
-            },
-            required_permissions: vec![permission_id],
-        });
-        let components = test_catalog();
-        let capabilities = CapabilityCatalog::default();
-        let image = ProgramCompiler::new("test", &components, &capabilities).compile(
-            &program,
-            "revision-1",
-            ImageTarget::Universal,
-        )?;
-
-        let client = image
-            .client_functions
-            .get(&function_id)
-            .expect("客户端入口");
-        assert!(client.instructions.iter().any(|instruction| matches!(
-            instruction.instruction,
-            Instruction::InvokeServerSegment { segment_id, .. } if segment_id == create_node_id
-        )));
-        assert!(
-            client
-                .instructions
-                .iter()
-                .any(|instruction| matches!(instruction.instruction, Instruction::Notify { .. }))
-        );
-        let server = image
-            .server_functions
-            .get(&create_node_id)
-            .expect("服务端节点 segment");
-        assert!(server.instructions.iter().any(|instruction| matches!(
-            instruction.instruction,
-            Instruction::CreateRecord { model_id: value } if value == model_id
-        )));
-        Ok(())
-    }
-
-    #[test]
-    fn compiles_one_thousand_component_page_within_acceptance_budget() -> anyhow::Result<()> {
-        let mut program = valid_program();
-        program.pages[0].root.children = (0..1_000)
-            .map(|index| ComponentNode {
-                id: SymbolId::new(),
-                component: "layout.section".to_owned(),
-                state: DefinitionState::Known,
-                properties: BTreeMap::new(),
-                content: Some(crate::PropertyValue::text(format!("component-{index}"))),
-                events: BTreeMap::new(),
-                children: Vec::new(),
-                style: ComponentStyle::default(),
-            })
-            .collect();
-        let components = test_catalog();
-        let capabilities = CapabilityCatalog::default();
-        let started = Instant::now();
-        let image = ProgramCompiler::new("performance", &components, &capabilities).compile(
-            &program,
-            "revision-performance",
-            ImageTarget::Universal,
-        )?;
-        assert_eq!(image.pages[&program.pages[0].id].root.children.len(), 1_000);
-        assert!(started.elapsed() < Duration::from_secs(2));
-        Ok(())
-    }
-
-    #[test]
-    fn validates_ten_thousand_node_logic_graph_within_acceptance_budget() -> anyhow::Result<()> {
-        let mut program = valid_program();
-        let function_id = SymbolId::new();
-        let node_ids = (0..10_000).map(|_| SymbolId::new()).collect::<Vec<_>>();
-        let nodes = node_ids
-            .iter()
-            .enumerate()
-            .map(|(index, id)| FunctionNode {
-                id: *id,
-                name: format!("math-{index}"),
-                state: DefinitionState::Known,
-                editor: FunctionNodeEditor::default(),
-                kind: FunctionNodeKind::Math {
-                    operator: crate::MathOperator::Add,
-                },
-            })
-            .collect();
-        let edges = node_ids
-            .windows(2)
-            .map(|pair| GraphEdge {
-                id: SymbolId::new(),
-                from_node: pair[0],
-                from_port: "value".to_owned(),
-                to_node: pair[1],
-                to_port: "value".to_owned(),
-            })
-            .collect();
-        program.functions.push(FunctionDefinition {
-            id: function_id,
-            name: "large-graph".to_owned(),
-            title: "大逻辑图".to_owned(),
-            state: DefinitionState::Known,
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-            graph: FunctionGraph { nodes, edges },
-            required_permissions: Vec::new(),
-        });
-        let components = test_catalog();
-        let capabilities = CapabilityCatalog::default();
-        let started = Instant::now();
-        let image = ProgramCompiler::new("performance", &components, &capabilities).compile(
-            &program,
-            "revision-performance",
-            ImageTarget::Universal,
-        )?;
         assert_eq!(
-            image.client_functions[&function_id].instructions.len(),
-            10_000
+            convention_page_path("aio-first-party", "API Keys"),
+            "src/pages/aio_first_party__api_keys.rs"
         );
-        assert!(started.elapsed() < Duration::from_secs(10));
-        Ok(())
     }
 }

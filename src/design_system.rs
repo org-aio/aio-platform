@@ -85,7 +85,6 @@ pub fn Button(
 pub enum BadgeVariant {
     #[default]
     Default,
-    Secondary,
     Muted,
     Outline,
 }
@@ -95,9 +94,6 @@ impl BadgeVariant {
         match self {
             Self::Default => {
                 "border-transparent bg-primary text-primary-foreground shadow hover:bg-primary/80"
-            }
-            Self::Secondary => {
-                "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80"
             }
             Self::Muted => "border-transparent bg-muted text-muted-foreground hover:bg-muted/80",
             Self::Outline => "text-foreground",

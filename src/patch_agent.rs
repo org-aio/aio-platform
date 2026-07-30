@@ -1,6 +1,6 @@
 use std::env;
 
-use crate::{CapabilityCatalog, ComponentCatalog, GraphPatchBatch, PatchOrigin, ProgramDefinition};
+use crate::{CapabilityCatalog, GraphPatchBatch, PatchOrigin, ProgramDefinition};
 use anyhow::{Context, Result, bail};
 use rig::providers::openai;
 use schemars::JsonSchema;
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 const DEFAULT_API_BASE: &str = "https://api.openai.com/v1";
-const DEFAULT_MODEL: &str = "gpt-5.2";
+const DEFAULT_MODEL: &str = "gpt-5.5";
 
 #[derive(Clone, Debug)]
 pub struct ProgramPatchAgent {
@@ -60,7 +60,6 @@ impl ProgramPatchAgent {
         model_override: Option<&str>,
         base_version: i64,
         definition: &ProgramDefinition,
-        components: &ComponentCatalog,
         capabilities: &CapabilityCatalog,
         previous_diagnostics: &[Value],
     ) -> Result<GeneratedProgramPatch> {
@@ -81,7 +80,6 @@ impl ProgramPatchAgent {
             prompt,
             base_version,
             definition,
-            components,
             capabilities,
             previous_diagnostics,
         )?;
@@ -117,7 +115,6 @@ fn agent_input(
     prompt: &str,
     base_version: i64,
     definition: &ProgramDefinition,
-    components: &ComponentCatalog,
     capabilities: &CapabilityCatalog,
     previous_diagnostics: &[Value],
 ) -> Result<String> {
@@ -125,7 +122,6 @@ fn agent_input(
         "request": prompt,
         "base_version": base_version,
         "program": definition,
-        "component_catalog": components,
         "capability_catalog": capabilities,
         "previous_diagnostics": previous_diagnostics,
     }))
@@ -135,9 +131,9 @@ fn agent_input(
 fn agent_contract() -> &'static str {
     r#"你是 AIO ProgramPatchAgent。你只能返回一个对象：{"batch": GraphPatchBatch JSON}。
 不得返回或生成 Rust、SQL、HTML、CSS、JavaScript、Rhai、文件路径、URL 或解释文本。
-只能使用输入中的稳定 SymbolId、组件 canonical_id、Capability canonical_id 和强类型 GraphPatch。
+只能使用输入中的稳定 SymbolId、页面渲染声明、模型字段、Capability canonical_id 和强类型 GraphPatch。
 新声明必须分配合法 UUID。不得构造任意 URL、递归或无界循环；ForEach.max_items 必须在 1..=10000。
-不要修改 base_version 和 origin，它们会由服务端覆盖。组件属性和事件必须存在于 component_catalog。
+不要修改 base_version 和 origin，它们会由服务端覆盖。页面只能选择 convention_file、tree_table 或 crud_table。
 若 previous_diagnostics 非空，修复这些诊断并保留用户原始意图。"#
 }
 

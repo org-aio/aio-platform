@@ -5,15 +5,15 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "AIO full-stack zero-code Studio, compiler, publisher, renderer, and Vibe editor."
+description = "全栈低代码"
 workspace = "../../.."
 
 [dependencies]
 anyhow.workspace = true
-automod.workspace = true
 dioxus.workspace = true
 hex.workspace = true
 rudi.workspace = true
+regex.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -27,6 +27,7 @@ dioxus-web = "0.7.9"
 futures-util = "0.3.31"
 gloo-net = { version = "0.6.0", features = ["http", "json", "eventsource"] }
 gloo-timers = { version = "0.3.0", features = ["futures"] }
+icons.workspace = true
 js-sys = "0.3.82"
 wasm-bindgen = "0.2.105"
 web-sys = { version = "0.3.82", features = ["Document", "Element", "HtmlElement", "Location", "UrlSearchParams", "Window", "History"] }
@@ -39,7 +40,7 @@ axum.workspace = true
 az-plugin-core.workspace = true
 futures-util = "0.3.31"
 matchit.workspace = true
-rig-core = "0.36.0"
+rig-core = { version = "0.36.0", default-features = false, features = ["native-tls", "reqwest"] }
 sqlx.workspace = true
 tokio.workspace = true
 toasty.workspace = true

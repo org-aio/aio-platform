@@ -2,10 +2,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    ComponentNode, DataSourceDefinition, FieldDefinition, FunctionDefinition, FunctionNode,
-    GraphEdge, MenuDefinition, ModelDefinition, ModelIndexDefinition, PageDefinition,
-    PageStateDefinition, PermissionDefinition, PortDefinition, ProgramDefinition, RouteDefinition,
-    SymbolId,
+    FieldDefinition, FunctionDefinition, FunctionNode, GraphEdge, MenuDefinition, ModelDefinition,
+    ModelIndexDefinition, PageDefinition, PermissionDefinition, PortDefinition, ProgramDefinition,
+    RouteDefinition, SymbolId,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -76,9 +75,6 @@ pub enum ChildCollection {
     Fields,
     ModelIndexes,
     Pages,
-    ComponentChildren,
-    PageStates,
-    DataSources,
     Functions,
     FunctionInputs,
     FunctionOutputs,
@@ -95,9 +91,6 @@ pub enum GraphEntity {
     Field(FieldDefinition),
     ModelIndex(ModelIndexDefinition),
     Page(PageDefinition),
-    Component(ComponentNode),
-    PageState(PageStateDefinition),
-    DataSource(DataSourceDefinition),
     Function(FunctionDefinition),
     Port(PortDefinition),
     FunctionNode(FunctionNode),
@@ -114,9 +107,6 @@ impl GraphEntity {
             Self::Field(value) => value.id,
             Self::ModelIndex(value) => value.id,
             Self::Page(value) => value.id,
-            Self::Component(value) => value.id,
-            Self::PageState(value) => value.id,
-            Self::DataSource(value) => value.id,
             Self::Function(value) => value.id,
             Self::Port(value) => value.id,
             Self::FunctionNode(value) => value.id,
@@ -135,14 +125,15 @@ pub enum EditableProperty {
     MenuPage,
     MenuEnabled,
     MenuPermissions,
+    MenuRowActions,
+    PageRenderer,
     DefinitionState,
-    ComponentProperty(String),
-    ComponentContent,
-    ComponentEvent(String),
-    ComponentStyle,
     FieldRequired,
+    FieldValueType,
+    FieldOptions,
+    ModelIndexFields,
+    ModelIndexPurpose,
     FunctionNodePosition,
-    PageStateInitialValue,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -306,27 +297,6 @@ impl ProgramDefinition {
                     .ok_or(PatchError::ParentNotFound(parent_id))?;
                 insert_at(&mut model.indexes, index, value)
             }
-            (ChildCollection::ComponentChildren, GraphEntity::Component(value)) => {
-                let children = find_component_children_mut(&mut self.pages, parent_id)
-                    .ok_or(PatchError::ParentNotFound(parent_id))?;
-                insert_at(children, index, value)
-            }
-            (ChildCollection::PageStates, GraphEntity::PageState(value)) => {
-                let page = self
-                    .pages
-                    .iter_mut()
-                    .find(|item| item.id == parent_id)
-                    .ok_or(PatchError::ParentNotFound(parent_id))?;
-                insert_at(&mut page.page_state, index, value)
-            }
-            (ChildCollection::DataSources, GraphEntity::DataSource(value)) => {
-                let page = self
-                    .pages
-                    .iter_mut()
-                    .find(|item| item.id == parent_id)
-                    .ok_or(PatchError::ParentNotFound(parent_id))?;
-                insert_at(&mut page.data_sources, index, value)
-            }
             (ChildCollection::FunctionInputs, GraphEntity::Port(value)) => {
                 let function = self
                     .functions
@@ -368,17 +338,6 @@ impl ProgramDefinition {
         }
         if let Ok(value) = remove_by_id(&mut self.pages, target_id, |value| value.id) {
             return Ok(GraphEntity::Page(value));
-        }
-        if let Some(value) = take_component(&mut self.pages, target_id) {
-            return Ok(GraphEntity::Component(value));
-        }
-        for page in &mut self.pages {
-            if let Ok(value) = remove_by_id(&mut page.page_state, target_id, |value| value.id) {
-                return Ok(GraphEntity::PageState(value));
-            }
-            if let Ok(value) = remove_by_id(&mut page.data_sources, target_id, |value| value.id) {
-                return Ok(GraphEntity::DataSource(value));
-            }
         }
         if let Ok(value) = remove_by_id(&mut self.functions, target_id, |value| value.id) {
             return Ok(GraphEntity::Function(value));
@@ -461,27 +420,6 @@ impl ProgramDefinition {
                     .find(|model| model.id == parent_id)
                     .ok_or(PatchError::ParentNotFound(parent_id))?;
                 reorder_values(&mut model.indexes, ordered_ids, |value| value.id)
-            }
-            ChildCollection::ComponentChildren => {
-                let values = find_component_children_mut(&mut self.pages, parent_id)
-                    .ok_or(PatchError::ParentNotFound(parent_id))?;
-                reorder_values(values, ordered_ids, |value| value.id)
-            }
-            ChildCollection::PageStates => {
-                let page = self
-                    .pages
-                    .iter_mut()
-                    .find(|value| value.id == parent_id)
-                    .ok_or(PatchError::ParentNotFound(parent_id))?;
-                reorder_values(&mut page.page_state, ordered_ids, |value| value.id)
-            }
-            ChildCollection::DataSources => {
-                let page = self
-                    .pages
-                    .iter_mut()
-                    .find(|value| value.id == parent_id)
-                    .ok_or(PatchError::ParentNotFound(parent_id))?;
-                reorder_values(&mut page.data_sources, ordered_ids, |value| value.id)
             }
             ChildCollection::FunctionInputs => {
                 let function = self
@@ -580,47 +518,20 @@ impl ProgramDefinition {
                     .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
                 Ok(())
             }
-            EditableProperty::ComponentProperty(name) => {
-                let component = find_component_mut(&mut self.pages, target_id)
+            EditableProperty::MenuRowActions => {
+                let menu = find_menu_mut(&mut self.menus, target_id)
                     .ok_or(PatchError::TargetNotFound(target_id))?;
-                component.properties.insert(
-                    name.clone(),
-                    serde_json::from_value(value.clone())
-                        .map_err(|error| PatchError::InvalidValue(error.to_string()))?,
-                );
+                menu.row_actions = serde_json::from_value(value.clone())
+                    .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
                 Ok(())
             }
-            EditableProperty::ComponentContent => {
-                let component = find_component_mut(&mut self.pages, target_id)
+            EditableProperty::PageRenderer => {
+                let page = self
+                    .pages
+                    .iter_mut()
+                    .find(|page| page.id == target_id)
                     .ok_or(PatchError::TargetNotFound(target_id))?;
-                component.content = if value.is_null() {
-                    None
-                } else {
-                    Some(
-                        serde_json::from_value(value.clone())
-                            .map_err(|error| PatchError::InvalidValue(error.to_string()))?,
-                    )
-                };
-                Ok(())
-            }
-            EditableProperty::ComponentEvent(name) => {
-                let component = find_component_mut(&mut self.pages, target_id)
-                    .ok_or(PatchError::TargetNotFound(target_id))?;
-                if value.is_null() {
-                    component.events.remove(name);
-                } else {
-                    let id = json_string(value).and_then(|text| {
-                        SymbolId::parse(&text)
-                            .map_err(|error| PatchError::InvalidValue(error.to_string()))
-                    })?;
-                    component.events.insert(name.clone(), id);
-                }
-                Ok(())
-            }
-            EditableProperty::ComponentStyle => {
-                let component = find_component_mut(&mut self.pages, target_id)
-                    .ok_or(PatchError::TargetNotFound(target_id))?;
-                component.style = serde_json::from_value(value.clone())
+                page.renderer = serde_json::from_value(value.clone())
                     .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
                 Ok(())
             }
@@ -636,6 +547,59 @@ impl ProgramDefinition {
                 })?;
                 Ok(())
             }
+            EditableProperty::FieldValueType => {
+                let field = self
+                    .models
+                    .iter_mut()
+                    .flat_map(|model| &mut model.fields)
+                    .find(|item| item.id == target_id)
+                    .ok_or(PatchError::TargetNotFound(target_id))?;
+                let value_type = serde_json::from_value(value.clone())
+                    .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
+                field.relation_model_id = match &value_type {
+                    crate::ValueType::Object { model_id } => Some(*model_id),
+                    _ => None,
+                };
+                field.value_type = value_type;
+                Ok(())
+            }
+            EditableProperty::FieldOptions => {
+                let field = self
+                    .models
+                    .iter_mut()
+                    .flat_map(|model| &mut model.fields)
+                    .find(|item| item.id == target_id)
+                    .ok_or(PatchError::TargetNotFound(target_id))?;
+                field.options = serde_json::from_value(value.clone())
+                    .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
+                Ok(())
+            }
+            EditableProperty::ModelIndexFields => {
+                let index = self
+                    .models
+                    .iter_mut()
+                    .flat_map(|model| &mut model.indexes)
+                    .find(|item| item.id == target_id)
+                    .ok_or(PatchError::TargetNotFound(target_id))?;
+                let fields = serde_json::from_value::<Vec<SymbolId>>(value.clone())
+                    .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
+                if fields.is_empty() {
+                    return Err(PatchError::InvalidValue("索引至少需要一个字段".to_owned()));
+                }
+                index.fields = fields;
+                Ok(())
+            }
+            EditableProperty::ModelIndexPurpose => {
+                let index = self
+                    .models
+                    .iter_mut()
+                    .flat_map(|model| &mut model.indexes)
+                    .find(|item| item.id == target_id)
+                    .ok_or(PatchError::TargetNotFound(target_id))?;
+                index.purpose = serde_json::from_value(value.clone())
+                    .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
+                Ok(())
+            }
             EditableProperty::FunctionNodePosition => {
                 let node = self
                     .functions
@@ -645,16 +609,6 @@ impl ProgramDefinition {
                     .ok_or(PatchError::TargetNotFound(target_id))?;
                 node.editor = serde_json::from_value(value.clone())
                     .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
-                Ok(())
-            }
-            EditableProperty::PageStateInitialValue => {
-                let state = self
-                    .pages
-                    .iter_mut()
-                    .flat_map(|page| &mut page.page_state)
-                    .find(|state| state.id == target_id)
-                    .ok_or(PatchError::TargetNotFound(target_id))?;
-                state.initial_value = value.clone();
                 Ok(())
             }
             EditableProperty::DefinitionState => {
@@ -697,11 +651,6 @@ impl ProgramDefinition {
                 .iter()
                 .flat_map(|model| &model.indexes)
                 .any(|index| index.id == target)
-            || self.pages.iter().any(|page| {
-                component_contains(&page.root, target)
-                    || page.page_state.iter().any(|state| state.id == target)
-                    || page.data_sources.iter().any(|source| source.id == target)
-            })
             || self.functions.iter().any(|function| {
                 function.inputs.iter().any(|port| port.id == target)
                     || function.outputs.iter().any(|port| port.id == target)
@@ -730,16 +679,6 @@ impl ProgramDefinition {
         for page in &mut self.pages {
             if page.id == target {
                 return Some((&mut page.name, Some(&mut page.title)));
-            }
-            if let Some(state) = page.page_state.iter_mut().find(|state| state.id == target) {
-                return Some((&mut state.name, None));
-            }
-            if let Some(source) = page
-                .data_sources
-                .iter_mut()
-                .find(|source| source.id == target)
-            {
-                return Some((&mut source.name, None));
             }
         }
         for function in &mut self.functions {
@@ -794,12 +733,6 @@ impl ProgramDefinition {
         if let Some(page) = self.pages.iter_mut().find(|value| value.id == target) {
             page.state = state;
             return Ok(());
-        }
-        for page in &mut self.pages {
-            if let Some(component) = find_component_node_mut(&mut page.root, target) {
-                component.state = state;
-                return Ok(());
-            }
         }
         if let Some(function) = self.functions.iter_mut().find(|value| value.id == target) {
             function.state = state;
@@ -883,14 +816,6 @@ fn menu_contains(menu: &MenuDefinition, target: SymbolId) -> bool {
             .any(|value| menu_contains(value, target))
 }
 
-fn component_contains(component: &ComponentNode, target: SymbolId) -> bool {
-    component.id == target
-        || component
-            .children
-            .iter()
-            .any(|value| component_contains(value, target))
-}
-
 fn find_menu_mut(values: &mut [MenuDefinition], target: SymbolId) -> Option<&mut MenuDefinition> {
     for value in values {
         if value.id == target {
@@ -926,350 +851,180 @@ fn take_menu_from(values: &mut Vec<MenuDefinition>, target: SymbolId) -> Option<
     None
 }
 
-fn find_component_mut(
-    pages: &mut [PageDefinition],
-    target: SymbolId,
-) -> Option<&mut ComponentNode> {
-    for page in pages {
-        if let Some(value) = find_component_node_mut(&mut page.root, target) {
-            return Some(value);
-        }
-    }
-    None
-}
-
-fn find_component_node_mut(
-    value: &mut ComponentNode,
-    target: SymbolId,
-) -> Option<&mut ComponentNode> {
-    if value.id == target {
-        return Some(value);
-    }
-    for child in &mut value.children {
-        if let Some(found) = find_component_node_mut(child, target) {
-            return Some(found);
-        }
-    }
-    None
-}
-
-fn find_component_children_mut(
-    pages: &mut [PageDefinition],
-    target: SymbolId,
-) -> Option<&mut Vec<ComponentNode>> {
-    find_component_mut(pages, target).map(|value| &mut value.children)
-}
-
-fn take_component(pages: &mut [PageDefinition], target: SymbolId) -> Option<ComponentNode> {
-    for page in pages {
-        if let Some(value) = take_component_from(&mut page.root.children, target) {
-            return Some(value);
-        }
-    }
-    None
-}
-
-fn take_component_from(values: &mut Vec<ComponentNode>, target: SymbolId) -> Option<ComponentNode> {
-    if let Some(index) = values.iter().position(|value| value.id == target) {
-        return Some(values.remove(index));
-    }
-    for value in values {
-        if let Some(found) = take_component_from(&mut value.children, target) {
-            return Some(found);
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-    use std::time::{Duration, Instant};
-
-    use serde_json::json;
-
     use super::*;
-    use crate::{
-        ComponentStyle, DefinitionState, FunctionGraph, FunctionNodeEditor, FunctionNodeKind,
-        ValueType,
-    };
+    use crate::{MenuActionAccess, MenuRowActions, PageRendererDefinition, TableDefinition};
 
-    fn editable_program() -> (ProgramDefinition, SymbolId, SymbolId, SymbolId) {
-        let mut program = ProgramDefinition::empty("studio-test", "Studio 测试");
-        let model_id = SymbolId::new();
+    #[test]
+    fn page_renderer_and_menu_actions_use_the_same_patch_protocol() -> anyhow::Result<()> {
+        let mut program = ProgramDefinition::empty("inventory", "资产");
         let page_id = SymbolId::new();
-        let function_id = SymbolId::new();
-        program.models.push(ModelDefinition {
-            id: model_id,
-            name: "asset".to_owned(),
-            title: "资产".to_owned(),
-            state: DefinitionState::Known,
-            fields: Vec::new(),
-            indexes: Vec::new(),
-        });
+        let menu_id = SymbolId::new();
+        let permission_id = SymbolId::new();
         program.pages.push(PageDefinition {
             id: page_id,
             name: "assets".to_owned(),
             title: "资产".to_owned(),
-            state: DefinitionState::Known,
-            root: ComponentNode {
-                id: SymbolId::new(),
-                component: "layout.section".to_owned(),
-                state: DefinitionState::Known,
-                properties: BTreeMap::new(),
-                content: None,
-                events: BTreeMap::new(),
-                children: Vec::new(),
-                style: ComponentStyle::default(),
-            },
-            page_state: Vec::new(),
-            data_sources: Vec::new(),
+            state: crate::DefinitionState::Known,
+            renderer: PageRendererDefinition::ConventionFile,
         });
-        program.functions.push(FunctionDefinition {
-            id: function_id,
-            name: "load-assets".to_owned(),
-            title: "加载资产".to_owned(),
-            state: DefinitionState::Known,
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-            graph: FunctionGraph::default(),
+        program.menus.push(MenuDefinition {
+            id: menu_id,
+            name: "assets".to_owned(),
+            title: "资产".to_owned(),
+            state: crate::DefinitionState::Known,
+            icon: None,
+            page_id: Some(page_id),
+            enabled: true,
+            children: Vec::new(),
             required_permissions: Vec::new(),
+            row_actions: MenuRowActions::default(),
         });
-        (program, model_id, page_id, function_id)
-    }
-
-    #[test]
-    fn studio_contract_entities_share_one_atomic_patch_protocol() -> anyhow::Result<()> {
-        let (mut program, model_id, page_id, function_id) = editable_program();
-        let field_id = SymbolId::new();
-        let state_id = SymbolId::new();
-        let source_id = SymbolId::new();
-        let port_id = SymbolId::new();
-        let node_id = SymbolId::new();
         program.apply_patch_batch(&GraphPatchBatch {
             base_version: 0,
             origin: PatchOrigin::Studio,
             patches: vec![
-                GraphPatch::Insert {
-                    parent_id: model_id,
-                    collection: ChildCollection::Fields,
-                    index: 0,
-                    entity: GraphEntity::Field(FieldDefinition {
-                        id: field_id,
-                        name: "name".to_owned(),
-                        title: "名称".to_owned(),
-                        value_type: ValueType::Text,
-                        state: DefinitionState::Known,
-                        required: true,
-                        relation_model_id: None,
-                    }),
+                GraphPatch::SetProperty {
+                    target_id: page_id,
+                    property: EditableProperty::PageRenderer,
+                    value: serde_json::to_value(PageRendererDefinition::CrudTable {
+                        table: TableDefinition::default(),
+                    })?,
                 },
-                GraphPatch::Insert {
-                    parent_id: page_id,
-                    collection: ChildCollection::PageStates,
-                    index: 0,
-                    entity: GraphEntity::PageState(PageStateDefinition {
-                        id: state_id,
-                        name: "keyword".to_owned(),
-                        value_type: ValueType::Text,
-                        initial_value: json!(""),
-                    }),
-                },
-                GraphPatch::Insert {
-                    parent_id: page_id,
-                    collection: ChildCollection::DataSources,
-                    index: 0,
-                    entity: GraphEntity::DataSource(DataSourceDefinition {
-                        id: source_id,
-                        name: "assets".to_owned(),
-                        function_id,
-                        parameters: BTreeMap::new(),
-                    }),
-                },
-                GraphPatch::Insert {
-                    parent_id: function_id,
-                    collection: ChildCollection::FunctionInputs,
-                    index: 0,
-                    entity: GraphEntity::Port(PortDefinition {
-                        id: port_id,
-                        name: "keyword".to_owned(),
-                        value_type: ValueType::Text,
-                    }),
-                },
-                GraphPatch::Insert {
-                    parent_id: function_id,
-                    collection: ChildCollection::FunctionNodes,
-                    index: 0,
-                    entity: GraphEntity::FunctionNode(FunctionNode {
-                        id: node_id,
-                        name: "input".to_owned(),
-                        state: DefinitionState::Known,
-                        editor: FunctionNodeEditor::default(),
-                        kind: FunctionNodeKind::Input { port_id },
-                    }),
+                GraphPatch::SetProperty {
+                    target_id: menu_id,
+                    property: EditableProperty::MenuRowActions,
+                    value: serde_json::to_value(MenuRowActions {
+                        detail: MenuActionAccess::Public,
+                        edit: MenuActionAccess::Permission { permission_id },
+                        delete: MenuActionAccess::Hidden,
+                    })?,
                 },
             ],
         })?;
-
-        program.apply_patch(&GraphPatch::Rename {
-            target_id: state_id,
-            name: "search".to_owned(),
-            title: None,
-        })?;
-        program.apply_patch(&GraphPatch::SetProperty {
-            target_id: state_id,
-            property: EditableProperty::PageStateInitialValue,
-            value: json!("AIO"),
-        })?;
-        program.apply_patch(&GraphPatch::SetProperty {
-            target_id: node_id,
-            property: EditableProperty::FunctionNodePosition,
-            value: json!({"x": 120, "y": 80}),
-        })?;
-
-        assert_eq!(program.models[0].fields[0].id, field_id);
-        assert_eq!(program.pages[0].page_state[0].name, "search");
-        assert_eq!(program.pages[0].page_state[0].initial_value, json!("AIO"));
-        assert_eq!(program.pages[0].data_sources[0].id, source_id);
-        assert_eq!(program.functions[0].inputs[0].id, port_id);
-        assert_eq!(program.functions[0].graph.nodes[0].editor.x, 120);
-        Ok(())
-    }
-
-    #[test]
-    fn root_menu_is_scene_without_an_extra_definition_layer() -> anyhow::Result<()> {
-        let mut program = ProgramDefinition::empty("menu-test", "菜单测试");
-        let scene_id = SymbolId::new();
-        let child_id = SymbolId::new();
-        program.apply_patch_batch(&GraphPatchBatch {
-            base_version: 0,
-            origin: PatchOrigin::Studio,
-            patches: vec![
-                GraphPatch::Insert {
-                    parent_id: program.id,
-                    collection: ChildCollection::Menus,
-                    index: 0,
-                    entity: GraphEntity::Menu(MenuDefinition {
-                        id: scene_id,
-                        name: "operations".to_owned(),
-                        title: "运营场景".to_owned(),
-                        state: DefinitionState::Known,
-                        icon: None,
-                        page_id: None,
-                        enabled: true,
-                        children: Vec::new(),
-                        required_permissions: Vec::new(),
-                    }),
-                },
-                GraphPatch::Insert {
-                    parent_id: scene_id,
-                    collection: ChildCollection::MenuChildren,
-                    index: 0,
-                    entity: GraphEntity::Menu(MenuDefinition {
-                        id: child_id,
-                        name: "dashboard".to_owned(),
-                        title: "运营看板".to_owned(),
-                        state: DefinitionState::Known,
-                        icon: None,
-                        page_id: None,
-                        enabled: true,
-                        children: Vec::new(),
-                        required_permissions: Vec::new(),
-                    }),
-                },
-            ],
-        })?;
-
-        let page_id = SymbolId::new();
-        let permission_id = SymbolId::new();
-        program.apply_patch_batch(&GraphPatchBatch {
-            base_version: 1,
-            origin: PatchOrigin::Studio,
-            patches: vec![
-                GraphPatch::SetProperty {
-                    target_id: child_id,
-                    property: EditableProperty::MenuEnabled,
-                    value: json!(false),
-                },
-                GraphPatch::SetProperty {
-                    target_id: child_id,
-                    property: EditableProperty::MenuPage,
-                    value: json!(page_id.to_string()),
-                },
-                GraphPatch::SetProperty {
-                    target_id: child_id,
-                    property: EditableProperty::MenuPermissions,
-                    value: json!([permission_id]),
-                },
-            ],
-        })?;
-
-        assert_eq!(program.menus[0].id, scene_id);
-        assert_eq!(program.menus[0].children[0].id, child_id);
-        assert!(!program.menus[0].children[0].enabled);
-        assert_eq!(program.menus[0].children[0].page_id, Some(page_id));
+        assert!(matches!(
+            program.pages[0].renderer,
+            PageRendererDefinition::CrudTable { .. }
+        ));
         assert_eq!(
-            program.menus[0].children[0].required_permissions,
-            vec![permission_id]
+            program.menus[0].row_actions.edit,
+            MenuActionAccess::Permission { permission_id }
         );
         Ok(())
     }
 
     #[test]
-    fn failed_batch_does_not_partially_mutate_definition() {
-        let (mut program, _, page_id, _) = editable_program();
-        let before = program.clone();
-        let duplicate_id = program.pages[0].id;
+    fn patch_batch_is_atomic_on_invalid_target() {
+        let mut program = ProgramDefinition::empty("inventory", "资产");
+        let original = program.clone();
         let result = program.apply_patch_batch(&GraphPatchBatch {
             base_version: 0,
             origin: PatchOrigin::Studio,
-            patches: vec![
-                GraphPatch::Rename {
-                    target_id: page_id,
-                    name: "changed".to_owned(),
-                    title: Some("已修改".to_owned()),
-                },
-                GraphPatch::Insert {
-                    parent_id: page_id,
-                    collection: ChildCollection::PageStates,
-                    index: 0,
-                    entity: GraphEntity::PageState(PageStateDefinition {
-                        id: duplicate_id,
-                        name: "duplicate".to_owned(),
-                        value_type: ValueType::Text,
-                        initial_value: json!(null),
-                    }),
-                },
-            ],
+            patches: vec![GraphPatch::Rename {
+                target_id: SymbolId::new(),
+                name: "missing".to_owned(),
+                title: None,
+            }],
         });
-        assert!(matches!(result, Err(PatchError::DuplicateSymbol(_))));
-        assert_eq!(program, before);
+        assert!(result.is_err());
+        assert_eq!(program, original);
     }
 
     #[test]
-    fn applies_one_hundred_patch_batch_within_acceptance_budget() -> anyhow::Result<()> {
-        let (mut program, _, page_id, _) = editable_program();
-        let patches = (0..100)
-            .map(|index| GraphPatch::Insert {
-                parent_id: page_id,
-                collection: ChildCollection::PageStates,
-                index,
-                entity: GraphEntity::PageState(PageStateDefinition {
-                    id: SymbolId::new(),
-                    name: format!("state-{index}"),
-                    value_type: ValueType::Integer,
-                    initial_value: json!(index),
-                }),
-            })
-            .collect();
-        let started = Instant::now();
+    fn model_grid_properties_update_fields_and_indexes() -> anyhow::Result<()> {
+        let mut program = ProgramDefinition::empty("inventory", "资产");
+        let model_id = SymbolId::new();
+        let first_field_id = SymbolId::new();
+        let second_field_id = SymbolId::new();
+        let index_id = SymbolId::new();
+        program.models.push(ModelDefinition {
+            id: model_id,
+            name: "asset".to_owned(),
+            title: "资产".to_owned(),
+            state: crate::DefinitionState::Known,
+            fields: vec![
+                FieldDefinition {
+                    id: first_field_id,
+                    name: "name".to_owned(),
+                    title: "名称".to_owned(),
+                    value_type: crate::ValueType::Text,
+                    state: crate::DefinitionState::Known,
+                    required: false,
+                    options: crate::FieldOptions::default(),
+                    relation_model_id: None,
+                },
+                FieldDefinition {
+                    id: second_field_id,
+                    name: "count".to_owned(),
+                    title: "数量".to_owned(),
+                    value_type: crate::ValueType::Integer,
+                    state: crate::DefinitionState::Known,
+                    required: false,
+                    options: crate::FieldOptions::default(),
+                    relation_model_id: None,
+                },
+            ],
+            indexes: vec![ModelIndexDefinition {
+                id: index_id,
+                fields: vec![first_field_id],
+                purpose: crate::IndexPurpose::Filter,
+            }],
+        });
+
         program.apply_patch_batch(&GraphPatchBatch {
             base_version: 0,
-            patches,
             origin: PatchOrigin::Studio,
+            patches: vec![
+                GraphPatch::SetProperty {
+                    target_id: first_field_id,
+                    property: EditableProperty::FieldValueType,
+                    value: serde_json::to_value(crate::ValueType::Boolean)?,
+                },
+                GraphPatch::SetProperty {
+                    target_id: first_field_id,
+                    property: EditableProperty::FieldOptions,
+                    value: serde_json::to_value(crate::FieldOptions {
+                        list_visible: false,
+                        unique: true,
+                        validation: crate::FieldValidation {
+                            min_length: Some(2),
+                            ..crate::FieldValidation::default()
+                        },
+                        ..crate::FieldOptions::default()
+                    })?,
+                },
+                GraphPatch::SetProperty {
+                    target_id: index_id,
+                    property: EditableProperty::ModelIndexFields,
+                    value: serde_json::to_value(vec![first_field_id, second_field_id])?,
+                },
+                GraphPatch::SetProperty {
+                    target_id: index_id,
+                    property: EditableProperty::ModelIndexPurpose,
+                    value: serde_json::to_value(crate::IndexPurpose::Sort)?,
+                },
+            ],
         })?;
-        assert_eq!(program.pages[0].page_state.len(), 100);
-        assert!(started.elapsed() < Duration::from_secs(1));
+
+        assert_eq!(
+            program.models[0].fields[0].value_type,
+            crate::ValueType::Boolean
+        );
+        assert!(!program.models[0].fields[0].options.list_visible);
+        assert!(program.models[0].fields[0].options.unique);
+        assert_eq!(
+            program.models[0].fields[0].options.validation.min_length,
+            Some(2)
+        );
+        assert_eq!(
+            program.models[0].indexes[0].fields,
+            vec![first_field_id, second_field_id]
+        );
+        assert_eq!(
+            program.models[0].indexes[0].purpose,
+            crate::IndexPurpose::Sort
+        );
         Ok(())
     }
 }

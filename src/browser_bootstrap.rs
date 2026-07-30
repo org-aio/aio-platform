@@ -19,16 +19,15 @@ pub fn initial_route(bootstrap: &WorkbenchBootstrap) -> String {
 }
 
 pub fn page_title(bootstrap: &WorkbenchBootstrap, route: &str) -> String {
+    if route == "/studio" {
+        return "Studio".to_owned();
+    }
     bootstrap
         .native_entries
         .iter()
         .find(|entry| entry.route == route)
         .map(|entry| entry.title.clone())
-        .or_else(|| {
-            bootstrap
-                .route(route)
-                .map(|(application, route)| format!("{} · {}", application.title, route.name))
-        })
+        .or_else(|| bootstrap.route(route).map(|(_, route)| route.name.clone()))
         .unwrap_or_else(|| "AIO".to_owned())
 }
 

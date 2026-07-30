@@ -3,10 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{
-    Breakpoint, ComponentStyle, EffectKind, MenuDefinition, PermissionDefinition, PropertyValue,
-    SymbolId, ValueType,
-};
+use crate::{EffectKind, MenuDefinition, PermissionDefinition, SymbolId, ValueType};
 
 /// bytecode 缓存目标，决定产物可在哪一侧执行。
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -30,18 +27,18 @@ impl ImageTarget {
 
 /// 可序列化、可缓存且与 Dioxus Element 解耦的发布产物。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ApplicationImage {
+pub struct ProgramImage {
     pub schema_version: u32,
     pub compiler_version: String,
     pub content_hash: String,
-    pub application_id: SymbolId,
+    pub program_id: SymbolId,
     pub name: String,
     pub title: String,
     pub revision_id: String,
     pub target: ImageTarget,
     pub menus: Vec<MenuDefinition>,
     pub permissions: Vec<PermissionDefinition>,
-    pub pages: BTreeMap<SymbolId, RenderPlan>,
+    pub pages: BTreeMap<SymbolId, CompiledPage>,
     pub client_functions: BTreeMap<SymbolId, BytecodeSegment>,
     pub server_functions: BTreeMap<SymbolId, BytecodeSegment>,
     pub models: BTreeMap<SymbolId, CompiledModel>,
@@ -49,7 +46,45 @@ pub struct ApplicationImage {
     pub dependencies: BTreeMap<SymbolId, Vec<SymbolId>>,
 }
 
-impl ApplicationImage {
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CompiledPage {
+    pub id: SymbolId,
+    pub name: String,
+    pub title: String,
+    pub renderer: CompiledPageRenderer,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CompiledPageRenderer {
+    ConventionFile {
+        module_name: String,
+        expected_path: String,
+    },
+    TreeTable {
+        tree: CompiledTree,
+        table: CompiledTable,
+    },
+    CrudTable {
+        table: CompiledTable,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CompiledTable {
+    pub model_id: SymbolId,
+    pub page_size: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CompiledTree {
+    pub model_id: SymbolId,
+    pub label_field_id: SymbolId,
+    pub parent_field_id: Option<SymbolId>,
+    pub table_relation_field_id: SymbolId,
+}
+
+impl ProgramImage {
     pub fn encode(&self) -> anyhow::Result<Vec<u8>> {
         serde_json::to_vec(self).map_err(Into::into)
     }
@@ -57,36 +92,6 @@ impl ApplicationImage {
     pub fn decode(bytes: &[u8]) -> anyhow::Result<Self> {
         serde_json::from_slice(bytes).map_err(Into::into)
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct RenderPlan {
-    pub page_id: SymbolId,
-    pub name: String,
-    pub title: String,
-    pub root: RenderNode,
-    pub page_state: BTreeMap<SymbolId, Value>,
-    pub data_sources: Vec<CompiledDataSource>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct RenderNode {
-    pub id: SymbolId,
-    pub component: String,
-    pub properties: BTreeMap<String, PropertyValue>,
-    pub content: Option<PropertyValue>,
-    pub events: BTreeMap<String, SymbolId>,
-    pub children: Vec<RenderNode>,
-    pub style: ComponentStyle,
-    pub responsive_visibility: BTreeMap<Breakpoint, bool>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CompiledDataSource {
-    pub id: SymbolId,
-    pub name: String,
-    pub function_id: SymbolId,
-    pub parameters: BTreeMap<String, PropertyValue>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -98,13 +103,17 @@ pub struct CompiledRoute {
     pub required_permissions: Vec<SymbolId>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CompiledModel {
     pub id: SymbolId,
     pub name: String,
+    pub title: String,
     pub field_slots: BTreeMap<SymbolId, u32>,
     pub field_types: BTreeMap<u32, ValueType>,
     pub field_names: BTreeMap<u32, String>,
+    pub field_titles: BTreeMap<u32, String>,
+    pub field_options: BTreeMap<u32, crate::FieldOptions>,
+    pub required_fields: Vec<u32>,
     pub expression_indexes: Vec<CompiledExpressionIndex>,
 }
 
@@ -190,9 +199,6 @@ pub enum Instruction {
         max_items: u32,
         body_function_id: SymbolId,
     },
-    SetState {
-        state_id: SymbolId,
-    },
     ValidateForm {
         rule_count: u32,
     },
@@ -216,17 +222,8 @@ pub enum Instruction {
         route_id: SymbolId,
     },
     Confirm,
-    OpenDialog {
-        component_id: SymbolId,
-    },
-    CloseDialog {
-        component_id: SymbolId,
-    },
     Notify {
         level: String,
-    },
-    Refresh {
-        source_id: SymbolId,
     },
     InvokeCapability {
         capability_id: String,

@@ -36,6 +36,18 @@ where
     send_json(Request::patch, "PATCH", api_base_url, path, input).await
 }
 
+pub async fn delete_api<O>(api_base_url: &str, path: &str) -> Result<O, String>
+where
+    O: DeserializeOwned,
+{
+    let url = api_url(api_base_url, path);
+    let response = Request::delete(&url)
+        .send()
+        .await
+        .map_err(|error| format!("DELETE {url} 失败: {error}"))?;
+    decode_api(response, "DELETE", &url).await
+}
+
 async fn send_json<I, O>(
     request: fn(&str) -> gloo_net::http::RequestBuilder,
     method: &str,

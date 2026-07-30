@@ -1,20 +1,18 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 use crate::{
-    ApplicationImage, GraphVm, GraphVmHost, SegmentInvocationRequest, SegmentInvocationResult,
-    SymbolId, VmEffect,
+    BuiltInPage, CompiledPageRenderer, ConventionPageContext, ConventionPageIndex, MenuRowActions,
+    ProgramImage, SymbolId,
 };
-use crate::{ComponentIndex, DynamicComponentEvent, DynamicRenderData, DynamicRenderer};
-use crate::{PublishedApplication, WorkbenchBootstrap};
+use crate::{PublishedProgram, WorkbenchBootstrap};
 use dioxus::prelude::*;
 use futures_util::StreamExt;
 use gloo_net::eventsource::futures::EventSource;
-use serde_json::Value;
+use icons::{PanelLeft, Plus, Settings};
 
-use crate::design_system::{Badge, BadgeVariant};
 use crate::{
     browser_bootstrap::{initial_route, load_from_document, page_title, push_route},
-    browser_http::{api_url, get_api, post_api},
+    browser_http::{api_url, get_api},
     ui::StudioPage,
 };
 
@@ -23,13 +21,15 @@ pub fn App() -> Element {
     let mut bootstrap = use_signal(load_from_document);
     let initial_route = initial_route(&bootstrap.read());
     let active_route = use_signal(move || initial_route);
-    let mut selected_application = use_signal(|| None::<String>);
     let mut selected_scene = use_signal(|| None::<SymbolId>);
+    let mut pending_scene = use_signal(|| None::<SymbolId>);
+    let mut sidebar_collapsed = use_signal(|| false);
+    let page_settings_open = use_signal(|| false);
+    let menu_creator_open = use_signal(|| false);
+    let mut scene_creator_open = use_signal(|| false);
     let mut image_generation = use_signal(|| 0_u64);
     let mut bootstrap_generation = use_signal(|| 0_u64);
-    let mut page_state = use_signal(BTreeMap::<SymbolId, Value>::new);
-    let mut notification = use_signal(|| None::<String>);
-    let component_index = use_hook(load_component_index);
+    let convention_pages = use_hook(load_convention_page_index);
     let remote_bootstrap = use_resource(move || {
         let _generation = bootstrap_generation();
         async move { get_api::<WorkbenchBootstrap>("", "/api/bootstrap").await }
@@ -42,45 +42,24 @@ pub fn App() -> Element {
     use_effect(move || {
         let snapshot = bootstrap();
         let route = active_route();
-        let selected_application_id = selected_application();
         let selected = selected_scene();
-        let route_application = snapshot
-            .route(&route)
-            .map(|(application, _)| application.application_id.clone());
-        let next_application = route_application
-            .or_else(|| {
-                selected_application_id.filter(|id| application_by_id(&snapshot, id).is_some())
-            })
+        let pending = pending_scene();
+        let next = scene_for_route(&snapshot, &route)
+            .map(|(_, scene)| scene.id)
+            .or_else(|| pending.filter(|id| scene_by_id(&snapshot, *id).is_some()))
+            .or_else(|| selected.filter(|id| scene_by_id(&snapshot, *id).is_some()))
             .or_else(|| {
                 snapshot
-                    .applications
-                    .first()
-                    .map(|application| application.application_id.clone())
-            });
-        if selected_application() != next_application {
-            selected_application.set(next_application.clone());
-        }
-        let next = scene_for_route(&snapshot, &route)
-            .filter(|(application, _)| {
-                Some(&application.application_id) == next_application.as_ref()
-            })
-            .map(|(_, scene)| scene.id)
-            .or_else(|| {
-                selected.filter(|id| {
-                    next_application.as_deref().is_some_and(|application_id| {
-                        scene_by_id(&snapshot, application_id, *id).is_some()
-                    })
-                })
-            })
-            .or_else(|| {
-                next_application.as_deref().and_then(|application_id| {
-                    application_by_id(&snapshot, application_id)
-                        .and_then(|application| application.menus.first())
-                        .map(|scene| scene.id)
-                })
+                    .program
+                    .as_ref()
+                    .and_then(|program| program.menus.first())
+                    .map(|scene| scene.id)
             });
         if selected != next {
             selected_scene.set(next);
+        }
+        if pending.is_some() && pending == next {
+            pending_scene.set(None);
         }
     });
 
@@ -89,33 +68,19 @@ pub fn App() -> Element {
         let bootstrap = bootstrap();
         let _generation = image_generation();
         async move {
-            let Some((application, _)) = bootstrap.route(&route) else {
+            if bootstrap.route(&route).is_none() {
                 return Ok(None);
-            };
-            let path = format!(
-                "/api/runtime/applications/{}/image",
-                application.application_id
-            );
-            get_api::<ApplicationImage>(&bootstrap.api_base_url, &path)
+            }
+            get_api::<ProgramImage>(&bootstrap.api_base_url, "/api/runtime/program/image")
                 .await
                 .map(Some)
         }
     });
 
     let _events = use_resource(move || {
-        let route = active_route();
         let bootstrap = bootstrap();
         async move {
-            let Some((application, _)) = bootstrap.route(&route) else {
-                return;
-            };
-            let url = api_url(
-                &bootstrap.api_base_url,
-                &format!(
-                    "/api/studio/applications/{}/events",
-                    application.application_id
-                ),
-            );
+            let url = api_url(&bootstrap.api_base_url, "/api/studio/program/events");
             let Ok(mut source) = EventSource::new(&url) else {
                 return;
             };
@@ -130,61 +95,54 @@ pub fn App() -> Element {
     });
 
     let loaded_image = image.read().as_ref().cloned();
-    use_effect(move || {
-        if let Some(Ok(Some(image))) = image.read().as_ref() {
-            let route = active_route();
-            if let Some(page) = page_for_route(image, &route) {
-                page_state.set(page.page_state.clone());
-            }
-        }
-    });
-
     let route = active_route();
-    use_effect(move || {
-        let _route = active_route();
-        notification.set(None);
-    });
     let snapshot = bootstrap();
     let title = page_title(&snapshot, &route);
+    let editor_target = snapshot.route(&route).map(|(_, route)| route.page_id);
+    let creator_target = selected_scene();
     let content = if route == "/studio" {
         rsx! {
             StudioPage {
                 api_base_url: snapshot.api_base_url.clone(),
-                selected_application,
+                selected_scene,
             }
         }
     } else {
-        render_runtime_content(
-            &snapshot,
-            &route,
-            loaded_image,
-            component_index.as_ref(),
-            active_route,
-            page_state,
-            notification,
-        )
+        render_runtime_content(&snapshot, &route, loaded_image, convention_pages.as_ref())
     };
 
     rsx! {
         document::Stylesheet { href: "/assets/dioxus-ui.css?v=91e8974" }
-        document::Stylesheet { href: "/assets/app.css?v=program-runtime-6" }
-        div { class: "aio-shell-frame bg-background text-foreground",
+        document::Stylesheet { href: "/assets/app.css?v=program-runtime-11" }
+        div {
+            class: "aio-shell-frame bg-background text-foreground",
+            "data-sidebar-collapsed": sidebar_collapsed().to_string(),
             aside { class: "aio-sidebar border-r bg-card",
                 header { class: "aio-sidebar-header",
-                    div { class: "aio-sidebar-brand px-3 py-2",
-                        p { class: "aio-sidebar-brand-title", "AIO" }
-                        p { class: "aio-sidebar-brand-subtitle", "ProgramGraph Workbench" }
+                    div { class: "aio-sidebar-header-row",
+                        button {
+                            class: "aio-icon-button",
+                            r#type: "button",
+                            title: if sidebar_collapsed() { "展开侧栏" } else { "收起侧栏" },
+                            aria_label: if sidebar_collapsed() { "展开侧栏" } else { "收起侧栏" },
+                            onclick: move |_| sidebar_collapsed.toggle(),
+                            PanelLeft { class: "aio-sidebar-toggle-icon" }
+                        }
                     }
                 }
                 nav { class: "aio-sidebar-scroll space-y-4", role: "menu",
-                    {native_menu(&snapshot, &route, active_route)}
-                    if let Some((application, scene)) = selected_application()
-                        .as_deref()
-                        .and_then(|application_id| selected_scene().and_then(|scene_id| {
-                            scene_by_id(&snapshot, application_id, scene_id)
-                        }))
+                    {native_menu(
+                        &snapshot,
+                        &route,
+                        active_route,
+                        page_settings_open,
+                        menu_creator_open,
+                        creator_target.is_some(),
+                    )}
+                    if let Some((program, scene)) = selected_scene()
+                        .and_then(|scene_id| scene_by_id(&snapshot, scene_id))
                     {
-                        {scene_menu(application, scene, &route, active_route)}
+                        {scene_menu(program, scene, &route, active_route)}
                     }
                 }
             }
@@ -194,39 +152,65 @@ pub fn App() -> Element {
                         h1 { class: "truncate text-sm font-semibold", "{title}" }
                     }
                     nav { class: "aio-root-menu", aria_label: "场景",
-                        if let Some(application) = selected_application()
-                            .as_deref()
-                            .and_then(|application_id| application_by_id(&snapshot, application_id))
-                        {
-                            for scene in &application.menus {
+                        if let Some(program) = &snapshot.program {
+                            for scene in &program.menus {
                                 {scene_link(
                                     scene,
-                                    application,
+                                    program,
                                     selected_scene() == Some(scene.id),
                                     active_route,
                                     selected_scene,
                                 )}
                             }
                         }
-                    }
-                    div { class: "aio-toolbar-actions",
-                        Badge { variant: BadgeVariant::Outline, "{route}" }
+                        if snapshot.admin.as_ref().is_some_and(|state| state.can_add_scene) {
+                            button {
+                                class: "aio-root-menu-add",
+                                r#type: "button",
+                                title: "添加场景",
+                                aria_label: "添加场景",
+                                onclick: move |_| scene_creator_open.set(true),
+                                Plus { class: "size-4" }
+                            }
+                        }
                     }
                 }
                 section { class: "aio-main-scroll bg-muted/30",
-                    if let Some(message) = notification() {
-                        div { class: "mb-3 rounded-md border bg-background p-3 text-sm break-words", "{message}" }
-                    }
                     {content}
+                }
+            }
+            if page_settings_open() {
+                if let Some(page_id) = editor_target {
+                    crate::ui::AdminPageEditor {
+                        api_base_url: snapshot.api_base_url.clone(),
+                        page_id,
+                        settings_open: page_settings_open,
+                    }
+                }
+            }
+            if menu_creator_open() {
+                if let Some(scene_id) = creator_target {
+                    crate::ui::AdminMenuCreator {
+                        api_base_url: snapshot.api_base_url.clone(),
+                        scene_id,
+                        creator_open: menu_creator_open,
+                    }
+                }
+            }
+            if scene_creator_open() {
+                crate::ui::AdminSceneCreator {
+                    api_base_url: snapshot.api_base_url.clone(),
+                    pending_scene,
+                    creator_open: scene_creator_open,
                 }
             }
         }
     }
 }
 
-fn load_component_index() -> Result<Arc<ComponentIndex>, String> {
+fn load_convention_page_index() -> Result<Arc<ConventionPageIndex>, String> {
     let mut context = rudi::Context::auto_register();
-    ComponentIndex::from_context(&mut context)
+    ConventionPageIndex::from_context(&mut context)
         .map(Arc::new)
         .map_err(|error| error.to_string())
 }
@@ -234,129 +218,115 @@ fn load_component_index() -> Result<Arc<ComponentIndex>, String> {
 fn render_runtime_content(
     bootstrap: &WorkbenchBootstrap,
     route: &str,
-    image: Option<Result<Option<ApplicationImage>, String>>,
-    component_index: Result<&Arc<ComponentIndex>, &String>,
-    active_route: Signal<String>,
-    page_state: Signal<BTreeMap<SymbolId, Value>>,
-    mut notification: Signal<Option<String>>,
+    image: Option<Result<Option<ProgramImage>, String>>,
+    convention_pages: Result<&Arc<ConventionPageIndex>, &String>,
 ) -> Element {
-    let Some((application, compiled_route)) = bootstrap.route(route) else {
+    let Some((program, compiled_route)) = bootstrap.route(route) else {
         return error_state("路由不存在", route);
     };
-    let application_id = application.application_id.clone();
     let api_base_url = bootstrap.api_base_url.clone();
-    let routes = application
-        .routes
-        .iter()
-        .map(|route| (route.id, route.path.clone()))
-        .collect::<BTreeMap<_, _>>();
     let image = match image {
         Some(Ok(Some(image))) => image,
-        Some(Ok(None)) => return error_state("活动版本不存在", &application_id),
-        Some(Err(error)) => return error_state("加载 ApplicationImage 失败", &error),
+        Some(Ok(None)) => return error_state("活动版本不存在", "Program 尚未发布"),
+        Some(Err(error)) => return error_state("加载 ProgramImage 失败", &error),
         None => return loading_state(),
     };
-    let Some(plan) = image.pages.get(&compiled_route.page_id) else {
-        return error_state("RenderPlan 不存在", &compiled_route.page_id.to_string());
+    let Some(page) = image.pages.get(&compiled_route.page_id).cloned() else {
+        return error_state("页面编译产物不存在", &compiled_route.page_id.to_string());
     };
-    let components = match component_index {
-        Ok(value) => Arc::clone(value),
-        Err(error) => return error_state("组件 Provider 初始化失败", error),
-    };
-    let plan = plan.clone();
-    let event_plan = plan.clone();
-    let image_for_event = image.clone();
-    let dispatch = Callback::new(move |event: DynamicComponentEvent| {
-        let Some(function_id) = find_event_function(&event_plan.root, &event) else {
-            notification.set(Some(format!(
-                "组件事件未绑定函数: {}.{}",
-                event.component_id, event.event
-            )));
-            return;
-        };
-        let Some(segment) = image_for_event
-            .client_functions
-            .get(&function_id)
-            .or_else(|| image_for_event.server_functions.get(&function_id))
-        else {
-            notification.set(Some(format!("发布函数不存在: {function_id}")));
-            return;
-        };
-        let inputs = segment
-            .input_ports
-            .iter()
-            .map(|(id, name)| (*id, event.payload.get(name).cloned().unwrap_or(Value::Null)))
-            .collect::<BTreeMap<_, _>>();
-        let image = image_for_event.clone();
-        let application_id = application_id.clone();
-        let api_base_url = api_base_url.clone();
-        let routes = routes.clone();
-        spawn(async move {
-            let result = if image.client_functions.contains_key(&function_id) {
-                let mut host = ClientVmHost {
-                    active_route,
-                    page_state,
-                    notification,
-                    routes,
-                    api_base_url,
-                    application_id,
-                };
-                GraphVm::new(&image.client_functions)
-                    .execute(function_id, &inputs, &mut host)
-                    .await
-            } else {
-                let path =
-                    format!("/api/runtime/applications/{application_id}/segments/{function_id}");
-                post_api::<_, SegmentInvocationResult>(
-                    &api_base_url,
-                    &path,
-                    &SegmentInvocationRequest { inputs },
-                )
-                .await
-                .map(|result| result.value)
-                .map_err(anyhow::Error::msg)
+    let renderer = page.renderer.clone();
+    match renderer {
+        CompiledPageRenderer::ConventionFile {
+            module_name,
+            expected_path,
+        } => {
+            let index = match convention_pages {
+                Ok(index) => index,
+                Err(error) => return error_state("约定页面 Provider 初始化失败", error),
             };
-            if let Err(error) = result {
-                notification.set(Some(format!("交互执行失败: {error:#}")));
+            index
+                .render(
+                    &module_name,
+                    ConventionPageContext {
+                        route: route.to_owned(),
+                        page,
+                    },
+                )
+                .unwrap_or_else(|| {
+                    error_state(
+                        "约定页面文件尚未进入构建",
+                        &format!("期望文件: app/{expected_path}"),
+                    )
+                })
+        }
+        CompiledPageRenderer::TreeTable { .. } | CompiledPageRenderer::CrudTable { .. } => {
+            let row_actions =
+                row_actions_for_page(&program.menus, compiled_route.page_id).unwrap_or_default();
+            rsx! {
+                BuiltInPage {
+                    api_base_url,
+                    image,
+                    page,
+                    row_actions,
+                }
             }
-        });
-    });
-    let data = DynamicRenderData {
-        page_state: page_state(),
-        ..DynamicRenderData::default()
-    };
-    DynamicRenderer::new(components).render(&plan, &data, dispatch)
-}
-
-fn page_for_route<'a>(image: &'a ApplicationImage, route: &str) -> Option<&'a crate::RenderPlan> {
-    let page_id = image
-        .routes
-        .iter()
-        .find(|compiled| compiled.path == route)
-        .map(|compiled| compiled.page_id)?;
-    image.pages.get(&page_id)
-}
-
-fn find_event_function(
-    node: &crate::RenderNode,
-    event: &DynamicComponentEvent,
-) -> Option<SymbolId> {
-    if node.id == event.component_id {
-        return node.events.get(&event.event).copied();
+        }
     }
-    node.children
-        .iter()
-        .find_map(|child| find_event_function(child, event))
+}
+
+fn row_actions_for_page(
+    menus: &[crate::MenuDefinition],
+    page_id: SymbolId,
+) -> Option<MenuRowActions> {
+    menus.iter().find_map(|menu| {
+        if menu.page_id == Some(page_id) {
+            return Some(menu.row_actions.clone());
+        }
+        row_actions_for_page(&menu.children, page_id)
+    })
 }
 
 fn native_menu(
     bootstrap: &WorkbenchBootstrap,
     active_route: &str,
     active_route_signal: Signal<String>,
+    mut page_settings_open: Signal<bool>,
+    mut menu_creator_open: Signal<bool>,
+    has_selected_scene: bool,
 ) -> Element {
+    let admin = bootstrap.admin.clone();
+    let has_current_page = bootstrap.route(active_route).is_some();
+    let can_edit_current =
+        has_current_page && admin.as_ref().is_some_and(|state| state.can_edit_page);
+    let can_add_menu = admin.as_ref().is_some_and(|state| state.can_add_menu);
     rsx! {
         section { class: "space-y-1",
-            p { class: "aio-sidebar-section-title px-3 text-xs font-semibold uppercase text-muted-foreground", "母机" }
+            div { class: "aio-sidebar-section-heading",
+                p { class: "aio-sidebar-section-title text-xs font-semibold uppercase text-muted-foreground", "管理工具" }
+                div { class: "aio-sidebar-section-actions",
+                    if can_add_menu {
+                        button {
+                            class: "aio-sidebar-admin-action aio-sidebar-admin-action--primary",
+                            r#type: "button",
+                            disabled: !has_selected_scene,
+                            title: if has_selected_scene { "添加菜单" } else { "请先添加场景" },
+                            aria_label: if has_selected_scene { "添加菜单" } else { "请先添加场景" },
+                            onclick: move |_| menu_creator_open.set(true),
+                            Plus { class: "size-4" }
+                        }
+                    }
+                    if can_edit_current {
+                        button {
+                            class: "aio-sidebar-admin-action",
+                            r#type: "button",
+                            title: "页面设置",
+                            aria_label: "页面设置",
+                            onclick: move |_| page_settings_open.set(true),
+                            Settings { class: "size-4" }
+                        }
+                    }
+                }
+            }
             for entry in &bootstrap.native_entries {
                 {menu_link(&entry.route, &entry.title, "◇", active_route, active_route_signal)}
             }
@@ -365,7 +335,7 @@ fn native_menu(
 }
 
 fn scene_menu(
-    application: &PublishedApplication,
+    program: &PublishedProgram,
     scene: &crate::MenuDefinition,
     active_route: &str,
     active_route_signal: Signal<String>,
@@ -373,7 +343,7 @@ fn scene_menu(
     rsx! {
         section { class: "space-y-1",
             for menu in &scene.children {
-                {program_menu(menu, application, active_route, active_route_signal)}
+                {program_menu(menu, program, active_route, active_route_signal)}
             }
         }
     }
@@ -381,14 +351,14 @@ fn scene_menu(
 
 fn scene_link(
     scene: &crate::MenuDefinition,
-    application: &PublishedApplication,
+    program: &PublishedProgram,
     active: bool,
     mut active_route: Signal<String>,
     mut selected_scene: Signal<Option<SymbolId>>,
 ) -> Element {
     let scene_id = scene.id;
     let title = scene.title.clone();
-    let route = first_menu_route(scene, application);
+    let route = first_menu_route(scene, program);
     let class = if active {
         "aio-root-menu-item aio-root-menu-item--active"
     } else {
@@ -410,39 +380,28 @@ fn scene_link(
     }
 }
 
-fn application_by_id<'a>(
-    bootstrap: &'a WorkbenchBootstrap,
-    application_id: &str,
-) -> Option<&'a PublishedApplication> {
-    bootstrap
-        .applications
-        .iter()
-        .find(|application| application.application_id == application_id)
-}
-
 fn scene_by_id<'a>(
     bootstrap: &'a WorkbenchBootstrap,
-    application_id: &str,
     scene_id: SymbolId,
-) -> Option<(&'a PublishedApplication, &'a crate::MenuDefinition)> {
-    let application = application_by_id(bootstrap, application_id)?;
-    application
+) -> Option<(&'a PublishedProgram, &'a crate::MenuDefinition)> {
+    let program = bootstrap.program.as_ref()?;
+    program
         .menus
         .iter()
         .find(|scene| scene.id == scene_id)
-        .map(|scene| (application, scene))
+        .map(|scene| (program, scene))
 }
 
 fn scene_for_route<'a>(
     bootstrap: &'a WorkbenchBootstrap,
     path: &str,
-) -> Option<(&'a PublishedApplication, &'a crate::MenuDefinition)> {
-    let (application, route) = bootstrap.route(path)?;
-    application
+) -> Option<(&'a PublishedProgram, &'a crate::MenuDefinition)> {
+    let (program, route) = bootstrap.route(path)?;
+    program
         .menus
         .iter()
         .find(|scene| menu_contains_page(scene, route.page_id))
-        .map(|scene| (application, scene))
+        .map(|scene| (program, scene))
 }
 
 fn menu_contains_page(menu: &crate::MenuDefinition, page_id: SymbolId) -> bool {
@@ -453,13 +412,10 @@ fn menu_contains_page(menu: &crate::MenuDefinition, page_id: SymbolId) -> bool {
             .any(|child| menu_contains_page(child, page_id))
 }
 
-fn first_menu_route(
-    menu: &crate::MenuDefinition,
-    application: &PublishedApplication,
-) -> Option<String> {
+fn first_menu_route(menu: &crate::MenuDefinition, program: &PublishedProgram) -> Option<String> {
     menu.page_id
         .and_then(|page_id| {
-            application
+            program
                 .routes
                 .iter()
                 .find(|route| route.page_id == page_id)
@@ -468,18 +424,18 @@ fn first_menu_route(
         .or_else(|| {
             menu.children
                 .iter()
-                .find_map(|child| first_menu_route(child, application))
+                .find_map(|child| first_menu_route(child, program))
         })
 }
 
 fn program_menu(
     menu: &crate::MenuDefinition,
-    application: &PublishedApplication,
+    program: &PublishedProgram,
     active_route: &str,
     active_route_signal: Signal<String>,
 ) -> Element {
     let route = menu.page_id.and_then(|page_id| {
-        application
+        program
             .routes
             .iter()
             .find(|route| route.page_id == page_id)
@@ -496,7 +452,7 @@ fn program_menu(
             if !menu.children.is_empty() {
                 div { class: "ml-3 space-y-1 border-l pl-2",
                     for child in &menu.children {
-                        {program_menu(child, application, active_route, active_route_signal)}
+                        {program_menu(child, program, active_route, active_route_signal)}
                     }
                 }
             }
@@ -512,9 +468,9 @@ fn menu_link(
     mut active_route_signal: Signal<String>,
 ) -> Element {
     let class = if route == active_route {
-        "aio-sidebar-menu-link flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground"
+        "aio-sidebar-menu-link flex items-center gap-2 rounded-md bg-muted px-3 py-2 text-sm text-foreground"
     } else {
-        "aio-sidebar-menu-link flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent"
+        "aio-sidebar-menu-link flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
     };
     let route = route.to_owned();
     rsx! {
@@ -543,88 +499,4 @@ fn error_state(title: &str, message: &str) -> Element {
             p { class: "mt-1 text-sm break-words", "{message}" }
         }
     }
-}
-
-struct ClientVmHost {
-    active_route: Signal<String>,
-    page_state: Signal<BTreeMap<SymbolId, Value>>,
-    notification: Signal<Option<String>>,
-    routes: BTreeMap<SymbolId, String>,
-    api_base_url: String,
-    application_id: String,
-}
-
-impl GraphVmHost for ClientVmHost {
-    async fn apply(&mut self, effect: VmEffect) -> anyhow::Result<Value> {
-        match effect {
-            VmEffect::SetState { state_id, value } => {
-                self.page_state.write().insert(state_id, value.clone());
-                Ok(value)
-            }
-            VmEffect::Navigate { route_id } => {
-                let route = self
-                    .routes
-                    .get(&route_id)
-                    .cloned()
-                    .ok_or_else(|| anyhow::anyhow!("路由不存在: {route_id}"))?;
-                self.active_route.set(route.clone());
-                push_route(&route);
-                Ok(Value::String(route))
-            }
-            VmEffect::Confirm { value } => {
-                let message = value.as_str().unwrap_or("确认执行此操作？");
-                let confirmed = web_sys::window()
-                    .and_then(|window| window.confirm_with_message(message).ok())
-                    .unwrap_or(false);
-                Ok(Value::Bool(confirmed))
-            }
-            VmEffect::OpenDialog { component_id } => {
-                self.page_state
-                    .write()
-                    .insert(component_id, Value::Bool(true));
-                Ok(Value::Bool(true))
-            }
-            VmEffect::CloseDialog { component_id } => {
-                self.page_state
-                    .write()
-                    .insert(component_id, Value::Bool(false));
-                Ok(Value::Bool(false))
-            }
-            VmEffect::Notify { level, value } => {
-                self.notification
-                    .set(Some(format!("{level}: {}", value_text(&value))));
-                Ok(value)
-            }
-            VmEffect::Refresh { .. } | VmEffect::ValidateForm { .. } => Ok(Value::Null),
-            VmEffect::InvokeServerSegment { segment_id, inputs } => {
-                let path = format!(
-                    "/api/runtime/applications/{}/segments/{segment_id}",
-                    self.application_id
-                );
-                post_api::<_, SegmentInvocationResult>(
-                    &self.api_base_url,
-                    &path,
-                    &SegmentInvocationRequest { inputs },
-                )
-                .await
-                .map(|result| result.value)
-                .map_err(anyhow::Error::msg)
-            }
-            VmEffect::CreateRecord { .. }
-            | VmEffect::ReadRecord { .. }
-            | VmEffect::UpdateRecord { .. }
-            | VmEffect::DeleteRecord { .. }
-            | VmEffect::QueryRecords { .. }
-            | VmEffect::Capability { .. } => {
-                anyhow::bail!("服务端 Effect 不能在客户端 VM 执行")
-            }
-        }
-    }
-}
-
-fn value_text(value: &Value) -> String {
-    value
-        .as_str()
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| value.to_string())
 }

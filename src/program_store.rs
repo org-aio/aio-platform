@@ -1,9 +1,9 @@
 use std::{collections::BTreeSet, fmt};
 
 use crate::{
-    ApplicationImage, ApplicationSummary, CreateApplicationInput, DraftSnapshot, GraphPatchBatch,
-    ImageTarget, ProgramDefinition, RevisionRunSnapshot, RevisionSnapshot, StudioPage,
-    StudioPageParams, ValueType, VibeMessageInput, VibeSessionSnapshot,
+    DraftSnapshot, GraphPatchBatch, ImageTarget, ProgramDefinition, ProgramImage,
+    RevisionRunSnapshot, RevisionSnapshot, StudioPage, StudioPageParams, ValueType,
+    VibeMessageInput, VibeSessionSnapshot,
 };
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -16,6 +16,16 @@ use az_plugin_core::{timestamp_ms, verify_database_url};
 #[derive(Clone)]
 pub struct ProgramStore {
     pool: PgPool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProgramState {
+    pub id: String,
+    pub name: String,
+    pub title: String,
+    pub active_revision_id: Option<String>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -57,156 +67,75 @@ impl ProgramStore {
         &self.pool
     }
 
-    pub async fn create_application(
-        &self,
-        input: CreateApplicationInput,
-    ) -> Result<ApplicationSummary> {
-        validate_application_name(&input.name)?;
-        if input.title.trim().is_empty() {
-            bail!("应用标题不能为空");
-        }
-        let id = Uuid::new_v4().to_string();
-        let now = timestamp_ms();
-        let definition = ProgramDefinition::empty(input.name.clone(), input.title.clone());
-        let mut transaction = self.pool.begin().await.context("开始新建应用事务失败")?;
-        sqlx::query(
-            "INSERT INTO engine_applications
-             (id, name, title, active_revision_id, created_at_ms, updated_at_ms)
-             VALUES ($1, $2, $3, NULL, $4, $4)",
-        )
-        .bind(&id)
-        .bind(&input.name)
-        .bind(&input.title)
-        .bind(now)
-        .execute(&mut *transaction)
-        .await
-        .context("创建 engine application 失败")?;
-        sqlx::query(
-            "INSERT INTO engine_application_drafts
-             (application_id, version, definition, updated_at_ms)
-             VALUES ($1, 0, $2, $3)",
-        )
-        .bind(&id)
-        .bind(Json(&definition))
-        .bind(now)
-        .execute(&mut *transaction)
-        .await
-        .context("创建 engine application draft 失败")?;
-        transaction.commit().await.context("提交新建应用事务失败")?;
-        Ok(ApplicationSummary {
-            id,
-            name: input.name,
-            title: input.title,
-            active_revision_id: None,
-            created_at_ms: now,
-            updated_at_ms: now,
-        })
-    }
-
-    pub async fn list_applications(
-        &self,
-        page: StudioPageParams,
-    ) -> Result<StudioPage<ApplicationSummary>> {
-        let total = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM engine_applications")
-            .fetch_one(&self.pool)
-            .await
-            .context("统计 engine applications 失败")?;
-        let rows = sqlx::query(
-            "SELECT id, name, title, active_revision_id, created_at_ms, updated_at_ms
-             FROM engine_applications
-             ORDER BY created_at_ms DESC, id
-             OFFSET $1 LIMIT $2",
-        )
-        .bind(page.o as i64)
-        .bind(page.s as i64)
-        .fetch_all(&self.pool)
-        .await
-        .context("查询 engine applications 失败")?;
-        let applications = rows
-            .iter()
-            .map(application_from_row)
-            .collect::<Result<Vec<_>>>()?;
-        Ok(StudioPage {
-            d: applications,
-            t: total as u64,
-            p: page,
-        })
-    }
-
-    pub async fn active_applications(&self) -> Result<Vec<ApplicationSummary>> {
-        let rows = sqlx::query(
-            "SELECT id, name, title, active_revision_id, created_at_ms, updated_at_ms
-             FROM engine_applications
-             WHERE active_revision_id IS NOT NULL
-             ORDER BY id",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("查询活动 engine applications 失败")?;
-        rows.iter().map(application_from_row).collect()
-    }
-
-    pub async fn unactivated_applications(&self) -> Result<Vec<ApplicationSummary>> {
-        let rows = sqlx::query(
-            "SELECT id, name, title, active_revision_id, created_at_ms, updated_at_ms
-             FROM engine_applications
-             WHERE active_revision_id IS NULL
-             ORDER BY id",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("查询待首次发布的 engine applications 失败")?;
-        rows.iter().map(application_from_row).collect()
-    }
-
-    pub async fn application(&self, application_id: &str) -> Result<ApplicationSummary> {
+    pub async fn active_program(&self) -> Result<Option<ProgramState>> {
         let row = sqlx::query(
             "SELECT id, name, title, active_revision_id, created_at_ms, updated_at_ms
-             FROM engine_applications WHERE id = $1",
+             FROM engine_programs
+             WHERE singleton AND active_revision_id IS NOT NULL",
         )
-        .bind(application_id)
         .fetch_optional(&self.pool)
         .await
-        .context("查询 engine application 失败")?
-        .with_context(|| format!("application not found: {application_id}"))?;
-        application_from_row(&row)
+        .context("查询活动 Program 失败")?;
+        row.as_ref().map(program_from_row).transpose()
     }
 
-    pub async fn draft(&self, application_id: &str) -> Result<DraftSnapshot> {
+    pub async fn unactivated_program(&self) -> Result<Option<ProgramState>> {
         let row = sqlx::query(
-            "SELECT application_id, version, definition, updated_at_ms
-             FROM engine_application_drafts WHERE application_id = $1",
+            "SELECT id, name, title, active_revision_id, created_at_ms, updated_at_ms
+             FROM engine_programs
+             WHERE singleton AND active_revision_id IS NULL",
         )
-        .bind(application_id)
         .fetch_optional(&self.pool)
         .await
-        .context("查询 engine application draft 失败")?
-        .with_context(|| format!("application draft not found: {application_id}"))?;
+        .context("查询待首次发布的 Program 失败")?;
+        row.as_ref().map(program_from_row).transpose()
+    }
+
+    pub async fn program(&self) -> Result<ProgramState> {
+        let row = sqlx::query(
+            "SELECT id, name, title, active_revision_id, created_at_ms, updated_at_ms
+             FROM engine_programs WHERE singleton",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .context("查询 engine program 失败")?
+        .context("Program 不存在")?;
+        program_from_row(&row)
+    }
+
+    pub async fn draft(&self) -> Result<DraftSnapshot> {
+        let row = sqlx::query(
+            "SELECT draft.program_id, draft.version, draft.definition, draft.updated_at_ms
+             FROM engine_program_drafts draft
+             INNER JOIN engine_programs program ON program.id = draft.program_id
+             WHERE program.singleton",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .context("查询 engine program draft 失败")?
+        .context("Program Draft 不存在")?;
         draft_from_row(&row)
     }
 
-    pub async fn patch_draft(
-        &self,
-        application_id: &str,
-        batch: &GraphPatchBatch,
-    ) -> Result<DraftSnapshot> {
+    pub async fn patch_draft(&self, batch: &GraphPatchBatch) -> Result<DraftSnapshot> {
         let mut transaction = self
             .pool
             .begin()
             .await
             .context("开始 Draft Patch 事务失败")?;
         let row = sqlx::query(
-            "SELECT application_id, version, definition, updated_at_ms
-             FROM engine_application_drafts
-             WHERE application_id = $1
+            "SELECT draft.program_id, draft.version, draft.definition, draft.updated_at_ms
+             FROM engine_program_drafts draft
+             INNER JOIN engine_programs program ON program.id = draft.program_id
+             WHERE program.singleton
              FOR UPDATE",
         )
-        .bind(application_id)
         .fetch_optional(&mut *transaction)
         .await
-        .context("锁定 engine application draft 失败")?
-        .with_context(|| format!("application draft not found: {application_id}"))?;
+        .context("锁定 engine program draft 失败")?
+        .context("Program Draft 不存在")?;
         let mut draft = draft_from_row(&row)?;
+        let program_id = draft.program_id.clone();
         if draft.version != batch.base_version {
             return Err(DraftVersionConflict {
                 expected: batch.base_version,
@@ -221,18 +150,18 @@ impl ProgramStore {
         draft.version += 1;
         draft.updated_at_ms = timestamp_ms();
         let result = sqlx::query(
-            "UPDATE engine_application_drafts
+            "UPDATE engine_program_drafts
              SET version = $1, definition = $2, updated_at_ms = $3
-             WHERE application_id = $4 AND version = $5",
+             WHERE program_id = $4 AND version = $5",
         )
         .bind(draft.version)
         .bind(Json(&draft.definition))
         .bind(draft.updated_at_ms)
-        .bind(application_id)
+        .bind(&program_id)
         .bind(batch.base_version)
         .execute(&mut *transaction)
         .await
-        .context("更新 engine application draft 失败")?;
+        .context("更新 engine program draft 失败")?;
         if result.rows_affected() != 1 {
             bail!("draft version conflict: concurrent update");
         }
@@ -245,7 +174,7 @@ impl ProgramStore {
 
     pub async fn create_revision_from_draft(
         &self,
-        application_id: &str,
+        program_id: &str,
         origin: &str,
         diagnostics: &Value,
     ) -> Result<RevisionSnapshot> {
@@ -256,21 +185,21 @@ impl ProgramStore {
             .await
             .context("开始创建 revision 事务失败")?;
         let draft_row = sqlx::query(
-            "SELECT application_id, version, definition, updated_at_ms
-             FROM engine_application_drafts
-             WHERE application_id = $1
+            "SELECT program_id, version, definition, updated_at_ms
+             FROM engine_program_drafts
+             WHERE program_id = $1
              FOR SHARE",
         )
-        .bind(application_id)
+        .bind(program_id)
         .fetch_optional(&mut *transaction)
         .await
         .context("读取待发布 Draft 失败")?
-        .with_context(|| format!("application draft not found: {application_id}"))?;
+        .with_context(|| format!("program draft not found: {program_id}"))?;
         let draft = draft_from_row(&draft_row)?;
         let revision = self
             .insert_revision(
                 &mut transaction,
-                application_id,
+                program_id,
                 draft.definition,
                 origin,
                 diagnostics,
@@ -279,13 +208,13 @@ impl ProgramStore {
         transaction
             .commit()
             .await
-            .context("提交 application revision 失败")?;
+            .context("提交 program revision 失败")?;
         Ok(revision)
     }
 
     pub async fn create_revision(
         &self,
-        application_id: &str,
+        program_id: &str,
         definition: ProgramDefinition,
         origin: &str,
         diagnostics: &Value,
@@ -299,7 +228,7 @@ impl ProgramStore {
         let revision = self
             .insert_revision(
                 &mut transaction,
-                application_id,
+                program_id,
                 definition,
                 origin,
                 diagnostics,
@@ -308,44 +237,44 @@ impl ProgramStore {
         transaction
             .commit()
             .await
-            .context("提交 application revision 失败")?;
+            .context("提交 program revision 失败")?;
         Ok(revision)
     }
 
     async fn insert_revision(
         &self,
         transaction: &mut Transaction<'_, Postgres>,
-        application_id: &str,
+        program_id: &str,
         definition: ProgramDefinition,
         origin: &str,
         diagnostics: &Value,
     ) -> Result<RevisionSnapshot> {
-        sqlx::query("SELECT id FROM engine_applications WHERE id = $1 FOR UPDATE")
-            .bind(application_id)
+        sqlx::query("SELECT id FROM engine_programs WHERE id = $1 FOR UPDATE")
+            .bind(program_id)
             .fetch_optional(&mut **transaction)
             .await
-            .context("锁定 application revision 序号失败")?
-            .with_context(|| format!("application not found: {application_id}"))?;
+            .context("锁定 program revision 序号失败")?
+            .with_context(|| format!("program not found: {program_id}"))?;
         let revision = sqlx::query_scalar::<_, i64>(
             "SELECT COALESCE(MAX(revision), 0) + 1
-             FROM engine_application_revisions
-             WHERE application_id = $1",
+             FROM engine_program_revisions
+             WHERE program_id = $1",
         )
-        .bind(application_id)
+        .bind(program_id)
         .fetch_one(&mut **transaction)
         .await
-        .context("分配 application revision 序号失败")?;
+        .context("分配 program revision 序号失败")?;
         let id = Uuid::new_v4().to_string();
         let content_hash =
             crate::content_hash(&definition).context("计算 ProgramDefinition 内容哈希失败")?;
         let now = timestamp_ms();
         sqlx::query(
-            "INSERT INTO engine_application_revisions
-             (id, application_id, revision, definition, content_hash, origin, diagnostics, created_at_ms)
+            "INSERT INTO engine_program_revisions
+             (id, program_id, revision, definition, content_hash, origin, diagnostics, created_at_ms)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         )
         .bind(&id)
-        .bind(application_id)
+        .bind(program_id)
         .bind(revision)
         .bind(Json(&definition))
         .bind(&content_hash)
@@ -354,10 +283,10 @@ impl ProgramStore {
         .bind(now)
         .execute(&mut **transaction)
         .await
-        .context("保存不可变 application revision 失败")?;
+        .context("保存不可变 program revision 失败")?;
         Ok(RevisionSnapshot {
             id,
-            application_id: application_id.to_owned(),
+            program_id: program_id.to_owned(),
             revision,
             definition,
             content_hash,
@@ -369,30 +298,30 @@ impl ProgramStore {
 
     pub async fn revisions(
         &self,
-        application_id: &str,
+        program_id: &str,
         page: StudioPageParams,
     ) -> Result<StudioPage<RevisionSnapshot>> {
         let total = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM engine_application_revisions WHERE application_id = $1",
+            "SELECT COUNT(*) FROM engine_program_revisions WHERE program_id = $1",
         )
-        .bind(application_id)
+        .bind(program_id)
         .fetch_one(&self.pool)
         .await
-        .context("统计 application revisions 失败")?;
+        .context("统计 program revisions 失败")?;
         let rows = sqlx::query(
-            "SELECT id, application_id, revision, definition, content_hash, origin,
+            "SELECT id, program_id, revision, definition, content_hash, origin,
                     diagnostics, created_at_ms
-             FROM engine_application_revisions
-             WHERE application_id = $1
+             FROM engine_program_revisions
+             WHERE program_id = $1
              ORDER BY revision DESC
              OFFSET $2 LIMIT $3",
         )
-        .bind(application_id)
+        .bind(program_id)
         .bind(page.o as i64)
         .bind(page.s as i64)
         .fetch_all(&self.pool)
         .await
-        .context("查询 application revisions 失败")?;
+        .context("查询 program revisions 失败")?;
         Ok(StudioPage {
             d: rows
                 .iter()
@@ -405,20 +334,20 @@ impl ProgramStore {
 
     pub async fn revision(&self, revision_id: &str) -> Result<RevisionSnapshot> {
         let row = sqlx::query(
-            "SELECT id, application_id, revision, definition, content_hash, origin,
+            "SELECT id, program_id, revision, definition, content_hash, origin,
                     diagnostics, created_at_ms
-             FROM engine_application_revisions WHERE id = $1",
+             FROM engine_program_revisions WHERE id = $1",
         )
         .bind(revision_id)
         .fetch_optional(&self.pool)
         .await
-        .context("查询 application revision 失败")?
+        .context("查询 program revision 失败")?
         .with_context(|| format!("revision not found: {revision_id}"))?;
         revision_from_row(&row)
     }
 
-    pub async fn save_image(&self, image: &ApplicationImage) -> Result<()> {
-        let bytes = image.encode().context("序列化 ApplicationImage 失败")?;
+    pub async fn save_image(&self, image: &ProgramImage) -> Result<()> {
+        let bytes = image.encode().context("序列化 ProgramImage 失败")?;
         sqlx::query(
             "INSERT INTO engine_program_images
              (content_hash, compiler_version, target, revision_id, image, created_at_ms)
@@ -433,7 +362,7 @@ impl ProgramStore {
         .bind(timestamp_ms())
         .execute(&self.pool)
         .await
-        .context("保存 ApplicationImage cache 失败")?;
+        .context("保存 ProgramImage cache 失败")?;
         Ok(())
     }
 
@@ -442,7 +371,7 @@ impl ProgramStore {
         content_hash: &str,
         compiler_version: &str,
         target: ImageTarget,
-    ) -> Result<Option<ApplicationImage>> {
+    ) -> Result<Option<ProgramImage>> {
         let bytes = sqlx::query_scalar::<_, Vec<u8>>(
             "SELECT image FROM engine_program_images
              WHERE content_hash = $1 AND compiler_version = $2 AND target = $3",
@@ -452,17 +381,17 @@ impl ProgramStore {
         .bind(target.as_str())
         .fetch_optional(&self.pool)
         .await
-        .context("读取 ApplicationImage cache 失败")?;
+        .context("读取 ProgramImage cache 失败")?;
         bytes
-            .map(|value| ApplicationImage::decode(&value).context("反序列化 ApplicationImage 失败"))
+            .map(|value| ProgramImage::decode(&value).context("反序列化 ProgramImage 失败"))
             .transpose()
     }
 
     pub async fn reconcile_program_models(
         &self,
-        application_id: &str,
+        program_id: &str,
         definition: &ProgramDefinition,
-        image: &ApplicationImage,
+        image: &ProgramImage,
     ) -> Result<()> {
         let mut transaction = self
             .pool
@@ -520,10 +449,15 @@ impl ProgramStore {
             for (order, field) in model.fields.iter().enumerate() {
                 let field_symbol = field.id.to_string();
                 let field_type = engine_field_type(&field.value_type);
+                let domain_metadata_json =
+                    serde_json::to_string(&field.options).context("序列化字段低代码配置失败")?;
+                let validation_json = serde_json::to_string(&field.options.validation)
+                    .context("序列化字段校验配置失败")?;
                 let updated = sqlx::query(
                     "UPDATE engine_meta_fields
                      SET program_symbol_id = $1, model_name = $2, name = $3, display_name = $4,
-                         field_type = $5, is_required = $6, order_index = $7, updated_at_ms = $8
+                         field_type = $5, is_required = $6, order_index = $7,
+                         domain_metadata_json = $8, validation_json = $9, updated_at_ms = $10
                      WHERE program_symbol_id = $1
                         OR (program_symbol_id IS NULL AND model_name = $2 AND name = $3)",
                 )
@@ -534,6 +468,8 @@ impl ProgramStore {
                 .bind(field_type)
                 .bind(field.required)
                 .bind(order as i32)
+                .bind(&domain_metadata_json)
+                .bind(&validation_json)
                 .bind(timestamp_ms())
                 .execute(&mut *transaction)
                 .await
@@ -551,7 +487,7 @@ impl ProgramStore {
                          (id, model_name, name, display_name, field_type, is_required, expression,
                           dependency_json, order_index, created_at_ms, updated_at_ms,
                           domain_metadata_json, validation_json, program_symbol_id)
-                         VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, $7, $8, $8, NULL, NULL, $1)",
+                         VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, $7, $8, $8, $9, $10, $1)",
                     )
                     .bind(&field_symbol)
                     .bind(&model.name)
@@ -561,6 +497,8 @@ impl ProgramStore {
                     .bind(field.required)
                     .bind(order as i32)
                     .bind(timestamp_ms())
+                    .bind(&domain_metadata_json)
+                    .bind(&validation_json)
                     .execute(&mut *transaction)
                     .await
                     .with_context(|| format!("创建动态字段失败: {}.{}", model.name, field.name))?;
@@ -568,7 +506,7 @@ impl ProgramStore {
             }
         }
 
-        reconcile_expression_indexes(&mut transaction, application_id, image).await?;
+        reconcile_expression_indexes(&mut transaction, program_id, image).await?;
         transaction
             .commit()
             .await
@@ -576,62 +514,62 @@ impl ProgramStore {
         Ok(())
     }
 
-    pub async fn activate_revision(&self, application_id: &str, revision_id: &str) -> Result<()> {
+    pub async fn activate_revision(&self, program_id: &str, revision_id: &str) -> Result<()> {
         let result = sqlx::query(
-            "UPDATE engine_applications
+            "UPDATE engine_programs
              SET active_revision_id = $1, updated_at_ms = $2
              WHERE id = $3
                AND EXISTS (
-                   SELECT 1 FROM engine_application_revisions revision
-                   WHERE revision.id = $1 AND revision.application_id = $3
+                   SELECT 1 FROM engine_program_revisions revision
+                   WHERE revision.id = $1 AND revision.program_id = $3
                )",
         )
         .bind(revision_id)
         .bind(timestamp_ms())
-        .bind(application_id)
+        .bind(program_id)
         .execute(&self.pool)
         .await
-        .context("激活 application revision 失败")?;
+        .context("激活 program revision 失败")?;
         if result.rows_affected() != 1 {
-            bail!("revision not found in application: {revision_id}");
+            bail!("revision not found in program: {revision_id}");
         }
         Ok(())
     }
 
     pub async fn rollback(
         &self,
-        application_id: &str,
+        program_id: &str,
         source_revision_id: &str,
     ) -> Result<RevisionSnapshot> {
         let source = self.revision(source_revision_id).await?;
-        if source.application_id != application_id {
-            bail!("revision not found in application: {source_revision_id}");
+        if source.program_id != program_id {
+            bail!("revision not found in program: {source_revision_id}");
         }
         let mut transaction = self.pool.begin().await.context("开始 rollback 事务失败")?;
         let current_version = sqlx::query_scalar::<_, i64>(
-            "SELECT version FROM engine_application_drafts
-             WHERE application_id = $1 FOR UPDATE",
+            "SELECT version FROM engine_program_drafts
+             WHERE program_id = $1 FOR UPDATE",
         )
-        .bind(application_id)
+        .bind(program_id)
         .fetch_one(&mut *transaction)
         .await
         .context("锁定 rollback Draft 失败")?;
         sqlx::query(
-            "UPDATE engine_application_drafts
+            "UPDATE engine_program_drafts
              SET version = $1, definition = $2, updated_at_ms = $3
-             WHERE application_id = $4",
+             WHERE program_id = $4",
         )
         .bind(current_version + 1)
         .bind(Json(&source.definition))
         .bind(timestamp_ms())
-        .bind(application_id)
+        .bind(program_id)
         .execute(&mut *transaction)
         .await
         .context("回写 rollback Draft 失败")?;
         let revision = self
             .insert_revision(
                 &mut transaction,
-                application_id,
+                program_id,
                 source.definition,
                 "rollback",
                 &Value::Array(Vec::new()),
@@ -644,24 +582,24 @@ impl ProgramStore {
         Ok(revision)
     }
 
-    pub async fn start_revision_run(&self, application_id: &str) -> Result<RevisionRunSnapshot> {
+    pub async fn start_revision_run(&self, program_id: &str) -> Result<RevisionRunSnapshot> {
         let id = Uuid::new_v4().to_string();
         let now = timestamp_ms();
         sqlx::query(
             "INSERT INTO engine_revision_runs
-             (id, application_id, revision_id, status, stage, diagnostics, tests,
+             (id, program_id, revision_id, status, stage, diagnostics, tests,
               started_at_ms, finished_at_ms, duration_ms)
              VALUES ($1, $2, NULL, 'running', 'schema', '[]'::jsonb, '[]'::jsonb, $3, 0, 0)",
         )
         .bind(&id)
-        .bind(application_id)
+        .bind(program_id)
         .bind(now)
         .execute(&self.pool)
         .await
         .context("创建 revision run 失败")?;
         Ok(RevisionRunSnapshot {
             id,
-            application_id: application_id.to_owned(),
+            program_id: program_id.to_owned(),
             revision_id: None,
             status: "running".to_owned(),
             stage: "schema".to_owned(),
@@ -706,18 +644,18 @@ impl ProgramStore {
 
     pub async fn create_vibe_session(
         &self,
-        application_id: &str,
+        program_id: &str,
         base_version: i64,
     ) -> Result<VibeSessionSnapshot> {
         let id = Uuid::new_v4().to_string();
         let now = timestamp_ms();
         sqlx::query(
             "INSERT INTO engine_vibe_sessions
-             (id, application_id, base_version, status, final_revision_id, created_at_ms, updated_at_ms)
+             (id, program_id, base_version, status, final_revision_id, created_at_ms, updated_at_ms)
              VALUES ($1, $2, $3, 'running', NULL, $4, $4)",
         )
         .bind(&id)
-        .bind(application_id)
+        .bind(program_id)
         .bind(base_version)
         .bind(now)
         .execute(&self.pool)
@@ -725,7 +663,7 @@ impl ProgramStore {
         .context("创建 vibe session 失败")?;
         Ok(VibeSessionSnapshot {
             id,
-            application_id: application_id.to_owned(),
+            program_id: program_id.to_owned(),
             base_version,
             status: "running".to_owned(),
             final_revision_id: None,
@@ -790,11 +728,48 @@ impl ProgramStore {
 
 async fn reconcile_expression_indexes(
     transaction: &mut Transaction<'_, Postgres>,
-    application_id: &str,
-    image: &ApplicationImage,
+    program_id: &str,
+    image: &ProgramImage,
 ) -> Result<()> {
     let mut desired = BTreeSet::new();
     for model in image.models.values() {
+        for (slot, options) in &model.field_options {
+            if !options.unique {
+                continue;
+            }
+            let Some(field) = model.field_names.get(slot) else {
+                continue;
+            };
+            let index_name =
+                managed_unique_index_name(program_id, &model.id.to_string(), &model.name, field);
+            let statement = format!(
+                "CREATE UNIQUE INDEX IF NOT EXISTS {index_name} ON engine_data_records ((payload -> '{}')) \
+                 WHERE model_name = '{}' AND payload ? '{}' AND payload -> '{}' <> 'null'::jsonb",
+                quote_literal(field),
+                quote_literal(&model.name),
+                quote_literal(field),
+                quote_literal(field),
+            );
+            sqlx::query(&statement)
+                .execute(&mut **transaction)
+                .await
+                .with_context(|| format!("创建字段唯一索引失败: {index_name}"))?;
+            sqlx::query(
+                "INSERT INTO engine_program_expression_indexes
+                 (program_id, index_name, model_symbol_id, field_slots, created_at_ms)
+                 VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (program_id, index_name) DO NOTHING",
+            )
+            .bind(program_id)
+            .bind(&index_name)
+            .bind(model.id.to_string())
+            .bind(Json(vec![slot.to_string()]))
+            .bind(timestamp_ms())
+            .execute(&mut **transaction)
+            .await
+            .context("登记字段唯一索引失败")?;
+            desired.insert(index_name);
+        }
         for index in &model.expression_indexes {
             let fields = index
                 .fields
@@ -806,7 +781,7 @@ async fn reconcile_expression_indexes(
                 continue;
             }
             let index_name =
-                managed_index_name(application_id, &model.id.to_string(), &model.name, &fields);
+                managed_index_name(program_id, &model.id.to_string(), &model.name, &fields);
             let expressions = fields
                 .iter()
                 .map(|field| format!("(payload ->> '{}')", quote_literal(field)))
@@ -823,11 +798,11 @@ async fn reconcile_expression_indexes(
                 .with_context(|| format!("创建 ProgramGraph 表达式索引失败: {index_name}"))?;
             sqlx::query(
                 "INSERT INTO engine_program_expression_indexes
-                 (application_id, index_name, model_symbol_id, field_slots, created_at_ms)
+                 (program_id, index_name, model_symbol_id, field_slots, created_at_ms)
                  VALUES ($1, $2, $3, $4, $5)
-                 ON CONFLICT (application_id, index_name) DO NOTHING",
+                 ON CONFLICT (program_id, index_name) DO NOTHING",
             )
-            .bind(application_id)
+            .bind(program_id)
             .bind(&index_name)
             .bind(model.id.to_string())
             .bind(Json(
@@ -845,9 +820,9 @@ async fn reconcile_expression_indexes(
         }
     }
     let existing = sqlx::query_scalar::<_, String>(
-        "SELECT index_name FROM engine_program_expression_indexes WHERE application_id = $1",
+        "SELECT index_name FROM engine_program_expression_indexes WHERE program_id = $1",
     )
-    .bind(application_id)
+    .bind(program_id)
     .fetch_all(&mut **transaction)
     .await
     .context("读取 ProgramGraph 表达式索引登记失败")?;
@@ -864,9 +839,9 @@ async fn reconcile_expression_indexes(
             .with_context(|| format!("删除过期 ProgramGraph 表达式索引失败: {index_name}"))?;
         sqlx::query(
             "DELETE FROM engine_program_expression_indexes
-             WHERE application_id = $1 AND index_name = $2",
+             WHERE program_id = $1 AND index_name = $2",
         )
-        .bind(application_id)
+        .bind(program_id)
         .bind(index_name)
         .execute(&mut **transaction)
         .await
@@ -876,13 +851,13 @@ async fn reconcile_expression_indexes(
 }
 
 fn managed_index_name(
-    application_id: &str,
+    program_id: &str,
     model_id: &str,
     model_name: &str,
     fields: &[String],
 ) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(application_id.as_bytes());
+    hasher.update(program_id.as_bytes());
     hasher.update(model_id.as_bytes());
     hasher.update(model_name.as_bytes());
     for field in fields {
@@ -891,6 +866,20 @@ fn managed_index_name(
     }
     let digest = format!("{:x}", hasher.finalize());
     format!("engine_program_{}_idx", &digest[..24])
+}
+
+fn managed_unique_index_name(
+    program_id: &str,
+    model_id: &str,
+    model_name: &str,
+    field: &str,
+) -> String {
+    managed_index_name(
+        program_id,
+        model_id,
+        model_name,
+        &["unique".to_owned(), field.to_owned()],
+    )
 }
 
 fn is_managed_index_name(value: &str) -> bool {
@@ -922,8 +911,8 @@ fn engine_field_type(value_type: &ValueType) -> &'static str {
     }
 }
 
-fn application_from_row(row: &sqlx::postgres::PgRow) -> Result<ApplicationSummary> {
-    Ok(ApplicationSummary {
+fn program_from_row(row: &sqlx::postgres::PgRow) -> Result<ProgramState> {
+    Ok(ProgramState {
         id: row.try_get("id")?,
         name: row.try_get("name")?,
         title: row.try_get("title")?,
@@ -936,7 +925,7 @@ fn application_from_row(row: &sqlx::postgres::PgRow) -> Result<ApplicationSummar
 fn draft_from_row(row: &sqlx::postgres::PgRow) -> Result<DraftSnapshot> {
     let definition: Json<ProgramDefinition> = row.try_get("definition")?;
     Ok(DraftSnapshot {
-        application_id: row.try_get("application_id")?,
+        program_id: row.try_get("program_id")?,
         version: row.try_get("version")?,
         definition: definition.0,
         updated_at_ms: row.try_get("updated_at_ms")?,
@@ -948,7 +937,7 @@ fn revision_from_row(row: &sqlx::postgres::PgRow) -> Result<RevisionSnapshot> {
     let diagnostics: Json<Value> = row.try_get("diagnostics")?;
     Ok(RevisionSnapshot {
         id: row.try_get("id")?,
-        application_id: row.try_get("application_id")?,
+        program_id: row.try_get("program_id")?,
         revision: row.try_get("revision")?,
         definition: definition.0,
         content_hash: row.try_get("content_hash")?,
@@ -956,17 +945,6 @@ fn revision_from_row(row: &sqlx::postgres::PgRow) -> Result<RevisionSnapshot> {
         diagnostics: diagnostics.0,
         created_at_ms: row.try_get("created_at_ms")?,
     })
-}
-
-fn validate_application_name(value: &str) -> Result<()> {
-    if value.is_empty()
-        || !value
-            .bytes()
-            .all(|value| value.is_ascii_alphanumeric() || value == b'-' || value == b'_')
-    {
-        bail!("应用名称只能包含 ASCII 字母、数字、- 和 _: {value}");
-    }
-    Ok(())
 }
 
 fn validate_revision_origin(value: &str) -> Result<()> {

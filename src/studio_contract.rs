@@ -1,11 +1,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{CapabilityCatalog, ComponentCatalog, ProgramDefinition};
+use crate::{CapabilityCatalog, ProgramDefinition};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StudioCatalog {
-    pub components: ComponentCatalog,
     pub capabilities: CapabilityCatalog,
 }
 
@@ -28,25 +27,9 @@ pub struct StudioPage<T> {
     pub p: StudioPageParams,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ApplicationSummary {
-    pub id: String,
-    pub name: String,
-    pub title: String,
-    pub active_revision_id: Option<String>,
-    pub created_at_ms: i64,
-    pub updated_at_ms: i64,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct CreateApplicationInput {
-    pub name: String,
-    pub title: String,
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DraftSnapshot {
-    pub application_id: String,
+    pub program_id: String,
     pub version: i64,
     pub definition: ProgramDefinition,
     pub updated_at_ms: i64,
@@ -55,7 +38,7 @@ pub struct DraftSnapshot {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RevisionSnapshot {
     pub id: String,
-    pub application_id: String,
+    pub program_id: String,
     pub revision: i64,
     pub definition: ProgramDefinition,
     pub content_hash: String,
@@ -67,7 +50,7 @@ pub struct RevisionSnapshot {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RevisionRunSnapshot {
     pub id: String,
-    pub application_id: String,
+    pub program_id: String,
     pub revision_id: Option<String>,
     pub status: String,
     pub stage: String,
@@ -81,7 +64,7 @@ pub struct RevisionRunSnapshot {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct VibeSessionSnapshot {
     pub id: String,
-    pub application_id: String,
+    pub program_id: String,
     pub base_version: i64,
     pub status: String,
     pub final_revision_id: Option<String>,
@@ -111,4 +94,49 @@ pub struct VibeRunRequest {
 pub struct VibeRunAccepted {
     pub session_id: String,
     pub status: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ConventionFileResult {
+    pub path: String,
+    pub created: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeRecordInput {
+    pub payload: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FormStateExtractionRequest {
+    pub prompt: String,
+    pub current_form_state: Value,
+    pub model: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FormStateExtractionResponse {
+    pub form_state: Value,
+    pub model: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeRecordFilter {
+    pub field: String,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeRecordView {
+    pub id: String,
+    pub payload: Value,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeRecordPage {
+    pub d: Vec<RuntimeRecordView>,
+    pub t: u64,
+    pub p: StudioPageParams,
 }

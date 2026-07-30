@@ -9,10 +9,6 @@ use crate::{BytecodeInstruction, BytecodeSegment, Instruction, SymbolId};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum VmEffect {
-    SetState {
-        state_id: SymbolId,
-        value: Value,
-    },
     ValidateForm {
         rules: u32,
         value: Value,
@@ -44,18 +40,9 @@ pub enum VmEffect {
     Confirm {
         value: Value,
     },
-    OpenDialog {
-        component_id: SymbolId,
-    },
-    CloseDialog {
-        component_id: SymbolId,
-    },
     Notify {
         level: String,
         value: Value,
-    },
-    Refresh {
-        source_id: SymbolId,
     },
     Capability {
         capability_id: String,
@@ -218,13 +205,6 @@ impl<'a> GraphVm<'a> {
                 }
                 Ok(Value::Array(output))
             }
-            Instruction::SetState { state_id } => {
-                host.apply(VmEffect::SetState {
-                    state_id: *state_id,
-                    value: first(),
-                })
-                .await
-            }
             Instruction::ValidateForm { rule_count } => {
                 host.apply(VmEffect::ValidateForm {
                     rules: *rule_count,
@@ -275,28 +255,10 @@ impl<'a> GraphVm<'a> {
                 .await
             }
             Instruction::Confirm => host.apply(VmEffect::Confirm { value: first() }).await,
-            Instruction::OpenDialog { component_id } => {
-                host.apply(VmEffect::OpenDialog {
-                    component_id: *component_id,
-                })
-                .await
-            }
-            Instruction::CloseDialog { component_id } => {
-                host.apply(VmEffect::CloseDialog {
-                    component_id: *component_id,
-                })
-                .await
-            }
             Instruction::Notify { level } => {
                 host.apply(VmEffect::Notify {
                     level: level.clone(),
                     value: first(),
-                })
-                .await
-            }
-            Instruction::Refresh { source_id } => {
-                host.apply(VmEffect::Refresh {
-                    source_id: *source_id,
                 })
                 .await
             }

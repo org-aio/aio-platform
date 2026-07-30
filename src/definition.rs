@@ -6,7 +6,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 /// 当前数据库程序协议版本。
-pub const PROGRAM_SCHEMA_VERSION: u32 = 4;
+pub const PROGRAM_SCHEMA_VERSION: u32 = 6;
 
 /// 创建时分配且永不因改名、改路由而变化的符号身份。
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -127,10 +127,34 @@ pub struct MenuDefinition {
     pub children: Vec<MenuDefinition>,
     #[serde(default)]
     pub required_permissions: Vec<SymbolId>,
+    #[serde(default)]
+    pub row_actions: MenuRowActions,
 }
 
 const fn menu_enabled() -> bool {
     true
+}
+
+/// 表格行操作直接随菜单声明，不在页面内部重复配置。
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct MenuRowActions {
+    #[serde(default)]
+    pub detail: MenuActionAccess,
+    #[serde(default)]
+    pub edit: MenuActionAccess,
+    #[serde(default)]
+    pub delete: MenuActionAccess,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MenuActionAccess {
+    #[default]
+    Hidden,
+    Public,
+    Permission {
+        permission_id: SymbolId,
+    },
 }
 
 /// 动态模型仍映射到 MetaModel、MetaField 与 JSONB DataRecord。
@@ -157,8 +181,67 @@ pub struct FieldDefinition {
     pub state: DefinitionState,
     #[serde(default)]
     pub required: bool,
+    pub options: FieldOptions,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relation_model_id: Option<SymbolId>,
+}
+
+/// 字段在列表、表单、交换与 AI 场景中的唯一行为定义。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FieldOptions {
+    pub list_visible: bool,
+    pub detail_visible: bool,
+    pub form_visible: bool,
+    pub form_editable: bool,
+    pub filterable: bool,
+    pub sortable: bool,
+    pub unique: bool,
+    pub excel_import: bool,
+    pub excel_export: bool,
+    pub ai_extract: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_value: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placeholder: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub help_text: Option<String>,
+    pub validation: FieldValidation,
+}
+
+impl Default for FieldOptions {
+    fn default() -> Self {
+        Self {
+            list_visible: true,
+            detail_visible: true,
+            form_visible: true,
+            form_editable: true,
+            filterable: false,
+            sortable: false,
+            unique: false,
+            excel_import: true,
+            excel_export: true,
+            ai_extract: true,
+            default_value: None,
+            placeholder: None,
+            help_text: None,
+            validation: FieldValidation::default(),
+        }
+    }
+}
+
+/// 可直接映射为 JSON Schema 与运行时校验规则的字段约束。
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct FieldValidation {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_length: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_length: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minimum: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -192,7 +275,7 @@ pub enum ValueType {
     Optional { value: Box<ValueType> },
 }
 
-/// 正式保存的页面只包含组件树、状态、数据源和事件绑定。
+/// 页面只声明需要的布局和数据，不指定组件实现。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PageDefinition {
     pub id: SymbolId,
@@ -200,125 +283,67 @@ pub struct PageDefinition {
     pub title: String,
     #[serde(default)]
     pub state: DefinitionState,
-    pub root: ComponentNode,
-    #[serde(default)]
-    pub page_state: Vec<PageStateDefinition>,
-    #[serde(default)]
-    pub data_sources: Vec<DataSourceDefinition>,
+    pub renderer: PageRendererDefinition,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PageStateDefinition {
-    pub id: SymbolId,
-    pub name: String,
-    pub value_type: ValueType,
-    #[serde(default)]
-    pub initial_value: Value,
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PageRendererDefinition {
+    ConventionFile,
+    TreeTable {
+        tree: TreeDefinition,
+        table: TableDefinition,
+    },
+    CrudTable {
+        table: TableDefinition,
+    },
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ComponentNode {
-    pub id: SymbolId,
-    pub component: String,
-    #[serde(default)]
-    pub state: DefinitionState,
-    #[serde(default)]
-    pub properties: BTreeMap<String, PropertyValue>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<PropertyValue>,
-    #[serde(default)]
-    pub events: BTreeMap<String, SymbolId>,
-    #[serde(default)]
-    pub children: Vec<ComponentNode>,
-    #[serde(default)]
-    pub style: ComponentStyle,
-}
-
-/// 页面只保存结构化设计约束，实际 class 由组件 Provider 决定。
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ComponentStyle {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub variant: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub spacing: Option<SpacingToken>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub width: Option<SizeConstraint>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub height: Option<SizeConstraint>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub columns: Option<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub alignment: Option<Alignment>,
-    #[serde(default)]
-    pub responsive: BTreeMap<Breakpoint, ResponsiveStyle>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SpacingToken {
-    None,
-    Xs,
-    Sm,
-    Md,
-    Lg,
-    Xl,
+impl Default for PageRendererDefinition {
+    fn default() -> Self {
+        Self::ConventionFile
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
-pub enum SizeConstraint {
-    Auto,
-    Full,
-    Content,
-    Fraction(u8),
-    Token(String),
+pub struct TableDefinition {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<SymbolId>,
+    #[serde(default = "default_page_size")]
+    pub page_size: u32,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Alignment {
-    Start,
-    Center,
-    End,
-    Stretch,
-    SpaceBetween,
+const fn default_page_size() -> u32 {
+    20
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Breakpoint {
-    Mobile,
-    Tablet,
-    Desktop,
+impl Default for TableDefinition {
+    fn default() -> Self {
+        Self {
+            model_id: None,
+            page_size: default_page_size(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ResponsiveStyle {
+pub struct TreeDefinition {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub columns: Option<u8>,
+    pub model_id: Option<SymbolId>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub visible: Option<bool>,
+    pub label_field_id: Option<SymbolId>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub spacing: Option<SpacingToken>,
+    pub parent_field_id: Option<SymbolId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub table_relation_field_id: Option<SymbolId>,
 }
 
 /// 属性绑定只能引用稳定符号或事件值，不接受表达式字符串。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "source", rename_all = "snake_case")]
 pub enum PropertyValue {
-    Literal {
-        value: Value,
-    },
-    PageState {
-        state_id: SymbolId,
-    },
-    DataSource {
-        source_id: SymbolId,
-        path: Vec<SymbolId>,
-    },
-    EventValue {
-        name: String,
-    },
+    Literal { value: Value },
+    EventValue { name: String },
 }
 
 impl PropertyValue {
@@ -335,15 +360,6 @@ impl PropertyValue {
             value: Value::Number(value.into()),
         }
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct DataSourceDefinition {
-    pub id: SymbolId,
-    pub name: String,
-    pub function_id: SymbolId,
-    #[serde(default)]
-    pub parameters: BTreeMap<String, PropertyValue>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -436,9 +452,6 @@ pub enum FunctionNodeKind {
         max_items: u32,
         body_function_id: SymbolId,
     },
-    SetState {
-        state_id: SymbolId,
-    },
     ValidateForm {
         rules: Vec<ValidationRule>,
     },
@@ -464,17 +477,8 @@ pub enum FunctionNodeKind {
     Confirm {
         message: PropertyValue,
     },
-    OpenDialog {
-        component_id: SymbolId,
-    },
-    CloseDialog {
-        component_id: SymbolId,
-    },
     Notify {
         level: NotificationLevel,
-    },
-    Refresh {
-        source_id: SymbolId,
     },
     Return,
     Fail {
@@ -583,47 +587,6 @@ pub enum EffectKind {
     DatabaseWrite,
     Secret,
     Capability,
-}
-
-/// 编译器只接受 Provider 暴露的结构化组件契约。
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ComponentCatalog {
-    #[serde(default)]
-    pub components: BTreeMap<String, ComponentContract>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ComponentContract {
-    pub canonical_id: String,
-    #[serde(default)]
-    pub properties: BTreeMap<String, ComponentPropertyContract>,
-    #[serde(default)]
-    pub events: BTreeMap<String, EventContract>,
-    pub children: ChildrenConstraint,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ComponentPropertyContract {
-    pub value_type: ValueType,
-    #[serde(default)]
-    pub required: bool,
-    #[serde(default)]
-    pub choices: Vec<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct EventContract {
-    #[serde(default)]
-    pub payload: BTreeMap<String, ValueType>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ChildrenConstraint {
-    None,
-    Any,
-    Range { minimum: u32, maximum: u32 },
-    Components { canonical_ids: Vec<String> },
 }
 
 /// Capability 目录是编译期链接白名单，不包含可执行实现。
