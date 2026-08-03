@@ -10,10 +10,12 @@ use rudi::Context as RudiContext;
 use serde_json::{Map, Value};
 
 use crate::{
-    CompiledModel, CompiledPage, CompiledPageRenderer, CompiledTable, CompiledTree,
-    FormStateExtractionRequest, FormStateExtractionResponse, MenuActionAccess, MenuRowActions,
-    ProgramImage, RuntimeRecordInput, RuntimeRecordPage, RuntimeRecordView, SymbolId, ValueType,
-    browser_http::{delete_api, get_api, patch_api, post_api},
+    CompiledModel, CompiledPage, CompiledPageEndpoint, CompiledPageRenderer, CompiledTable,
+    CompiledTree, CrudTablePageProvider, EndpointInputLocation, FormStateExtractionRequest,
+    FormStateExtractionResponse, MenuActionAccess, MenuRowActions, PageEndpointSource,
+    ProgramImage, RestFormPageProvider, RestMethod, RuntimeRecordInput, RuntimeRecordPage,
+    RuntimeRecordView, SymbolId, TreeTablePageProvider, ValueType,
+    browser_http::{api_url, delete_api, get_api, patch_api, post_api},
     design_system::{Button, ButtonSize, ButtonVariant},
 };
 
@@ -21,6 +23,176 @@ use crate::{
 pub struct ConventionPageContext {
     pub route: String,
     pub page: CompiledPage,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BuiltInPageContext {
+    pub api_base_url: String,
+    pub image: ProgramImage,
+    pub page: CompiledPage,
+    pub row_actions: MenuRowActions,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PageEndpointFormContext {
+    pub api_base_url: String,
+    pub endpoint: CompiledPageEndpoint,
+}
+
+pub trait PageEndpointProvider: Send + Sync + std::fmt::Debug {
+    fn key(&self) -> &'static str;
+
+    fn render(&self, context: PageEndpointFormContext) -> Element;
+}
+
+pub type DynPageEndpointProvider = Arc<dyn PageEndpointProvider>;
+
+#[derive(Clone, Debug, Default)]
+pub struct PageEndpointIndex {
+    providers: BTreeMap<String, DynPageEndpointProvider>,
+}
+
+impl PageEndpointIndex {
+    pub fn from_context(context: &mut RudiContext) -> Result<Self> {
+        let provider_names = context
+            .get_providers_by_type::<DynPageEndpointProvider>()
+            .into_iter()
+            .map(|provider| provider.definition().key.name.to_string())
+            .collect::<Vec<_>>();
+        let mut providers = BTreeMap::new();
+        for provider_name in provider_names {
+            let provider = context
+                .resolve_option_with_name::<DynPageEndpointProvider>(provider_name.clone())
+                .with_context(|| format!("无法解析页面接口 Provider: {provider_name}"))?;
+            ensure!(
+                provider.key() == provider_name,
+                "页面接口的 Rudi name 与 Provider key 不一致: {provider_name} != {}",
+                provider.key()
+            );
+            if providers.insert(provider_name.clone(), provider).is_some() {
+                bail!("页面接口 Provider 重复: {provider_name}");
+            }
+        }
+        Ok(Self { providers })
+    }
+
+    pub fn render(&self, provider_key: &str, context: PageEndpointFormContext) -> Option<Element> {
+        self.providers
+            .get(provider_key)
+            .map(|provider| provider.render(context))
+    }
+}
+
+impl PageEndpointProvider for RestFormPageProvider {
+    fn key(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
+
+    fn render(&self, context: PageEndpointFormContext) -> Element {
+        rsx! {
+            RestEndpointForm {
+                api_base_url: context.api_base_url,
+                endpoint: context.endpoint,
+            }
+        }
+    }
+}
+
+#[rudi::Singleton(name = std::any::type_name::<RestFormPageProvider>())]
+fn rest_form_page_provider() -> DynPageEndpointProvider {
+    Arc::new(RestFormPageProvider)
+}
+
+fn load_page_endpoint_index() -> Result<Arc<PageEndpointIndex>, String> {
+    let mut context = RudiContext::auto_register();
+    PageEndpointIndex::from_context(&mut context)
+        .map(Arc::new)
+        .map_err(|error| error.to_string())
+}
+
+pub trait BuiltInPageProvider: Send + Sync + std::fmt::Debug {
+    fn key(&self) -> &'static str;
+
+    fn render(&self, context: BuiltInPageContext) -> Element;
+}
+
+pub type DynBuiltInPageProvider = Arc<dyn BuiltInPageProvider>;
+
+#[derive(Clone, Debug, Default)]
+pub struct BuiltInPageIndex {
+    providers: BTreeMap<String, DynBuiltInPageProvider>,
+}
+
+impl BuiltInPageIndex {
+    pub fn from_context(context: &mut RudiContext) -> Result<Self> {
+        let provider_names = context
+            .get_providers_by_type::<DynBuiltInPageProvider>()
+            .into_iter()
+            .map(|provider| provider.definition().key.name.to_string())
+            .collect::<Vec<_>>();
+        let mut providers = BTreeMap::new();
+        for provider_name in provider_names {
+            let provider = context
+                .resolve_option_with_name::<DynBuiltInPageProvider>(provider_name.clone())
+                .with_context(|| format!("无法解析内置页面 Provider: {provider_name}"))?;
+            ensure!(
+                provider.key() == provider_name,
+                "内置页面的 Rudi name 与 Provider key 不一致: {provider_name} != {}",
+                provider.key()
+            );
+            if providers.insert(provider_name.clone(), provider).is_some() {
+                bail!("内置页面 Provider 重复: {provider_name}");
+            }
+        }
+        Ok(Self { providers })
+    }
+
+    pub fn render(&self, provider_key: &str, context: BuiltInPageContext) -> Option<Element> {
+        self.providers
+            .get(provider_key)
+            .map(|provider| provider.render(context))
+    }
+}
+
+impl BuiltInPageProvider for CrudTablePageProvider {
+    fn key(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
+
+    fn render(&self, context: BuiltInPageContext) -> Element {
+        render_built_in_page(context)
+    }
+}
+
+impl BuiltInPageProvider for TreeTablePageProvider {
+    fn key(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
+
+    fn render(&self, context: BuiltInPageContext) -> Element {
+        render_built_in_page(context)
+    }
+}
+
+#[rudi::Singleton(name = std::any::type_name::<CrudTablePageProvider>())]
+fn crud_table_page_provider() -> DynBuiltInPageProvider {
+    Arc::new(CrudTablePageProvider)
+}
+
+#[rudi::Singleton(name = std::any::type_name::<TreeTablePageProvider>())]
+fn tree_table_page_provider() -> DynBuiltInPageProvider {
+    Arc::new(TreeTablePageProvider)
+}
+
+fn render_built_in_page(context: BuiltInPageContext) -> Element {
+    rsx! {
+        BuiltInPage {
+            api_base_url: context.api_base_url,
+            image: context.image,
+            page: context.page,
+            row_actions: context.row_actions,
+        }
+    }
 }
 
 pub trait ConventionPageProvider: Send + Sync + std::fmt::Debug {
@@ -91,8 +263,8 @@ pub fn BuiltInPage(
     row_actions: MenuRowActions,
 ) -> Element {
     let (table, tree) = match &page.renderer {
-        CompiledPageRenderer::TreeTable { tree, table } => (table.clone(), Some(tree.clone())),
-        CompiledPageRenderer::CrudTable { table } => (table.clone(), None),
+        CompiledPageRenderer::TreeTable { tree, table, .. } => (table.clone(), Some(tree.clone())),
+        CompiledPageRenderer::CrudTable { table, .. } => (table.clone(), None),
         CompiledPageRenderer::ConventionFile { .. } => {
             return render_runtime_error("内置页面收到了约定文件渲染计划");
         }
@@ -145,6 +317,8 @@ fn MetadataTablePage(
     mut dialog: Signal<Option<RecordDialog>>,
     mut notice: Signal<Option<String>>,
 ) -> Element {
+    let mut endpoint_dialog = use_signal(|| None::<CompiledPageEndpoint>);
+    let endpoint_forms = use_hook(load_page_endpoint_index);
     let page_size = table.page_size as usize;
     let records_api = api_base_url.clone();
     let records_model = table.model_id;
@@ -227,6 +401,12 @@ fn MetadataTablePage(
         .unwrap_or_default();
     let has_previous = offset() > 0;
     let has_next = offset().saturating_add(page_size) < total as usize;
+    let custom_endpoints = page
+        .endpoints
+        .iter()
+        .filter(|endpoint| endpoint.source == PageEndpointSource::Custom)
+        .cloned()
+        .collect::<Vec<_>>();
     rsx! {
         section { class: "aio-runtime-table-page",
             header { class: "aio-runtime-table-page__header",
@@ -234,10 +414,15 @@ fn MetadataTablePage(
                     h2 { "{page.title}" }
                     p { "{model.title}" }
                 }
-                if can_create {
-                    Button { onclick: move |_| dialog.set(Some(RecordDialog::Create)),
-                        Plus { class: "size-4" }
-                        "新增"
+                div { class: "aio-runtime-table-page__actions",
+                    for endpoint in custom_endpoints {
+                        {endpoint_action_button(endpoint, endpoint_dialog)}
+                    }
+                    if can_create {
+                        Button { onclick: move |_| dialog.set(Some(RecordDialog::Create)),
+                            Plus { class: "size-4" }
+                            "新增"
+                        }
                     }
                 }
             }
@@ -402,14 +587,272 @@ fn MetadataTablePage(
                     key: "{table.model_id}:{dialog_key(&dialog_value)}",
                     value: dialog_value,
                     model,
-                    api_base_url,
+                    api_base_url: api_base_url.clone(),
                     model_id: table.model_id,
                     generation,
                     dialog,
                     notice,
                 }
             }
+            if let Some(endpoint) = endpoint_dialog() {
+                div { class: "aio-runtime-dialog-backdrop", onclick: move |_| endpoint_dialog.set(None) }
+                section { class: "aio-runtime-dialog aio-runtime-dialog--endpoint",
+                    header {
+                        div {
+                            strong { "{endpoint.title}" }
+                            code { "{endpoint.method.as_str()} {endpoint.path}" }
+                        }
+                        Button {
+                            size: ButtonSize::IconSm,
+                            variant: ButtonVariant::Ghost,
+                            title: "关闭",
+                            aria_label: "关闭",
+                            onclick: move |_| endpoint_dialog.set(None),
+                            X { class: "size-4" }
+                        }
+                    }
+                    match &endpoint_forms {
+                        Ok(index) => index
+                            .render(
+                                &endpoint.route_instruction.provider_key,
+                                PageEndpointFormContext {
+                                    api_base_url: api_base_url.clone(),
+                                    endpoint: endpoint.clone(),
+                                },
+                            )
+                            .unwrap_or_else(|| render_runtime_error("页面接口 Provider 未注册")),
+                        Err(error) => render_runtime_error(error),
+                    }
+                }
+            }
         }
+    }
+}
+
+fn endpoint_action_button(
+    endpoint: CompiledPageEndpoint,
+    mut endpoint_dialog: Signal<Option<CompiledPageEndpoint>>,
+) -> Element {
+    let title = endpoint.title.clone();
+    rsx! {
+        Button {
+            variant: ButtonVariant::Outline,
+            onclick: move |_| endpoint_dialog.set(Some(endpoint.clone())),
+            "{title}"
+        }
+    }
+}
+
+#[component]
+fn RestEndpointForm(api_base_url: String, endpoint: CompiledPageEndpoint) -> Element {
+    let mut response = use_signal(|| None::<Result<String, String>>);
+    let mut sending = use_signal(|| false);
+    let request_api = api_base_url;
+    let request_endpoint = endpoint.clone();
+    rsx! {
+        form { class: "aio-rest-endpoint-form", onsubmit: move |event| {
+            event.prevent_default();
+            let values = request_endpoint
+                .inputs
+                .iter()
+                .map(|input| (input.name.clone(), form_text(&event, &input.name)))
+                .collect::<BTreeMap<_, _>>();
+            let api_base_url = request_api.clone();
+            let endpoint = request_endpoint.clone();
+            sending.set(true);
+            response.set(None);
+            spawn(async move {
+                let result = send_rest_endpoint_request(&api_base_url, &endpoint, &values).await;
+                response.set(Some(result));
+                sending.set(false);
+            });
+        },
+            div { class: "aio-rest-endpoint-form__inputs",
+                for input in &endpoint.inputs {
+                    label {
+                        span {
+                            "{input.title}"
+                            code { "{endpoint_location_name(input.location)}" }
+                        }
+                        {rest_endpoint_input(input)}
+                    }
+                }
+                if endpoint.inputs.is_empty() {
+                    div { class: "aio-runtime-table-state", "无入参" }
+                }
+            }
+            if !endpoint.outputs.is_empty() {
+                dl { class: "aio-rest-endpoint-form__outputs",
+                    for output in &endpoint.outputs {
+                        div {
+                            dt { "{output.title}" }
+                            dd { code { "{output.name}" } span { "{value_type_name(&output.value_type)}" } }
+                        }
+                    }
+                }
+            }
+            footer {
+                Button { button_type: "submit", disabled: sending(),
+                    if sending() { "发送中" } else { "发送请求" }
+                }
+            }
+            if let Some(result) = response() {
+                match result {
+                    Ok(payload) => rsx! { pre { class: "aio-rest-endpoint-form__response", "{payload}" } },
+                    Err(error) => rsx! { div { class: "aio-runtime-table-state is-error", "{error}" } },
+                }
+            }
+        }
+    }
+}
+
+fn rest_endpoint_input(input: &crate::CompiledEndpointInput) -> Element {
+    let input_type = match input.value_type {
+        ValueType::Integer | ValueType::Decimal | ValueType::TimestampMs => "number",
+        ValueType::File => "file",
+        _ => "text",
+    };
+    if input.value_type == ValueType::Boolean {
+        return rsx! {
+            select { name: "{input.name}", class: "aio-input", required: input.required,
+                option { value: "", "选择" }
+                option { value: "true", "是" }
+                option { value: "false", "否" }
+            }
+        };
+    }
+    rsx! {
+        input {
+            name: "{input.name}",
+            class: "aio-input",
+            r#type: input_type,
+            required: input.required,
+            placeholder: "{input.name}"
+        }
+    }
+}
+
+async fn send_rest_endpoint_request(
+    api_base_url: &str,
+    endpoint: &CompiledPageEndpoint,
+    values: &BTreeMap<String, String>,
+) -> Result<String, String> {
+    let mut path = endpoint.path.clone();
+    let mut query = Vec::new();
+    let mut headers = Vec::new();
+    let mut body = Map::new();
+    for input in &endpoint.inputs {
+        let value = values.get(&input.name).cloned().unwrap_or_default();
+        if value.is_empty() && !input.required {
+            continue;
+        }
+        match input.location {
+            EndpointInputLocation::Path => {
+                path = path.replace(&format!("{{{}}}", input.name), &urlencoding::encode(&value));
+            }
+            EndpointInputLocation::Query => query.push(format!(
+                "{}={}",
+                urlencoding::encode(&input.name),
+                urlencoding::encode(&value)
+            )),
+            EndpointInputLocation::Header => headers.push((input.name.clone(), value)),
+            EndpointInputLocation::Body => {
+                body.insert(
+                    input.name.clone(),
+                    rest_input_value(&input.value_type, &value)?,
+                );
+            }
+        }
+    }
+    if !query.is_empty() {
+        let separator = if path.contains('?') { '&' } else { '?' };
+        path.push(separator);
+        path.push_str(&query.join("&"));
+    }
+    let url = api_url(api_base_url, &path);
+    let mut request = match endpoint.method {
+        RestMethod::Get => gloo_net::http::Request::get(&url),
+        RestMethod::Post => gloo_net::http::Request::post(&url),
+        RestMethod::Put => gloo_net::http::Request::put(&url),
+        RestMethod::Patch => gloo_net::http::Request::patch(&url),
+        RestMethod::Delete => gloo_net::http::Request::delete(&url),
+    };
+    for (name, value) in headers {
+        request = request.header(&name, &value);
+    }
+    let response = if body.is_empty() {
+        request.send().await
+    } else {
+        request
+            .json(&Value::Object(body))
+            .map_err(|error| format!("请求体序列化失败: {error}"))?
+            .send()
+            .await
+    }
+    .map_err(|error| format!("{} {url} 失败: {error}", endpoint.method.as_str()))?;
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .map_err(|error| format!("读取响应失败: {error}"))?;
+    if !(200..300).contains(&status) {
+        return Err(format!("HTTP {status}: {text}"));
+    }
+    match serde_json::from_str::<Value>(&text) {
+        Ok(value) => {
+            serde_json::to_string_pretty(&value).map_err(|error| format!("格式化响应失败: {error}"))
+        }
+        Err(_) => Ok(text),
+    }
+}
+
+fn rest_input_value(value_type: &ValueType, value: &str) -> Result<Value, String> {
+    match value_type {
+        ValueType::Boolean => value
+            .parse::<bool>()
+            .map(Value::Bool)
+            .map_err(|error| format!("布尔值无效: {error}")),
+        ValueType::Integer | ValueType::TimestampMs => value
+            .parse::<i64>()
+            .map(Value::from)
+            .map_err(|error| format!("整数值无效: {error}")),
+        ValueType::Decimal => value
+            .parse::<f64>()
+            .map(Value::from)
+            .map_err(|error| format!("小数值无效: {error}")),
+        ValueType::Any
+        | ValueType::Object { .. }
+        | ValueType::List { .. }
+        | ValueType::Optional { .. } => {
+            serde_json::from_str(value).map_err(|error| format!("JSON 值无效: {error}"))
+        }
+        ValueType::Null => Ok(Value::Null),
+        ValueType::Text | ValueType::File => Ok(Value::String(value.to_owned())),
+    }
+}
+
+const fn endpoint_location_name(location: EndpointInputLocation) -> &'static str {
+    match location {
+        EndpointInputLocation::Path => "Path",
+        EndpointInputLocation::Query => "Query",
+        EndpointInputLocation::Header => "Header",
+        EndpointInputLocation::Body => "Body",
+    }
+}
+
+fn value_type_name(value_type: &ValueType) -> &'static str {
+    match value_type {
+        ValueType::Any => "任意结构",
+        ValueType::Null => "空值",
+        ValueType::Boolean => "布尔",
+        ValueType::Integer => "整数",
+        ValueType::Decimal => "小数",
+        ValueType::Text => "文本",
+        ValueType::TimestampMs => "时间戳",
+        ValueType::File => "文件",
+        ValueType::Object { .. } => "对象",
+        ValueType::List { .. } => "列表",
+        ValueType::Optional { .. } => "可选",
     }
 }
 

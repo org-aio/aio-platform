@@ -3,7 +3,10 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{EffectKind, MenuDefinition, PermissionDefinition, SymbolId, ValueType};
+use crate::{
+    EffectKind, EndpointInputLocation, MenuDefinition, PermissionDefinition, RestMethod, SymbolId,
+    ValueType,
+};
 
 /// bytecode 缓存目标，决定产物可在哪一侧执行。
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -52,6 +55,7 @@ pub struct CompiledPage {
     pub name: String,
     pub title: String,
     pub renderer: CompiledPageRenderer,
+    pub endpoints: Vec<CompiledPageEndpoint>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -62,12 +66,71 @@ pub enum CompiledPageRenderer {
         expected_path: String,
     },
     TreeTable {
+        provider_key: String,
         tree: CompiledTree,
         table: CompiledTable,
     },
     CrudTable {
+        provider_key: String,
         table: CompiledTable,
     },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CompiledPageEndpoint {
+    pub id: String,
+    pub name: String,
+    pub title: String,
+    pub method: RestMethod,
+    pub path: String,
+    pub inputs: Vec<CompiledEndpointInput>,
+    pub outputs: Vec<CompiledEndpointOutput>,
+    pub source: PageEndpointSource,
+    pub route_instruction: RudiRouteInstruction,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CompiledEndpointInput {
+    pub name: String,
+    pub title: String,
+    pub location: EndpointInputLocation,
+    pub value_type: ValueType,
+    pub required: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CompiledEndpointOutput {
+    pub name: String,
+    pub title: String,
+    pub value_type: ValueType,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PageEndpointSource {
+    BuiltIn,
+    Custom,
+}
+
+/// 编译产物通过 Rudi Provider key 绑定页面接口组件。
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RudiRouteInstruction {
+    pub provider_key: String,
+    pub operation: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CrudTablePageProvider;
+
+#[derive(Clone, Debug, Default)]
+pub struct TreeTablePageProvider;
+
+#[derive(Clone, Debug, Default)]
+pub struct RestFormPageProvider;
+
+#[must_use]
+pub fn page_provider_key<T: 'static>() -> String {
+    std::any::type_name::<T>().to_owned()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

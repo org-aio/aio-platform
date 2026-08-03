@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    BuiltInPage, CompiledPageRenderer, ConventionPageContext, ConventionPageIndex, MenuRowActions,
-    ProgramImage, SymbolId,
+    BuiltInPageContext, BuiltInPageIndex, CompiledPageRenderer, ConventionPageContext,
+    ConventionPageIndex, MenuRowActions, ProgramImage, SymbolId,
 };
 use crate::{PublishedProgram, WorkbenchBootstrap};
 use dioxus::prelude::*;
@@ -29,7 +29,7 @@ pub fn App() -> Element {
     let mut scene_creator_open = use_signal(|| false);
     let mut image_generation = use_signal(|| 0_u64);
     let mut bootstrap_generation = use_signal(|| 0_u64);
-    let convention_pages = use_hook(load_convention_page_index);
+    let runtime_pages = use_hook(load_runtime_page_indexes);
     let remote_bootstrap = use_resource(move || {
         let _generation = bootstrap_generation();
         async move { get_api::<WorkbenchBootstrap>("", "/api/bootstrap").await }
@@ -108,12 +108,12 @@ pub fn App() -> Element {
             }
         }
     } else {
-        render_runtime_content(&snapshot, &route, loaded_image, convention_pages.as_ref())
+        render_runtime_content(&snapshot, &route, loaded_image, runtime_pages.as_ref())
     };
 
     rsx! {
         document::Stylesheet { href: "/assets/dioxus-ui.css?v=91e8974" }
-        document::Stylesheet { href: "/assets/app.css?v=program-runtime-11" }
+        document::Stylesheet { href: "/assets/app.css?v=program-runtime-13" }
         div {
             class: "aio-shell-frame bg-background text-foreground",
             "data-sidebar-collapsed": sidebar_collapsed().to_string(),
@@ -208,18 +208,29 @@ pub fn App() -> Element {
     }
 }
 
-fn load_convention_page_index() -> Result<Arc<ConventionPageIndex>, String> {
+#[derive(Clone, Debug)]
+struct RuntimePageIndexes {
+    convention: ConventionPageIndex,
+    built_in: BuiltInPageIndex,
+}
+
+fn load_runtime_page_indexes() -> Result<Arc<RuntimePageIndexes>, String> {
     let mut context = rudi::Context::auto_register();
-    ConventionPageIndex::from_context(&mut context)
-        .map(Arc::new)
-        .map_err(|error| error.to_string())
+    let convention =
+        ConventionPageIndex::from_context(&mut context).map_err(|error| error.to_string())?;
+    let built_in =
+        BuiltInPageIndex::from_context(&mut context).map_err(|error| error.to_string())?;
+    Ok(Arc::new(RuntimePageIndexes {
+        convention,
+        built_in,
+    }))
 }
 
 fn render_runtime_content(
     bootstrap: &WorkbenchBootstrap,
     route: &str,
     image: Option<Result<Option<ProgramImage>, String>>,
-    convention_pages: Result<&Arc<ConventionPageIndex>, &String>,
+    runtime_pages: Result<&Arc<RuntimePageIndexes>, &String>,
 ) -> Element {
     let Some((program, compiled_route)) = bootstrap.route(route) else {
         return error_state("路由不存在", route);
@@ -240,11 +251,12 @@ fn render_runtime_content(
             module_name,
             expected_path,
         } => {
-            let index = match convention_pages {
-                Ok(index) => index,
+            let indexes = match runtime_pages {
+                Ok(indexes) => indexes,
                 Err(error) => return error_state("约定页面 Provider 初始化失败", error),
             };
-            index
+            indexes
+                .convention
                 .render(
                     &module_name,
                     ConventionPageContext {
@@ -259,17 +271,31 @@ fn render_runtime_content(
                     )
                 })
         }
-        CompiledPageRenderer::TreeTable { .. } | CompiledPageRenderer::CrudTable { .. } => {
+        CompiledPageRenderer::TreeTable { provider_key, .. }
+        | CompiledPageRenderer::CrudTable { provider_key, .. } => {
+            let indexes = match runtime_pages {
+                Ok(indexes) => indexes,
+                Err(error) => return error_state("内置页面 Provider 初始化失败", error),
+            };
             let row_actions =
                 row_actions_for_page(&program.menus, compiled_route.page_id).unwrap_or_default();
-            rsx! {
-                BuiltInPage {
-                    api_base_url,
-                    image,
-                    page,
-                    row_actions,
-                }
-            }
+            indexes
+                .built_in
+                .render(
+                    &provider_key,
+                    BuiltInPageContext {
+                        api_base_url,
+                        image,
+                        page,
+                        row_actions,
+                    },
+                )
+                .unwrap_or_else(|| {
+                    error_state(
+                        "内置页面 Provider 未注册",
+                        &format!("Rudi Provider: {provider_key}"),
+                    )
+                })
         }
     }
 }

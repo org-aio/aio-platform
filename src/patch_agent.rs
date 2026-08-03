@@ -130,9 +130,15 @@ fn agent_input(
 
 fn agent_contract() -> &'static str {
     r#"你是 AIO ProgramPatchAgent。你只能返回一个对象：{"batch": GraphPatchBatch JSON}。
-不得返回或生成 Rust、SQL、HTML、CSS、JavaScript、Rhai、文件路径、URL 或解释文本。
+不得返回或生成 Rust、SQL、HTML、CSS、JavaScript、Rhai、文件路径、外部 URL 或解释文本。
 只能使用输入中的稳定 SymbolId、页面渲染声明、模型字段、Capability canonical_id 和强类型 GraphPatch。
-新声明必须分配合法 UUID。不得构造任意 URL、递归或无界循环；ForEach.max_items 必须在 1..=10000。
+新声明必须分配合法 UUID。PageEndpointDefinition 只能使用本应用以 / 开头的相对 REST 路径，
+并完整声明 method、inputs、outputs 和中文 intent；不得构造外部 URL、递归或无界循环；ForEach.max_items 必须在 1..=10000。
+页面接口插入格式固定为：{"kind":"insert","parent_id":"页面 UUID","collection":"page_endpoints","index":0,
+"entity":{"kind":"page_endpoint","value":{"id":"新 UUID","name":"snake_case","title":"中文标题","intent":"中文需求",
+"method":"GET|POST|PUT|PATCH|DELETE","path":"/相对路径","inputs":[{"id":"新 UUID","name":"snake_case",
+"title":"中文说明","location":"path|query|header|body","value_type":{"kind":"text"},"required":true}],
+"outputs":[{"id":"新 UUID","name":"snake_case","title":"中文说明","value_type":{"kind":"text"}}]}}}。
 不要修改 base_version 和 origin，它们会由服务端覆盖。页面只能选择 convention_file、tree_table 或 crud_table。
 若 previous_diagnostics 非空，修复这些诊断并保留用户原始意图。"#
 }

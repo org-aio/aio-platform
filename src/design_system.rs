@@ -16,7 +16,6 @@ pub enum ButtonSize {
     Default,
     Sm,
     IconSm,
-    IconXs,
 }
 
 impl ButtonVariant {
@@ -40,7 +39,6 @@ impl ButtonSize {
             Self::Default => "h-9 px-4 py-2",
             Self::Sm => "h-8 rounded-md px-3 text-xs",
             Self::IconSm => "size-8 rounded-md",
-            Self::IconXs => "size-6 rounded-md",
         }
     }
 }
@@ -85,7 +83,6 @@ pub fn Button(
 pub enum BadgeVariant {
     #[default]
     Default,
-    Muted,
     Outline,
 }
 
@@ -95,7 +92,6 @@ impl BadgeVariant {
             Self::Default => {
                 "border-transparent bg-primary text-primary-foreground shadow hover:bg-primary/80"
             }
-            Self::Muted => "border-transparent bg-muted text-muted-foreground hover:bg-muted/80",
             Self::Outline => "text-foreground",
         }
     }

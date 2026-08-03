@@ -29,8 +29,10 @@ gloo-net = { version = "0.6.0", features = ["http", "json", "eventsource"] }
 gloo-timers = { version = "0.3.0", features = ["futures"] }
 icons.workspace = true
 js-sys = "0.3.82"
+urlencoding.workspace = true
 wasm-bindgen = "0.2.105"
-web-sys = { version = "0.3.82", features = ["Document", "Element", "HtmlElement", "Location", "UrlSearchParams", "Window", "History"] }
+wasm-bindgen-futures = "0.4.55"
+web-sys = { version = "0.3.82", features = ["Clipboard", "Document", "Element", "History", "HtmlElement", "Location", "Navigator", "UrlSearchParams", "Window"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 arc-swap.workspace = true

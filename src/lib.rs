@@ -27,8 +27,6 @@ mod design_system;
 mod ui;
 #[cfg(target_arch = "wasm32")]
 mod workbench;
-#[cfg(target_arch = "wasm32")]
-mod workflow;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod capability;

@@ -3,8 +3,8 @@ use serde_json::Value;
 
 use crate::{
     FieldDefinition, FunctionDefinition, FunctionNode, GraphEdge, MenuDefinition, ModelDefinition,
-    ModelIndexDefinition, PageDefinition, PermissionDefinition, PortDefinition, ProgramDefinition,
-    RouteDefinition, SymbolId,
+    ModelIndexDefinition, PageDefinition, PageEndpointDefinition, PermissionDefinition,
+    PortDefinition, ProgramDefinition, RouteDefinition, SymbolId,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -75,6 +75,7 @@ pub enum ChildCollection {
     Fields,
     ModelIndexes,
     Pages,
+    PageEndpoints,
     Functions,
     FunctionInputs,
     FunctionOutputs,
@@ -91,6 +92,7 @@ pub enum GraphEntity {
     Field(FieldDefinition),
     ModelIndex(ModelIndexDefinition),
     Page(PageDefinition),
+    PageEndpoint(PageEndpointDefinition),
     Function(FunctionDefinition),
     Port(PortDefinition),
     FunctionNode(FunctionNode),
@@ -107,6 +109,7 @@ impl GraphEntity {
             Self::Field(value) => value.id,
             Self::ModelIndex(value) => value.id,
             Self::Page(value) => value.id,
+            Self::PageEndpoint(value) => value.id,
             Self::Function(value) => value.id,
             Self::Port(value) => value.id,
             Self::FunctionNode(value) => value.id,
@@ -127,6 +130,7 @@ pub enum EditableProperty {
     MenuPermissions,
     MenuRowActions,
     PageRenderer,
+    PageEndpoint,
     DefinitionState,
     FieldRequired,
     FieldValueType,
@@ -257,6 +261,14 @@ impl ProgramDefinition {
             (ChildCollection::Pages, GraphEntity::Page(value)) if parent_id == self.id => {
                 insert_at(&mut self.pages, index, value)
             }
+            (ChildCollection::PageEndpoints, GraphEntity::PageEndpoint(value)) => {
+                let page = self
+                    .pages
+                    .iter_mut()
+                    .find(|page| page.id == parent_id)
+                    .ok_or(PatchError::ParentNotFound(parent_id))?;
+                insert_at(&mut page.endpoints, index, value)
+            }
             (ChildCollection::Functions, GraphEntity::Function(value)) if parent_id == self.id => {
                 insert_at(&mut self.functions, index, value)
             }
@@ -339,6 +351,11 @@ impl ProgramDefinition {
         if let Ok(value) = remove_by_id(&mut self.pages, target_id, |value| value.id) {
             return Ok(GraphEntity::Page(value));
         }
+        for page in &mut self.pages {
+            if let Ok(value) = remove_by_id(&mut page.endpoints, target_id, |value| value.id) {
+                return Ok(GraphEntity::PageEndpoint(value));
+            }
+        }
         if let Ok(value) = remove_by_id(&mut self.functions, target_id, |value| value.id) {
             return Ok(GraphEntity::Function(value));
         }
@@ -382,6 +399,14 @@ impl ProgramDefinition {
             }
             ChildCollection::Pages if parent_id == self.id => {
                 reorder_values(&mut self.pages, ordered_ids, |value| value.id)
+            }
+            ChildCollection::PageEndpoints => {
+                let page = self
+                    .pages
+                    .iter_mut()
+                    .find(|page| page.id == parent_id)
+                    .ok_or(PatchError::ParentNotFound(parent_id))?;
+                reorder_values(&mut page.endpoints, ordered_ids, |value| value.id)
             }
             ChildCollection::Functions if parent_id == self.id => {
                 reorder_values(&mut self.functions, ordered_ids, |value| value.id)
@@ -535,6 +560,23 @@ impl ProgramDefinition {
                     .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
                 Ok(())
             }
+            EditableProperty::PageEndpoint => {
+                let endpoint = self
+                    .pages
+                    .iter_mut()
+                    .flat_map(|page| &mut page.endpoints)
+                    .find(|endpoint| endpoint.id == target_id)
+                    .ok_or(PatchError::TargetNotFound(target_id))?;
+                let replacement = serde_json::from_value::<PageEndpointDefinition>(value.clone())
+                    .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
+                if replacement.id != target_id {
+                    return Err(PatchError::InvalidValue(
+                        "页面接口更新不能改变 SymbolId".to_owned(),
+                    ));
+                }
+                *endpoint = replacement;
+                Ok(())
+            }
             EditableProperty::FieldRequired => {
                 let field = self
                     .models
@@ -642,7 +684,14 @@ impl ProgramDefinition {
         {
             return true;
         }
-        self.models
+        self.pages.iter().any(|page| {
+            page.endpoints.iter().any(|endpoint| {
+                endpoint.id == target
+                    || endpoint.inputs.iter().any(|input| input.id == target)
+                    || endpoint.outputs.iter().any(|output| output.id == target)
+            })
+        }) || self
+            .models
             .iter()
             .flat_map(|model| &model.fields)
             .any(|field| field.id == target)
@@ -679,6 +728,9 @@ impl ProgramDefinition {
         for page in &mut self.pages {
             if page.id == target {
                 return Some((&mut page.name, Some(&mut page.title)));
+            }
+            if let Some(endpoint) = page.endpoints.iter_mut().find(|value| value.id == target) {
+                return Some((&mut endpoint.name, Some(&mut endpoint.title)));
             }
         }
         for function in &mut self.functions {
@@ -733,6 +785,12 @@ impl ProgramDefinition {
         if let Some(page) = self.pages.iter_mut().find(|value| value.id == target) {
             page.state = state;
             return Ok(());
+        }
+        for page in &mut self.pages {
+            if let Some(endpoint) = page.endpoints.iter_mut().find(|value| value.id == target) {
+                endpoint.state = state;
+                return Ok(());
+            }
         }
         if let Some(function) = self.functions.iter_mut().find(|value| value.id == target) {
             function.state = state;
@@ -854,7 +912,10 @@ fn take_menu_from(values: &mut Vec<MenuDefinition>, target: SymbolId) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MenuActionAccess, MenuRowActions, PageRendererDefinition, TableDefinition};
+    use crate::{
+        MenuActionAccess, MenuRowActions, PageEndpointDefinition, PageRendererDefinition,
+        RestMethod, TableDefinition,
+    };
 
     #[test]
     fn page_renderer_and_menu_actions_use_the_same_patch_protocol() -> anyhow::Result<()> {
@@ -868,6 +929,7 @@ mod tests {
             title: "资产".to_owned(),
             state: crate::DefinitionState::Known,
             renderer: PageRendererDefinition::ConventionFile,
+            endpoints: Vec::new(),
         });
         program.menus.push(MenuDefinition {
             id: menu_id,
@@ -929,6 +991,49 @@ mod tests {
         });
         assert!(result.is_err());
         assert_eq!(program, original);
+    }
+
+    #[test]
+    fn page_endpoint_uses_page_owned_patch_collection() -> anyhow::Result<()> {
+        let mut program = ProgramDefinition::empty("inventory", "资产");
+        let page_id = SymbolId::new();
+        let endpoint_id = SymbolId::new();
+        program.pages.push(PageDefinition {
+            id: page_id,
+            name: "assets".to_owned(),
+            title: "资产".to_owned(),
+            state: crate::DefinitionState::Known,
+            renderer: PageRendererDefinition::ConventionFile,
+            endpoints: Vec::new(),
+        });
+        let endpoint = PageEndpointDefinition {
+            id: endpoint_id,
+            name: "archive".to_owned(),
+            title: "归档资产".to_owned(),
+            state: crate::DefinitionState::Known,
+            intent: "归档指定资产".to_owned(),
+            method: RestMethod::Post,
+            path: "/api/assets/archive".to_owned(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+        };
+        program.apply_patch(&GraphPatch::Insert {
+            parent_id: page_id,
+            collection: ChildCollection::PageEndpoints,
+            index: 0,
+            entity: GraphEntity::PageEndpoint(endpoint.clone()),
+        })?;
+        assert_eq!(program.pages[0].endpoints, vec![endpoint.clone()]);
+
+        let mut updated = endpoint;
+        updated.method = RestMethod::Delete;
+        program.apply_patch(&GraphPatch::SetProperty {
+            target_id: endpoint_id,
+            property: EditableProperty::PageEndpoint,
+            value: serde_json::to_value(updated.clone())?,
+        })?;
+        assert_eq!(program.pages[0].endpoints, vec![updated]);
+        Ok(())
     }
 
     #[test]

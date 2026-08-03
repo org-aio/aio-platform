@@ -6,7 +6,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 /// 当前数据库程序协议版本。
-pub const PROGRAM_SCHEMA_VERSION: u32 = 6;
+pub const PROGRAM_SCHEMA_VERSION: u32 = 7;
 
 /// 创建时分配且永不因改名、改路由而变化的符号身份。
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -284,6 +284,77 @@ pub struct PageDefinition {
     #[serde(default)]
     pub state: DefinitionState,
     pub renderer: PageRendererDefinition,
+    /// 页面声明的自定义 REST 接口；内置布局接口由编译器推导。
+    #[serde(default)]
+    pub endpoints: Vec<PageEndpointDefinition>,
+}
+
+/// 页面作为前端消费者所需的自定义 REST 接口。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PageEndpointDefinition {
+    pub id: SymbolId,
+    pub name: String,
+    pub title: String,
+    #[serde(default)]
+    pub state: DefinitionState,
+    pub intent: String,
+    pub method: RestMethod,
+    pub path: String,
+    #[serde(default)]
+    pub inputs: Vec<EndpointInputDefinition>,
+    #[serde(default)]
+    pub outputs: Vec<EndpointOutputDefinition>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum RestMethod {
+    Get,
+    Post,
+    Put,
+    Patch,
+    Delete,
+}
+
+impl RestMethod {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Get => "GET",
+            Self::Post => "POST",
+            Self::Put => "PUT",
+            Self::Patch => "PATCH",
+            Self::Delete => "DELETE",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct EndpointInputDefinition {
+    pub id: SymbolId,
+    pub name: String,
+    pub title: String,
+    pub location: EndpointInputLocation,
+    pub value_type: ValueType,
+    #[serde(default)]
+    pub required: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EndpointInputLocation {
+    Path,
+    Query,
+    Header,
+    Body,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct EndpointOutputDefinition {
+    pub id: SymbolId,
+    pub name: String,
+    pub title: String,
+    pub value_type: ValueType,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

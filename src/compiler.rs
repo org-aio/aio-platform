@@ -5,12 +5,15 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    BytecodeInstruction, BytecodeSegment, CapabilityCatalog, CompiledExpressionIndex,
-    CompiledModel, CompiledPage, CompiledPageRenderer, CompiledRoute, CompiledTable, CompiledTree,
-    DefinitionState, EffectKind, FieldDefinition, FunctionDefinition, FunctionNode,
-    FunctionNodeKind, GraphEdge, ImageTarget, Instruction, ModelDefinition, PROGRAM_SCHEMA_VERSION,
-    PageDefinition, PageRendererDefinition, ProgramDefinition, ProgramImage, SymbolId,
-    TableDefinition, validate_route_path,
+    BytecodeInstruction, BytecodeSegment, CapabilityCatalog, CompiledEndpointInput,
+    CompiledEndpointOutput, CompiledExpressionIndex, CompiledModel, CompiledPage,
+    CompiledPageEndpoint, CompiledPageRenderer, CompiledRoute, CompiledTable, CompiledTree,
+    CrudTablePageProvider, DefinitionState, EffectKind, EndpointInputLocation, FieldDefinition,
+    FunctionDefinition, FunctionNode, FunctionNodeKind, GraphEdge, ImageTarget, Instruction,
+    ModelDefinition, PROGRAM_SCHEMA_VERSION, PageDefinition, PageEndpointSource,
+    PageRendererDefinition, ProgramDefinition, ProgramImage, RestFormPageProvider, RestMethod,
+    RudiRouteInstruction, SymbolId, TableDefinition, TreeTablePageProvider, page_provider_key,
+    validate_route_path,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -220,6 +223,9 @@ impl<'a> ProgramCompiler<'a> {
                 validate_field_options(field, diagnostics);
             }
         }
+        for page in &definition.pages {
+            validate_page_endpoints(page, diagnostics);
+        }
     }
 
     fn resolve_symbols(
@@ -246,6 +252,16 @@ impl<'a> ProgramCompiler<'a> {
         for page in &definition.pages {
             insert_symbol(&mut symbols, page.id, diagnostics);
             check_state(page.id, &page.state, diagnostics);
+            for endpoint in &page.endpoints {
+                insert_symbol(&mut symbols, endpoint.id, diagnostics);
+                check_state(endpoint.id, &endpoint.state, diagnostics);
+                for input in &endpoint.inputs {
+                    insert_symbol(&mut symbols, input.id, diagnostics);
+                }
+                for output in &endpoint.outputs {
+                    insert_symbol(&mut symbols, output.id, diagnostics);
+                }
+            }
         }
         for function in &definition.functions {
             insert_symbol(&mut symbols, function.id, diagnostics);
@@ -667,6 +683,88 @@ fn validate_field_options(field: &FieldDefinition, diagnostics: &mut Vec<Diagnos
     }
 }
 
+fn validate_page_endpoints(page: &PageDefinition, diagnostics: &mut Vec<Diagnostic>) {
+    let mut endpoint_names = BTreeSet::new();
+    let mut endpoint_routes = BTreeSet::new();
+    for endpoint in &page.endpoints {
+        if !is_data_identifier(&endpoint.name) {
+            diagnostics.push(diagnostic(
+                "PAGE_ENDPOINT_IDENTIFIER_INVALID",
+                CompilerStage::Schema,
+                format!("页面接口标识必须是 snake_case: {}", endpoint.name),
+                Some(endpoint.id),
+            ));
+        }
+        if !endpoint_names.insert(endpoint.name.as_str()) {
+            diagnostics.push(diagnostic(
+                "PAGE_ENDPOINT_IDENTIFIER_DUPLICATE",
+                CompilerStage::Schema,
+                format!("页面接口标识重复: {}.{}", page.name, endpoint.name),
+                Some(endpoint.id),
+            ));
+        }
+        if let Err(error) = validate_route_path(&endpoint.path) {
+            diagnostics.push(diagnostic(
+                "PAGE_ENDPOINT_PATH_INVALID",
+                CompilerStage::Schema,
+                error.to_string(),
+                Some(endpoint.id),
+            ));
+        }
+        let route_key = (endpoint.method, endpoint.path.as_str());
+        if !endpoint_routes.insert(route_key) {
+            diagnostics.push(diagnostic(
+                "PAGE_ENDPOINT_ROUTE_DUPLICATE",
+                CompilerStage::Schema,
+                format!(
+                    "页面接口路由重复: {} {}",
+                    endpoint.method.as_str(),
+                    endpoint.path
+                ),
+                Some(endpoint.id),
+            ));
+        }
+        let mut input_names = BTreeSet::new();
+        for input in &endpoint.inputs {
+            if !is_data_identifier(&input.name) || !input_names.insert(input.name.as_str()) {
+                diagnostics.push(diagnostic(
+                    "PAGE_ENDPOINT_INPUT_INVALID",
+                    CompilerStage::Schema,
+                    format!(
+                        "接口 {} 的入参标识无效或重复: {}",
+                        endpoint.name, input.name
+                    ),
+                    Some(input.id),
+                ));
+            }
+            if input.location == EndpointInputLocation::Path
+                && !endpoint.path.contains(&format!("{{{}}}", input.name))
+            {
+                diagnostics.push(diagnostic(
+                    "PAGE_ENDPOINT_PATH_INPUT_MISSING",
+                    CompilerStage::Schema,
+                    format!("接口路径缺少参数 {{{}}}: {}", input.name, endpoint.path),
+                    Some(input.id),
+                ));
+            }
+        }
+        let mut output_names = BTreeSet::new();
+        for output in &endpoint.outputs {
+            if !is_data_identifier(&output.name) || !output_names.insert(output.name.as_str()) {
+                diagnostics.push(diagnostic(
+                    "PAGE_ENDPOINT_OUTPUT_INVALID",
+                    CompilerStage::Schema,
+                    format!(
+                        "接口 {} 的出参标识无效或重复: {}",
+                        endpoint.name, output.name
+                    ),
+                    Some(output.id),
+                ));
+            }
+        }
+    }
+}
+
 #[must_use]
 pub fn compile_page(definition: &ProgramDefinition, page: &PageDefinition) -> CompiledPage {
     let renderer = match &page.renderer {
@@ -675,6 +773,7 @@ pub fn compile_page(definition: &ProgramDefinition, page: &PageDefinition) -> Co
             expected_path: convention_page_path(&definition.name, &page.name),
         },
         PageRendererDefinition::TreeTable { tree, table } => CompiledPageRenderer::TreeTable {
+            provider_key: page_provider_key::<TreeTablePageProvider>(),
             tree: CompiledTree {
                 model_id: tree.model_id.unwrap_or(page.id),
                 label_field_id: tree.label_field_id.unwrap_or(page.id),
@@ -684,15 +783,229 @@ pub fn compile_page(definition: &ProgramDefinition, page: &PageDefinition) -> Co
             table: compile_table(table, page.id),
         },
         PageRendererDefinition::CrudTable { table } => CompiledPageRenderer::CrudTable {
+            provider_key: page_provider_key::<CrudTablePageProvider>(),
             table: compile_table(table, page.id),
         },
     };
+    let endpoints = compile_page_endpoints(definition, page);
     CompiledPage {
         id: page.id,
         name: page.name.clone(),
         title: page.title.clone(),
         renderer,
+        endpoints,
     }
+}
+
+fn compile_page_endpoints(
+    definition: &ProgramDefinition,
+    page: &PageDefinition,
+) -> Vec<CompiledPageEndpoint> {
+    let mut endpoints = built_in_page_endpoints(definition, page);
+    let provider_key = page_provider_key::<RestFormPageProvider>();
+    endpoints.extend(
+        page.endpoints
+            .iter()
+            .filter(|endpoint| endpoint.state.is_known())
+            .map(|endpoint| CompiledPageEndpoint {
+                id: endpoint.id.to_string(),
+                name: endpoint.name.clone(),
+                title: endpoint.title.clone(),
+                method: endpoint.method,
+                path: endpoint.path.clone(),
+                inputs: endpoint
+                    .inputs
+                    .iter()
+                    .map(|input| CompiledEndpointInput {
+                        name: input.name.clone(),
+                        title: input.title.clone(),
+                        location: input.location,
+                        value_type: input.value_type.clone(),
+                        required: input.required,
+                    })
+                    .collect(),
+                outputs: endpoint
+                    .outputs
+                    .iter()
+                    .map(|output| CompiledEndpointOutput {
+                        name: output.name.clone(),
+                        title: output.title.clone(),
+                        value_type: output.value_type.clone(),
+                    })
+                    .collect(),
+                source: PageEndpointSource::Custom,
+                route_instruction: RudiRouteInstruction {
+                    provider_key: provider_key.clone(),
+                    operation: endpoint.name.clone(),
+                },
+            }),
+    );
+    endpoints
+}
+
+fn built_in_page_endpoints(
+    definition: &ProgramDefinition,
+    page: &PageDefinition,
+) -> Vec<CompiledPageEndpoint> {
+    let (table, provider_key) = match &page.renderer {
+        PageRendererDefinition::CrudTable { table } => {
+            (table, page_provider_key::<CrudTablePageProvider>())
+        }
+        PageRendererDefinition::TreeTable { table, .. } => {
+            (table, page_provider_key::<TreeTablePageProvider>())
+        }
+        PageRendererDefinition::ConventionFile => return Vec::new(),
+    };
+    let Some(model_id) = table.model_id else {
+        return Vec::new();
+    };
+    let Some(model) = definition.models.iter().find(|model| model.id == model_id) else {
+        return Vec::new();
+    };
+    let records_path = format!("/api/runtime/models/{model_id}/records");
+    let body_inputs = model
+        .fields
+        .iter()
+        .filter(|field| field.options.form_visible)
+        .map(|field| CompiledEndpointInput {
+            name: field.name.clone(),
+            title: field.title.clone(),
+            location: EndpointInputLocation::Body,
+            value_type: field.value_type.clone(),
+            required: field.required,
+        })
+        .collect::<Vec<_>>();
+    let model_outputs = model
+        .fields
+        .iter()
+        .filter(|field| field.options.detail_visible)
+        .map(|field| CompiledEndpointOutput {
+            name: field.name.clone(),
+            title: field.title.clone(),
+            value_type: field.value_type.clone(),
+        })
+        .collect::<Vec<_>>();
+    let page_inputs = vec![
+        CompiledEndpointInput {
+            name: "o".to_owned(),
+            title: "偏移量".to_owned(),
+            location: EndpointInputLocation::Query,
+            value_type: crate::ValueType::Integer,
+            required: false,
+        },
+        CompiledEndpointInput {
+            name: "s".to_owned(),
+            title: "每页条数".to_owned(),
+            location: EndpointInputLocation::Query,
+            value_type: crate::ValueType::Integer,
+            required: false,
+        },
+    ];
+    let record_id = CompiledEndpointInput {
+        name: "record_id".to_owned(),
+        title: format!("{} ID", model.title),
+        location: EndpointInputLocation::Path,
+        value_type: crate::ValueType::Text,
+        required: true,
+    };
+    let build = |name: &str,
+                 title: String,
+                 method: RestMethod,
+                 path: String,
+                 inputs: Vec<CompiledEndpointInput>,
+                 outputs: Vec<CompiledEndpointOutput>| CompiledPageEndpoint {
+        id: format!("builtin:{}:{name}", page.id),
+        name: name.to_owned(),
+        title,
+        method,
+        path,
+        inputs,
+        outputs,
+        source: PageEndpointSource::BuiltIn,
+        route_instruction: RudiRouteInstruction {
+            provider_key: provider_key.clone(),
+            operation: name.to_owned(),
+        },
+    };
+    vec![
+        build(
+            "query",
+            format!("查询{}", model.title),
+            RestMethod::Get,
+            records_path.clone(),
+            page_inputs,
+            vec![
+                CompiledEndpointOutput {
+                    name: "d".to_owned(),
+                    title: "记录列表".to_owned(),
+                    value_type: crate::ValueType::List {
+                        item: Box::new(crate::ValueType::Object { model_id }),
+                    },
+                },
+                CompiledEndpointOutput {
+                    name: "t".to_owned(),
+                    title: "总数".to_owned(),
+                    value_type: crate::ValueType::Integer,
+                },
+            ],
+        ),
+        build(
+            "create",
+            format!("新增{}", model.title),
+            RestMethod::Post,
+            records_path.clone(),
+            body_inputs.clone(),
+            model_outputs.clone(),
+        ),
+        build(
+            "update",
+            format!("修改{}", model.title),
+            RestMethod::Patch,
+            format!("{records_path}/{{record_id}}"),
+            std::iter::once(record_id.clone())
+                .chain(body_inputs)
+                .collect(),
+            model_outputs,
+        ),
+        build(
+            "delete",
+            format!("删除{}", model.title),
+            RestMethod::Delete,
+            format!("{records_path}/{{record_id}}"),
+            vec![record_id],
+            Vec::new(),
+        ),
+        build(
+            "import",
+            format!("导入{}", model.title),
+            RestMethod::Post,
+            format!("{records_path}/import"),
+            vec![CompiledEndpointInput {
+                name: "file".to_owned(),
+                title: "导入文件".to_owned(),
+                location: EndpointInputLocation::Body,
+                value_type: crate::ValueType::File,
+                required: true,
+            }],
+            vec![CompiledEndpointOutput {
+                name: "created".to_owned(),
+                title: "导入数量".to_owned(),
+                value_type: crate::ValueType::Integer,
+            }],
+        ),
+        build(
+            "export",
+            format!("导出{}", model.title),
+            RestMethod::Get,
+            format!("{records_path}/export"),
+            Vec::new(),
+            vec![CompiledEndpointOutput {
+                name: "file".to_owned(),
+                title: "导出文件".to_owned(),
+                value_type: crate::ValueType::File,
+            }],
+        ),
+    ]
 }
 
 fn compile_table(table: &TableDefinition, fallback: SymbolId) -> CompiledTable {
@@ -866,8 +1179,34 @@ fn validate_page_references(
             );
         }
     }
+    for endpoint in &page.endpoints {
+        for value_type in endpoint
+            .inputs
+            .iter()
+            .map(|input| &input.value_type)
+            .chain(endpoint.outputs.iter().map(|output| &output.value_type))
+        {
+            collect_value_type_references(value_type, &mut references);
+        }
+    }
     for reference in references {
         check_reference(reference, symbols, diagnostics, page.id);
+    }
+}
+
+fn collect_value_type_references(value_type: &crate::ValueType, references: &mut Vec<SymbolId>) {
+    match value_type {
+        crate::ValueType::Object { model_id } => references.push(*model_id),
+        crate::ValueType::List { item } => collect_value_type_references(item, references),
+        crate::ValueType::Optional { value } => collect_value_type_references(value, references),
+        crate::ValueType::Any
+        | crate::ValueType::Null
+        | crate::ValueType::Boolean
+        | crate::ValueType::Integer
+        | crate::ValueType::Decimal
+        | crate::ValueType::Text
+        | crate::ValueType::TimestampMs
+        | crate::ValueType::File => {}
     }
 }
 
@@ -1343,9 +1682,10 @@ pub fn content_hash(definition: &ProgramDefinition) -> Result<String> {
 mod tests {
     use super::*;
     use crate::{
-        DefinitionState, FieldDefinition, MenuActionAccess, MenuDefinition, MenuRowActions,
-        ModelDefinition, PageRendererDefinition, RouteDefinition, TableDefinition, TreeDefinition,
-        ValueType,
+        DefinitionState, EndpointInputDefinition, EndpointInputLocation, EndpointOutputDefinition,
+        FieldDefinition, MenuActionAccess, MenuDefinition, MenuRowActions, ModelDefinition,
+        PageEndpointDefinition, PageRendererDefinition, RestMethod, RouteDefinition,
+        TableDefinition, TreeDefinition, ValueType,
     };
 
     fn model(name: &str, title: &str) -> ModelDefinition {
@@ -1398,6 +1738,7 @@ mod tests {
                     page_size: 20,
                 },
             },
+            endpoints: Vec::new(),
         });
         program.routes.push(RouteDefinition {
             id: SymbolId::new(),
@@ -1440,7 +1781,61 @@ mod tests {
             page.renderer,
             CompiledPageRenderer::CrudTable { .. }
         ));
+        assert_eq!(page.endpoints.len(), 6);
+        assert_eq!(page.endpoints[0].name, "query");
+        assert_eq!(page.endpoints[4].name, "import");
+        assert_eq!(
+            page.endpoints[0].route_instruction.provider_key,
+            page_provider_key::<CrudTablePageProvider>()
+        );
         assert_eq!(image.models[&program.models[0].id].title, "资产");
+        Ok(())
+    }
+
+    #[test]
+    fn compiles_custom_rest_endpoint_with_rudi_form_instruction() -> anyhow::Result<()> {
+        let mut program = crud_program();
+        let endpoint_id = SymbolId::new();
+        program.pages[0].endpoints.push(PageEndpointDefinition {
+            id: endpoint_id,
+            name: "batch_disable".to_owned(),
+            title: "批量停用资产".to_owned(),
+            state: DefinitionState::Known,
+            intent: "按分类批量停用资产".to_owned(),
+            method: RestMethod::Post,
+            path: "/api/assets/{category_id}/batch-disable".to_owned(),
+            inputs: vec![EndpointInputDefinition {
+                id: SymbolId::new(),
+                name: "category_id".to_owned(),
+                title: "分类 ID".to_owned(),
+                location: EndpointInputLocation::Path,
+                value_type: ValueType::Text,
+                required: true,
+            }],
+            outputs: vec![EndpointOutputDefinition {
+                id: SymbolId::new(),
+                name: "updated".to_owned(),
+                title: "停用数量".to_owned(),
+                value_type: ValueType::Integer,
+            }],
+        });
+
+        let image = ProgramCompiler::new("test", &CapabilityCatalog::default()).compile(
+            &program,
+            "revision-1",
+            ImageTarget::Universal,
+        )?;
+        let endpoint = image.pages[&program.pages[0].id]
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.id == endpoint_id.to_string())
+            .ok_or_else(|| anyhow::anyhow!("自定义接口未进入编译产物"))?;
+        assert_eq!(endpoint.method, RestMethod::Post);
+        assert_eq!(endpoint.source, PageEndpointSource::Custom);
+        assert_eq!(
+            endpoint.route_instruction.provider_key,
+            page_provider_key::<RestFormPageProvider>()
+        );
         Ok(())
     }
 
