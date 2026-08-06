@@ -16,9 +16,12 @@ use dioxus::prelude::*;
 use serde_json::Value;
 
 use crate::browser_http::{get_api, patch_api, post_api};
-use crate::design_system::{
-    Badge, BadgeVariant, Button, ButtonSize, ButtonVariant, Table, TableBody, TableCell, TableHead,
-    TableHeader, TableRow,
+use crate::components::{
+    badge::{Badge, BadgeVariant},
+    button::{Button, ButtonSize, ButtonVariant},
+    checkbox::{Checkbox, checkbox_is_checked, checkbox_state},
+    input::Input,
+    textarea::Textarea,
 };
 use gloo_timers::future::TimeoutFuture;
 
@@ -61,14 +64,14 @@ pub fn StudioPage(api_base_url: String, mut selected_scene: Signal<Option<Symbol
         section { class: "aio-studio-shell min-h-[calc(100vh-8rem)] border bg-background",
             header { class: "aio-studio-shell__toolbar border-b px-3",
                 nav { class: "aio-studio-view-tabs", aria_label: "Studio 管理视图",
-                    button {
+                    Button {
                         class: if studio_tab() == StudioTab::Menus { "is-active" } else { "" },
                         r#type: "button",
                         aria_label: "菜单管理",
                         onclick: move |_| studio_tab.set(StudioTab::Menus),
                         "菜单管理"
                     }
-                    button {
+                    Button {
                         class: if studio_tab() == StudioTab::Permissions { "is-active" } else { "" },
                         r#type: "button",
                         aria_label: "权限定义",
@@ -269,21 +272,21 @@ pub(crate) fn AdminMenuCreator(
                 creator_open.set(false);
             },
                 label { r#for: "admin-page-name", "页面标识" }
-                input {
+                Input {
                     id: "admin-page-name",
                     name: "name",
                     class: "aio-input",
                     placeholder: "例如 order-list"
                 }
                 label { r#for: "admin-page-title", "页面标题" }
-                input {
+                Input {
                     id: "admin-page-title",
                     name: "title",
                     class: "aio-input",
                     placeholder: "例如 订单管理"
                 }
                 label { r#for: "admin-page-path", "路由" }
-                input {
+                Input {
                     id: "admin-page-path",
                     name: "path",
                     class: "aio-input",
@@ -294,9 +297,9 @@ pub(crate) fn AdminMenuCreator(
                     p { class: "text-xs text-destructive", "{message}" }
                 }
                 footer {
-                    Button { button_type: "submit", "添加" }
+                    Button { r#type: "submit", "添加" }
                     Button {
-                        button_type: "button",
+                        r#type: "button",
                         variant: ButtonVariant::Ghost,
                         onclick: move |_| creator_open.set(false),
                         "取消"
@@ -383,14 +386,14 @@ pub(crate) fn AdminSceneCreator(
                 creator_open.set(false);
             },
                 label { r#for: "admin-scene-name", "场景标识" }
-                input {
+                Input {
                     id: "admin-scene-name",
                     name: "name",
                     class: "aio-input",
                     placeholder: "例如 operations"
                 }
                 label { r#for: "admin-scene-title", "场景标题" }
-                input {
+                Input {
                     id: "admin-scene-title",
                     name: "title",
                     class: "aio-input",
@@ -400,9 +403,9 @@ pub(crate) fn AdminSceneCreator(
                     p { class: "text-xs text-destructive", "{message}" }
                 }
                 footer {
-                    Button { button_type: "submit", "添加" }
+                    Button { r#type: "submit", "添加" }
                     Button {
-                        button_type: "button",
+                        r#type: "button",
                         variant: ButtonVariant::Ghost,
                         onclick: move |_| creator_open.set(false),
                         "取消"
@@ -617,14 +620,14 @@ fn PermissionDefinitionRow(
                 submit_context.status,
             );
         },
-            input {
+            Input {
                 class: "aio-input",
                 name: "name",
                 aria_label: "权限标识 {permission_name}",
                 value: permission.name,
                 placeholder: "例如 asset:read",
             }
-            input {
+            Input {
                 class: "aio-input",
                 name: "title",
                 aria_label: "权限名称 {permission_name}",
@@ -637,7 +640,7 @@ fn PermissionDefinitionRow(
             }
             div { class: "aio-permission-table__actions", role: "cell",
                 Button {
-                    button_type: "submit",
+                    r#type: "submit",
                     size: ButtonSize::IconSm,
                     variant: ButtonVariant::Ghost,
                     title: "保存权限 {permission_name}",
@@ -707,13 +710,13 @@ fn NewPermissionDefinitionRow(context: PermissionTableContext) -> Element {
                 submit_context.status,
             );
         },
-            input {
+            Input {
                 class: "aio-input",
                 name: "name",
                 aria_label: "新权限标识",
                 placeholder: "例如 asset:read",
             }
-            input {
+            Input {
                 class: "aio-input",
                 name: "title",
                 aria_label: "新权限名称",
@@ -723,7 +726,7 @@ fn NewPermissionDefinitionRow(context: PermissionTableContext) -> Element {
             span { class: "aio-permission-table__usage", role: "cell", "新定义" }
             div { class: "aio-permission-table__actions", role: "cell",
                 Button {
-                    button_type: "submit",
+                    r#type: "submit",
                     size: ButtonSize::Sm,
                     title: "添加权限定义",
                     aria_label: "添加权限定义",
@@ -740,10 +743,9 @@ fn permission_effect_fields(selected: &[EffectKind]) -> Element {
         div { class: "aio-permission-table__effects", role: "cell",
             for effect in EffectKind::all() {
                 label {
-                    input {
-                        r#type: "checkbox",
+                    Checkbox {
                         name: "{permission_effect_input_name(effect)}",
-                        checked: selected.contains(&effect),
+                        default_checked: checkbox_state(selected.contains(&effect)),
                         aria_label: "允许 {effect.label()}",
                     }
                     span { "{effect.label()}" }
@@ -925,7 +927,7 @@ fn menu_table_rows(
                     if child_count == 0 {
                         span { class: "aio-menu-table__tree-spacer" }
                     } else {
-                        button {
+                        Button {
                             class: if is_collapsed { "aio-menu-table__tree-toggle" } else { "aio-menu-table__tree-toggle aio-menu-table__tree-toggle--open" },
                             r#type: "button",
                             title: if is_collapsed { "展开菜单" } else { "收起菜单" },
@@ -946,18 +948,17 @@ fn menu_table_rows(
                 code { class: "aio-menu-table__code", role: "cell", "{route_path}" }
                 span { class: "aio-menu-table__page", role: "cell", "{page_name}" }
                 label { class: "aio-menu-switch", title: if menu.enabled { "已启用" } else { "已停用" },
-                    input {
-                        r#type: "checkbox",
-                        checked: menu.enabled,
+                    Checkbox {
+                        checked: Some(checkbox_state(menu.enabled)),
                         aria_label: if menu.enabled { "停用菜单" } else { "启用菜单" },
-                        onchange: move |event| submit_patches(
+                        on_checked_change: move |checked| submit_patches(
                             enable_context.api_base_url.clone(),
                             enable_context.program_id.clone(),
                             enable_context.version,
                             vec![GraphPatch::SetProperty {
                                 target_id: menu_id,
                                 property: crate::EditableProperty::MenuEnabled,
-                                value: serde_json::Value::Bool(event.checked()),
+                                value: serde_json::Value::Bool(checkbox_is_checked(checked)),
                             }],
                             enable_context.generation,
                             enable_context.status,
@@ -966,12 +967,12 @@ fn menu_table_rows(
                     span { aria_hidden: "true" }
                 }
                 div { class: "aio-menu-table__row-actions", role: "cell",
-                    button {
+                    Button {
                         r#type: "button",
                         onclick: move |_| edit_context.editing_menu.set(Some(menu_id)),
                         "修改"
                     }
-                    button {
+                    Button {
                         r#type: "button",
                         onclick: move |_| {
                             add_context.collapsed_menus.with_mut(|items| {
@@ -1004,7 +1005,7 @@ fn menu_table_rows(
                         },
                         "新增"
                     }
-                    button {
+                    Button {
                         class: "aio-menu-table__delete",
                         r#type: "button",
                         title: "删除{delete_kind}",
@@ -1318,19 +1319,19 @@ fn menu_edit_row(
         },
             div { class: "aio-menu-table__editor-field",
                 label { r#for: "menu-name-{menu_id}", "标识" }
-                input { id: "menu-name-{menu_id}", name: "name", class: "aio-input", value: menu.name }
+                Input { id: "menu-name-{menu_id}", name: "name", class: "aio-input", value: menu.name }
             }
             div { class: "aio-menu-table__editor-field",
                 label { r#for: "menu-title-{menu_id}", "菜单名称" }
-                input { id: "menu-title-{menu_id}", name: "title", class: "aio-input", value: menu.title }
+                Input { id: "menu-title-{menu_id}", name: "title", class: "aio-input", value: menu.title }
             }
             div { class: "aio-menu-table__editor-field",
                 label { r#for: "menu-icon-{menu_id}", "图标" }
-                input { id: "menu-icon-{menu_id}", name: "icon", class: "aio-input", value: menu.icon.unwrap_or_default(), placeholder: "图标名" }
+                Input { id: "menu-icon-{menu_id}", name: "icon", class: "aio-input", value: menu.icon.unwrap_or_default(), placeholder: "图标名" }
             }
             div { class: "aio-menu-table__editor-field aio-menu-table__editor-field--sort",
                 label { r#for: "menu-sort-{menu_id}", "排序" }
-                input { id: "menu-sort-{menu_id}", name: "sort", class: "aio-input", r#type: "number", min: "1", max: "{sibling_count}", value: "{position + 1}" }
+                Input { id: "menu-sort-{menu_id}", name: "sort", class: "aio-input", r#type: "number", min: "1", max: "{sibling_count}", value: "{position + 1}" }
             }
             div { class: "aio-menu-table__editor-field",
                 label { r#for: "menu-permission-{menu_id}", "权限标识" }
@@ -1359,7 +1360,7 @@ fn menu_edit_row(
             {menu_action_select("删除权限", "delete_access", &delete_access, &context.permissions)}
             div { class: "aio-menu-table__editor-field aio-menu-table__editor-field--path",
                 label { r#for: "menu-path-{menu_id}", "路由" }
-                input {
+                Input {
                     id: "menu-path-{menu_id}",
                     name: "path",
                     class: "aio-input",
@@ -1369,8 +1370,8 @@ fn menu_edit_row(
                 }
             }
             div { class: "aio-menu-table__editor-actions",
-                Button { button_type: "submit", "保存" }
-                button {
+                Button { r#type: "submit", "保存" }
+                Button {
                     r#type: "button",
                     onclick: move |_| cancel_editing.set(None),
                     "取消"
@@ -1584,7 +1585,7 @@ fn PageRendererSettings(
                                 name: "renderer_kind",
                                 class: "aio-input",
                                 value: "{renderer_kind}",
-                                onchange: move |event| renderer_kind.set(event.value()),
+                                onchange: move |event: FormEvent| renderer_kind.set(event.value()),
                                 option { value: "convention_file", "约定文件渲染" }
                                 option { value: "tree_table", "内置 · 左树右表" }
                                 option { value: "crud_table", "内置 · 增删改查表格" }
@@ -1594,7 +1595,7 @@ fn PageRendererSettings(
                                     code { "{expected_path}" }
                                     p { "文件名由程序标识和页面标识自动推导，代码中无需再声明组件。" }
                                     Button {
-                                        button_type: "button",
+                                        r#type: "button",
                                         variant: ButtonVariant::Outline,
                                         onclick: move |_| generate_convention_file(
                                             generate_api.clone(),
@@ -1611,14 +1612,14 @@ fn PageRendererSettings(
                                     name: "table_model_id",
                                     class: "aio-input",
                                     value: "{table_model}",
-                                    onchange: move |event| table_model.set(event.value()),
+                                    onchange: move |event: FormEvent| table_model.set(event.value()),
                                     option { value: "", "选择模型" }
                                     for model in &models {
                                         option { value: "{model.id}", "{model.title} · {model.name}" }
                                     }
                                 }
                                 label { r#for: "page-size", "每页条数" }
-                                input {
+                                Input {
                                     id: "page-size",
                                     name: "page_size",
                                     class: "aio-input",
@@ -1635,7 +1636,7 @@ fn PageRendererSettings(
                                     name: "tree_model_id",
                                     class: "aio-input",
                                     value: "{tree_model}",
-                                    onchange: move |event| tree_model.set(event.value()),
+                                    onchange: move |event: FormEvent| tree_model.set(event.value()),
                                     option { value: "", "选择树模型" }
                                     for model in &models {
                                         option { value: "{model.id}", "{model.title} · {model.name}" }
@@ -1671,9 +1672,9 @@ fn PageRendererSettings(
                     }
                 }
                 footer {
-                    Button { button_type: "submit", "保存设置" }
+                    Button { r#type: "submit", "保存设置" }
                     Button {
-                        button_type: "button",
+                        r#type: "button",
                         variant: ButtonVariant::Ghost,
                         onclick: move |_| settings_open.set(false),
                         "取消"
@@ -1909,13 +1910,13 @@ fn endpoint_panel(
                         status,
                     );
                 },
-                    textarea {
+                    Textarea {
                         name: "endpoint_intent",
                         class: "aio-input",
                         rows: "3",
                         placeholder: "例如：按部门批量停用用户，返回成功数量和失败用户 ID"
                     }
-                    Button { button_type: "submit",
+                    Button { r#type: "submit",
                         icons::Sparkles { class: "size-4" }
                         "生成 REST 元数据"
                     }
@@ -1929,29 +1930,31 @@ fn endpoint_panel(
                 if compiled_endpoints.is_empty() {
                     {empty_panel("暂无接口定义")}
                 } else {
-                    Table { class: Some("aio-endpoint-table".to_owned()),
-                        TableHeader {
-                            TableRow {
-                                TableHead { "来源" }
-                                TableHead { "方法" }
-                                TableHead { "REST 路径" }
-                                TableHead { "显示名称" }
-                                TableHead { "入参" }
-                                TableHead { "响应" }
-                                TableHead { class: Some("text-right".to_owned()), "操作" }
+                    div { class: "relative w-full overflow-x-auto",
+                        table { class: "aio-endpoint-table",
+                            thead {
+                                tr {
+                                    th { "来源" }
+                                    th { "方法" }
+                                    th { "REST 路径" }
+                                    th { "显示名称" }
+                                    th { "入参" }
+                                    th { "响应" }
+                                    th { class: "text-right", "操作" }
+                                }
                             }
-                        }
-                        TableBody {
-                            for endpoint in &compiled_endpoints {
-                                {endpoint_table_row(
-                                    endpoint.clone(),
-                                    delete_api.clone(),
-                                    delete_program.clone(),
-                                    version,
-                                    generation,
-                                    status,
-                                    selected_endpoint,
-                                )}
+                            tbody {
+                                for endpoint in &compiled_endpoints {
+                                    {endpoint_table_row(
+                                        endpoint.clone(),
+                                        delete_api.clone(),
+                                        delete_program.clone(),
+                                        version,
+                                        generation,
+                                        status,
+                                        selected_endpoint,
+                                    )}
+                                }
                             }
                         }
                     }
@@ -1995,20 +1998,20 @@ fn endpoint_table_row(
 ) -> Element {
     let endpoint_id = SymbolId::parse(&endpoint.id).ok();
     rsx! {
-        TableRow { key: "{endpoint.id}",
-            TableCell {
+        tr { key: "{endpoint.id}",
+            td {
                 if endpoint.source == PageEndpointSource::BuiltIn {
                     Badge { variant: BadgeVariant::Outline, "内置" }
                 } else {
                     Badge { variant: BadgeVariant::Outline, "自定义" }
                 }
             }
-            TableCell { span { class: method_class(endpoint.method), "{endpoint.method.as_str()}" } }
-            TableCell { code { class: "aio-endpoint-table__path", "{endpoint.path}" } }
-            TableCell { strong { "{endpoint.title}" } }
-            TableCell { "{endpoint.inputs.len()}" }
-            TableCell { "{endpoint.outputs.len()}" }
-            TableCell { class: Some("text-right".to_owned()),
+            td { span { class: method_class(endpoint.method), "{endpoint.method.as_str()}" } }
+            td { code { class: "aio-endpoint-table__path", "{endpoint.path}" } }
+            td { strong { "{endpoint.title}" } }
+            td { "{endpoint.inputs.len()}" }
+            td { "{endpoint.outputs.len()}" }
+            td { class: "text-right",
                 if let Some(endpoint_id) = endpoint_id {
                     Button {
                         size: ButtonSize::IconSm,
@@ -2110,7 +2113,7 @@ fn endpoint_editor(
                     select { name: "method", class: "aio-input aio-endpoint-method",
                         {rest_method_options(endpoint.method)}
                     }
-                    input {
+                    Input {
                         name: "path",
                         class: "aio-input aio-endpoint-path",
                         value: "{endpoint.path}",
@@ -2120,14 +2123,14 @@ fn endpoint_editor(
             }
             div { class: "aio-endpoint-editor__identity",
                 label { "显示名称（可选）"
-                    input { name: "title", class: "aio-input", value: "{endpoint.title}" }
+                    Input { name: "title", class: "aio-input", value: "{endpoint.title}" }
                 }
             }
             section { class: "aio-endpoint-parameters",
                 header {
                     strong { "入参" }
                     Button {
-                        button_type: "button",
+                        r#type: "button",
                         size: ButtonSize::Sm,
                         variant: ButtonVariant::Outline,
                         onclick: move |_| {
@@ -2157,28 +2160,30 @@ fn endpoint_editor(
                 if endpoint.inputs.is_empty() {
                     div { class: "aio-endpoint-parameters__empty", "无入参" }
                 } else {
-                    Table { class: Some("aio-endpoint-parameter-table".to_owned()),
-                        TableHeader {
-                            TableRow {
-                                TableHead { "名称" }
-                                TableHead { "说明" }
-                                TableHead { "位置" }
-                                TableHead { "类型" }
-                                TableHead { "必填" }
-                                TableHead {}
+                    div { class: "relative w-full overflow-x-auto",
+                        table { class: "aio-endpoint-parameter-table",
+                            thead {
+                                tr {
+                                    th { "名称" }
+                                    th { "说明" }
+                                    th { "位置" }
+                                    th { "类型" }
+                                    th { "必填" }
+                                    th {}
+                                }
                             }
-                        }
-                        TableBody {
-                            for input in &endpoint.inputs {
-                                {endpoint_input_row(
-                                    input.clone(),
-                                    endpoint.clone(),
-                                    save_api.clone(),
-                                    save_program.clone(),
-                                    version,
-                                    generation,
-                                    status,
-                                )}
+                            tbody {
+                                for input in &endpoint.inputs {
+                                    {endpoint_input_row(
+                                        input.clone(),
+                                        endpoint.clone(),
+                                        save_api.clone(),
+                                        save_program.clone(),
+                                        version,
+                                        generation,
+                                        status,
+                                    )}
+                                }
                             }
                         }
                     }
@@ -2188,7 +2193,7 @@ fn endpoint_editor(
                 header {
                     strong { "响应 data" }
                     Button {
-                        button_type: "button",
+                        r#type: "button",
                         size: ButtonSize::Sm,
                         variant: ButtonVariant::Outline,
                         onclick: move |_| {
@@ -2216,33 +2221,35 @@ fn endpoint_editor(
                 if endpoint.outputs.is_empty() {
                     div { class: "aio-endpoint-parameters__empty", "无响应字段" }
                 } else {
-                    Table { class: Some("aio-endpoint-output-grid".to_owned()),
-                        TableHeader {
-                            TableRow {
-                                TableHead { "名称" }
-                                TableHead { "说明" }
-                                TableHead { "类型" }
-                                TableHead {}
+                    div { class: "relative w-full overflow-x-auto",
+                        table { class: "aio-endpoint-output-grid",
+                            thead {
+                                tr {
+                                    th { "名称" }
+                                    th { "说明" }
+                                    th { "类型" }
+                                    th {}
+                                }
                             }
-                        }
-                        TableBody {
-                            for output in &endpoint.outputs {
-                                {endpoint_output_row(
-                                    output.clone(),
-                                    endpoint.clone(),
-                                    save_api.clone(),
-                                    save_program.clone(),
-                                    version,
-                                    generation,
-                                    status,
-                                )}
+                            tbody {
+                                for output in &endpoint.outputs {
+                                    {endpoint_output_row(
+                                        output.clone(),
+                                        endpoint.clone(),
+                                        save_api.clone(),
+                                        save_program.clone(),
+                                        version,
+                                        generation,
+                                        status,
+                                    )}
+                                }
                             }
                         }
                     }
                 }
             }
             footer {
-                Button { button_type: "submit",
+                Button { r#type: "submit",
                     icons::Save { class: "size-4" }
                     "保存接口"
                 }
@@ -2267,26 +2274,25 @@ fn endpoint_input_row(
     let required_field = endpoint_input_field_name(input.id, "required");
     let input_id = input.id;
     rsx! {
-        TableRow { class: Some("aio-endpoint-parameter-table__row".to_owned()),
-            TableCell { input { name: name_field, class: "aio-input", value: "{input.name}" } }
-            TableCell { input { name: title_field, class: "aio-input", value: "{input.title}" } }
-            TableCell { select { name: location_field, class: "aio-input",
+        tr { class: "aio-endpoint-parameter-table__row",
+            td { Input { name: name_field, class: "aio-input", value: "{input.name}" } }
+            td { Input { name: title_field, class: "aio-input", value: "{input.title}" } }
+            td { select { name: location_field, class: "aio-input",
                     {endpoint_location_options(input.location)}
                 }
             }
-            TableCell { {endpoint_value_type_select(type_field, &input.value_type)} }
-            TableCell { class: Some("aio-endpoint-parameter-table__required".to_owned()),
-                input {
+            td { {endpoint_value_type_select(type_field, &input.value_type)} }
+            td { class: "aio-endpoint-parameter-table__required",
+                Checkbox {
                     name: required_field,
-                    r#type: "checkbox",
                     value: "true",
-                    checked: input.required,
+                    default_checked: checkbox_state(input.required),
                     aria_label: "必填"
                 }
             }
-            TableCell { class: Some("aio-endpoint-parameter-table__action".to_owned()),
+            td { class: "aio-endpoint-parameter-table__action",
                 Button {
-                    button_type: "button",
+                    r#type: "button",
                     size: ButtonSize::IconSm,
                     variant: ButtonVariant::Ghost,
                     title: "删除入参",
@@ -2324,13 +2330,13 @@ fn endpoint_output_row(
     let type_field = endpoint_output_field_name(output.id, "type");
     let output_id = output.id;
     rsx! {
-        TableRow { class: Some("aio-endpoint-output-grid__row".to_owned()),
-            TableCell { input { name: name_field, class: "aio-input", value: "{output.name}" } }
-            TableCell { input { name: title_field, class: "aio-input", value: "{output.title}" } }
-            TableCell { {endpoint_value_type_select(type_field, &output.value_type)} }
-            TableCell { class: Some("aio-endpoint-parameter-table__action".to_owned()),
+        tr { class: "aio-endpoint-output-grid__row",
+            td { Input { name: name_field, class: "aio-input", value: "{output.name}" } }
+            td { Input { name: title_field, class: "aio-input", value: "{output.title}" } }
+            td { {endpoint_value_type_select(type_field, &output.value_type)} }
+            td { class: "aio-endpoint-parameter-table__action",
                 Button {
-                    button_type: "button",
+                    r#type: "button",
                     size: ButtonSize::IconSm,
                     variant: ButtonVariant::Ghost,
                     title: "删除出参",
@@ -2637,7 +2643,7 @@ fn models_panel(
                     div { class: "aio-model-workspace__directory-heading", "模型目录" }
                     div { class: "aio-model-workspace__directory-list",
                         for model in &draft.definition.models {
-                            button {
+                            Button {
                                 r#type: "button",
                                 class: if Some(model.id) == current_model_id {
                                     "aio-model-workspace__model aio-model-workspace__model--active"
@@ -2766,20 +2772,20 @@ fn ModelGrid(
             div { class: "aio-model-grid__identity",
                 label {
                     span { "模型标识" }
-                    input {
+                    Input {
                         class: "aio-input",
                         aria_label: "模型标识",
                         value: model_name(),
-                        oninput: move |event| model_name.set(event.value()),
+                        oninput: move |event: FormEvent| model_name.set(event.value()),
                     }
                 }
                 label {
                     span { "模型标题" }
-                    input {
+                    Input {
                         class: "aio-input",
                         aria_label: "模型标题",
                         value: model_title(),
-                        oninput: move |event| model_title.set(event.value()),
+                        oninput: move |event: FormEvent| model_title.set(event.value()),
                     }
                 }
                 div { class: "aio-model-grid__metrics",
@@ -3108,12 +3114,11 @@ fn ModelAuditEditor(
             div { class: "aio-model-audit-editor__roles",
                 for kind in crate::AuditFieldKind::all() {
                     label {
-                        input {
-                            r#type: "checkbox",
-                            checked: selected().contains(&kind),
+                        Checkbox {
+                            checked: Some(checkbox_state(selected().contains(&kind))),
                             aria_label: "启用审计字段 {kind.label()}",
-                            onchange: move |event| selected.with_mut(|kinds| {
-                                if event.checked() {
+                            on_checked_change: move |checked| selected.with_mut(|kinds| {
+                                if checkbox_is_checked(checked) {
                                     kinds.insert(kind);
                                 } else {
                                     kinds.remove(&kind);
@@ -3127,7 +3132,7 @@ fn ModelAuditEditor(
             }
             footer {
                 Button {
-                    button_type: "submit",
+                    r#type: "submit",
                     size: ButtonSize::Sm,
                     variant: ButtonVariant::Outline,
                     title: "保存审计字段",
@@ -3206,20 +3211,20 @@ fn FieldGridRow(
     let validation = use_signal(move || initial_validation);
     rsx! {
         tr { "data-field-id": "{field_id}",
-            td { input {
+            td { Input {
                 aria_label: "字段标识 {field.name}",
                 value: name(),
-                oninput: move |event| name.set(event.value()),
+                oninput: move |event: FormEvent| name.set(event.value()),
             } }
-            td { input {
+            td { Input {
                 aria_label: "字段标题 {field.name}",
                 value: title(),
-                oninput: move |event| title.set(event.value()),
+                oninput: move |event: FormEvent| title.set(event.value()),
             } }
             td { select {
                 aria_label: "字段类型 {field.name}",
                 disabled: field.relation.is_some(),
-                onchange: move |event| value_type.set(event.value()),
+                onchange: move |event: FormEvent| value_type.set(event.value()),
                 {editable_value_type_options(&current_value_type, value_type())}
             } }
             td { class: "aio-edit-grid__actions",
@@ -3232,28 +3237,27 @@ fn FieldGridRow(
                     icons::Link { class: "size-4" }
                 }
             }
-            td { class: "aio-edit-grid__toggle", input {
+            td { class: "aio-edit-grid__toggle", Checkbox {
                 aria_label: "字段必填 {field.name}",
-                r#type: "checkbox",
-                checked: required(),
-                onchange: move |event| required.set(event.checked()),
+                checked: Some(checkbox_state(required())),
+                on_checked_change: move |checked| required.set(checkbox_is_checked(checked)),
             } }
             FieldOptionCells { options, field_label: field.title.clone() }
-            td { input {
+            td { Input {
                 aria_label: "默认值 {field.name}",
                 placeholder: "JSON 或文本",
                 value: default_value(),
-                oninput: move |event| default_value.set(event.value()),
+                oninput: move |event: FormEvent| default_value.set(event.value()),
             } }
-            td { input {
+            td { Input {
                 aria_label: "占位提示 {field.name}",
                 value: placeholder(),
-                oninput: move |event| placeholder.set(event.value()),
+                oninput: move |event: FormEvent| placeholder.set(event.value()),
             } }
-            td { input {
+            td { Input {
                 aria_label: "帮助文本 {field.name}",
                 value: help_text(),
-                oninput: move |event| help_text.set(event.value()),
+                oninput: move |event: FormEvent| help_text.set(event.value()),
             } }
             FieldValidationCell { validation, field_label: field.title.clone() }
             td { class: "aio-edit-grid__actions",
@@ -3403,18 +3407,18 @@ fn QueryBuilder(
             },
             label {
                 "查询标识"
-                input {
+                Input {
                     class: "aio-input",
                     value: name(),
-                    oninput: move |event| name.set(event.value()),
+                    oninput: move |event: FormEvent| name.set(event.value()),
                 }
             }
             label {
                 "查询标题"
-                input {
+                Input {
                     class: "aio-input",
                     value: title(),
-                    oninput: move |event| title.set(event.value()),
+                    oninput: move |event: FormEvent| title.set(event.value()),
                 }
             }
             label {
@@ -3422,7 +3426,7 @@ fn QueryBuilder(
                 select {
                     class: "aio-input",
                     value: conjunction(),
-                    onchange: move |event| conjunction.set(event.value()),
+                    onchange: move |event: FormEvent| conjunction.set(event.value()),
                     option { value: "all", "全部满足" }
                     option { value: "any", "任一满足" }
                 }
@@ -3432,7 +3436,7 @@ fn QueryBuilder(
                 select {
                     class: "aio-input",
                     value: field_id(),
-                    onchange: move |event| field_id.set(event.value()),
+                    onchange: move |event: FormEvent| field_id.set(event.value()),
                     option { value: "", "不添加本模型条件" }
                     for field in &fields {
                         option { value: "{field.id}", "{field.title}" }
@@ -3444,17 +3448,17 @@ fn QueryBuilder(
                 select {
                     class: "aio-input",
                     value: field_operator(),
-                    onchange: move |event| field_operator.set(event.value()),
+                    onchange: move |event: FormEvent| field_operator.set(event.value()),
                     {query_operator_options(&field_operator())}
                 }
             }
             label {
                 "本模型参数"
-                input {
+                Input {
                     class: "aio-input",
                     placeholder: "例如 department_name",
                     value: field_parameter(),
-                    oninput: move |event| field_parameter.set(event.value()),
+                    oninput: move |event: FormEvent| field_parameter.set(event.value()),
                 }
             }
             label {
@@ -3462,7 +3466,7 @@ fn QueryBuilder(
                 select {
                     class: "aio-input",
                     value: relation_field_id(),
-                    onchange: move |event| relation_field_id.set(event.value()),
+                    onchange: move |event: FormEvent| relation_field_id.set(event.value()),
                     option { value: "", "不添加关联条件" }
                     for field in fields.iter().filter(|field| field.relation.is_some()) {
                         option { value: "{field.id}", "{field.title}" }
@@ -3474,7 +3478,7 @@ fn QueryBuilder(
                 select {
                     class: "aio-input",
                     value: relation_target_field_id(),
-                    onchange: move |event| relation_target_field_id.set(event.value()),
+                    onchange: move |event: FormEvent| relation_target_field_id.set(event.value()),
                     option { value: "", "选择字段" }
                     for field in &target_fields {
                         option { value: "{field.id}", "{field.title}" }
@@ -3486,22 +3490,22 @@ fn QueryBuilder(
                 select {
                     class: "aio-input",
                     value: relation_operator(),
-                    onchange: move |event| relation_operator.set(event.value()),
+                    onchange: move |event: FormEvent| relation_operator.set(event.value()),
                     {query_operator_options(&relation_operator())}
                 }
             }
             label {
                 "关联参数"
-                input {
+                Input {
                     class: "aio-input",
                     placeholder: "例如 user_name",
                     value: relation_parameter(),
-                    oninput: move |event| relation_parameter.set(event.value()),
+                    oninput: move |event: FormEvent| relation_parameter.set(event.value()),
                 }
             }
             footer {
                 Button {
-                    button_type: "submit",
+                    r#type: "submit",
                     title: "添加命名查询",
                     aria_label: "添加命名查询",
                     icons::Plus { class: "size-4" }
@@ -3580,7 +3584,7 @@ fn ModelValidationBuilder(
                 select {
                     class: "aio-input",
                     value: kind(),
-                    onchange: move |event| kind.set(event.value()),
+                    onchange: move |event: FormEvent| kind.set(event.value()),
                     option { value: "required_when_present", "条件必填" }
                     option { value: "fields_required_together", "联合必填" }
                     option { value: "at_least_one_required", "至少一个必填" }
@@ -3591,7 +3595,7 @@ fn ModelValidationBuilder(
                 select {
                     class: "aio-input",
                     value: field_id(),
-                    onchange: move |event| field_id.set(event.value()),
+                    onchange: move |event: FormEvent| field_id.set(event.value()),
                     option { value: "", "选择字段" }
                     for field in &fields {
                         option { value: "{field.id}", "{field.title}" }
@@ -3603,7 +3607,7 @@ fn ModelValidationBuilder(
                 select {
                     class: "aio-input",
                     value: other_field_id(),
-                    onchange: move |event| other_field_id.set(event.value()),
+                    onchange: move |event: FormEvent| other_field_id.set(event.value()),
                     option { value: "", "选择字段" }
                     for field in &fields {
                         option { value: "{field.id}", "{field.title}" }
@@ -3612,15 +3616,15 @@ fn ModelValidationBuilder(
             }
             label {
                 "失败提示"
-                input {
+                Input {
                     class: "aio-input",
                     value: message(),
-                    oninput: move |event| message.set(event.value()),
+                    oninput: move |event: FormEvent| message.set(event.value()),
                 }
             }
             footer {
                 Button {
-                    button_type: "submit",
+                    r#type: "submit",
                     disabled: !has_fields,
                     title: "添加模型校验",
                     aria_label: "添加模型校验",
@@ -3850,7 +3854,7 @@ fn RelationEditor(
                     select {
                         class: "aio-input",
                         value: kind(),
-                        onchange: move |event| kind.set(event.value()),
+                        onchange: move |event: FormEvent| kind.set(event.value()),
                         option { value: "one_to_one", "OneToOne" }
                         option { value: "many_to_one", "ManyToOne" }
                         option { value: "one_to_many", "OneToMany" }
@@ -3862,7 +3866,7 @@ fn RelationEditor(
                     select {
                         class: "aio-input",
                         value: target_model(),
-                        onchange: move |event| target_model.set(event.value()),
+                        onchange: move |event: FormEvent| target_model.set(event.value()),
                         option { value: "", "选择模型" }
                         for model in &all_models {
                             option { value: "{model.id}", "{model.title} · {model.name}" }
@@ -3874,7 +3878,7 @@ fn RelationEditor(
                     select {
                         class: "aio-input",
                         value: target_field(),
-                        onchange: move |event| target_field.set(event.value()),
+                        onchange: move |event: FormEvent| target_field.set(event.value()),
                         option { value: "", "选择字段" }
                         for target in &target_fields {
                             option { value: "{target.id}", "{target.title} · {target.name}" }
@@ -3931,7 +3935,7 @@ fn RelationEditor(
                         }
                     }
                     Button {
-                        button_type: "submit",
+                        r#type: "submit",
                         icons::Save { class: "size-4" }
                         "保存关联"
                     }
@@ -3962,46 +3966,45 @@ fn NewFieldGridRow(
     let validation = use_signal(crate::FieldValidation::default);
     rsx! {
         tr { class: "aio-edit-grid__new-row",
-            td { input {
+            td { Input {
                 aria_label: "新字段标识",
                 placeholder: "新增字段标识",
                 value: name(),
-                oninput: move |event| name.set(event.value()),
+                oninput: move |event: FormEvent| name.set(event.value()),
             } }
-            td { input {
+            td { Input {
                 aria_label: "新字段标题",
                 placeholder: "新增字段标题",
                 value: title(),
-                oninput: move |event| title.set(event.value()),
+                oninput: move |event: FormEvent| title.set(event.value()),
             } }
             td { select {
                 aria_label: "新字段类型",
-                onchange: move |event| value_type.set(event.value()),
+                onchange: move |event: FormEvent| value_type.set(event.value()),
                 {editable_value_type_options(&ValueType::Text, value_type())}
             } }
             td { class: "aio-edit-grid__actions" }
-            td { class: "aio-edit-grid__toggle", input {
+            td { class: "aio-edit-grid__toggle", Checkbox {
                 aria_label: "新字段必填",
-                r#type: "checkbox",
-                checked: required(),
-                onchange: move |event| required.set(event.checked()),
+                checked: Some(checkbox_state(required())),
+                on_checked_change: move |checked| required.set(checkbox_is_checked(checked)),
             } }
             FieldOptionCells { options, field_label: "新字段".to_owned() }
-            td { input {
+            td { Input {
                 aria_label: "新字段默认值",
                 placeholder: "JSON 或文本",
                 value: default_value(),
-                oninput: move |event| default_value.set(event.value()),
+                oninput: move |event: FormEvent| default_value.set(event.value()),
             } }
-            td { input {
+            td { Input {
                 aria_label: "新字段占位提示",
                 value: placeholder(),
-                oninput: move |event| placeholder.set(event.value()),
+                oninput: move |event: FormEvent| placeholder.set(event.value()),
             } }
-            td { input {
+            td { Input {
                 aria_label: "新字段帮助文本",
                 value: help_text(),
-                oninput: move |event| help_text.set(event.value()),
+                oninput: move |event: FormEvent| help_text.set(event.value()),
             } }
             FieldValidationCell { validation, field_label: "新字段".to_owned() }
             td { class: "aio-edit-grid__actions",
@@ -4069,74 +4072,73 @@ fn FieldValidationCell(validation: Signal<crate::FieldValidation>, field_label: 
             div { class: "aio-edit-grid__validation-grid",
                 label { title: "最小文本长度",
                     span { "最短" }
-                    input {
+                    Input {
                         r#type: "number",
                         min: "0",
                         aria_label: "最小文本长度 {field_label}",
                         value: optional_u32(validation().min_length),
-                        oninput: move |event| min_length.with_mut(|value| value.min_length = parse_optional_u32(&event.value())),
+                        oninput: move |event: FormEvent| min_length.with_mut(|value| value.min_length = parse_optional_u32(&event.value())),
                     }
                 }
                 label { title: "最大文本长度",
                     span { "最长" }
-                    input {
+                    Input {
                         r#type: "number",
                         min: "0",
                         aria_label: "最大文本长度 {field_label}",
                         value: optional_u32(validation().max_length),
-                        oninput: move |event| max_length.with_mut(|value| value.max_length = parse_optional_u32(&event.value())),
+                        oninput: move |event: FormEvent| max_length.with_mut(|value| value.max_length = parse_optional_u32(&event.value())),
                     }
                 }
                 label { title: "最小数值",
                     span { "最小" }
-                    input {
+                    Input {
                         aria_label: "最小数值 {field_label}",
                         value: optional_f64(validation().minimum),
-                        oninput: move |event| minimum.with_mut(|value| value.minimum = parse_optional_f64(&event.value())),
+                        oninput: move |event: FormEvent| minimum.with_mut(|value| value.minimum = parse_optional_f64(&event.value())),
                     }
                 }
                 label { title: "最大数值",
                     span { "最大" }
-                    input {
+                    Input {
                         aria_label: "最大数值 {field_label}",
                         value: optional_f64(validation().maximum),
-                        oninput: move |event| maximum.with_mut(|value| value.maximum = parse_optional_f64(&event.value())),
+                        oninput: move |event: FormEvent| maximum.with_mut(|value| value.maximum = parse_optional_f64(&event.value())),
                     }
                 }
                 label { title: "列表最少项数",
                     span { "至少" }
-                    input {
+                    Input {
                         r#type: "number",
                         min: "0",
                         aria_label: "列表最少项数 {field_label}",
                         value: optional_u32(validation().min_items),
-                        oninput: move |event| min_items.with_mut(|value| value.min_items = parse_optional_u32(&event.value())),
+                        oninput: move |event: FormEvent| min_items.with_mut(|value| value.min_items = parse_optional_u32(&event.value())),
                     }
                 }
                 label { title: "列表最多项数",
                     span { "至多" }
-                    input {
+                    Input {
                         r#type: "number",
                         min: "0",
                         aria_label: "列表最多项数 {field_label}",
                         value: optional_u32(validation().max_items),
-                        oninput: move |event| max_items.with_mut(|value| value.max_items = parse_optional_u32(&event.value())),
+                        oninput: move |event: FormEvent| max_items.with_mut(|value| value.max_items = parse_optional_u32(&event.value())),
                     }
                 }
                 label { class: "aio-edit-grid__validation-pattern", title: "正则表达式",
                     span { "正则" }
-                    input {
+                    Input {
                         aria_label: "正则表达式 {field_label}",
                         value: validation().pattern.clone().unwrap_or_default(),
-                        oninput: move |event| pattern.with_mut(|value| value.pattern = non_empty_text(&event.value())),
+                        oninput: move |event: FormEvent| pattern.with_mut(|value| value.pattern = non_empty_text(&event.value())),
                     }
                 }
                 label { class: "aio-edit-grid__validation-unique",
-                    input {
-                        r#type: "checkbox",
+                    Checkbox {
                         aria_label: "列表元素不能重复 {field_label}",
-                        checked: validation().unique_items,
-                        onchange: move |event| unique_items.with_mut(|value| value.unique_items = event.checked()),
+                        checked: Some(checkbox_state(validation().unique_items)),
+                        on_checked_change: move |checked| unique_items.with_mut(|value| value.unique_items = checkbox_is_checked(checked)),
                     }
                     span { "列表元素唯一" }
                 }
@@ -4174,55 +4176,55 @@ fn FieldOptionCells(options: Signal<crate::FieldOptions>, field_label: String) -
     let mut export_options = options;
     let mut ai_options = options;
     rsx! {
-        td { class: "aio-edit-grid__toggle", input {
-            aria_label: "列表显示 {field_label}", r#type: "checkbox",
-            checked: options().list_visible,
-            onchange: move |event| list_options.with_mut(|value| value.list_visible = event.checked()),
+        td { class: "aio-edit-grid__toggle", Checkbox {
+            aria_label: "列表显示 {field_label}",
+            checked: Some(checkbox_state(options().list_visible)),
+            on_checked_change: move |checked| list_options.with_mut(|value| value.list_visible = checkbox_is_checked(checked)),
         } }
-        td { class: "aio-edit-grid__toggle", input {
-            aria_label: "详情显示 {field_label}", r#type: "checkbox",
-            checked: options().detail_visible,
-            onchange: move |event| detail_options.with_mut(|value| value.detail_visible = event.checked()),
+        td { class: "aio-edit-grid__toggle", Checkbox {
+            aria_label: "详情显示 {field_label}",
+            checked: Some(checkbox_state(options().detail_visible)),
+            on_checked_change: move |checked| detail_options.with_mut(|value| value.detail_visible = checkbox_is_checked(checked)),
         } }
-        td { class: "aio-edit-grid__toggle", input {
-            aria_label: "表单显示 {field_label}", r#type: "checkbox",
-            checked: options().form_visible,
-            onchange: move |event| form_options.with_mut(|value| value.form_visible = event.checked()),
+        td { class: "aio-edit-grid__toggle", Checkbox {
+            aria_label: "表单显示 {field_label}",
+            checked: Some(checkbox_state(options().form_visible)),
+            on_checked_change: move |checked| form_options.with_mut(|value| value.form_visible = checkbox_is_checked(checked)),
         } }
-        td { class: "aio-edit-grid__toggle", input {
-            aria_label: "表单可编辑 {field_label}", r#type: "checkbox",
-            checked: options().form_editable,
-            onchange: move |event| edit_options.with_mut(|value| value.form_editable = event.checked()),
+        td { class: "aio-edit-grid__toggle", Checkbox {
+            aria_label: "表单可编辑 {field_label}",
+            checked: Some(checkbox_state(options().form_editable)),
+            on_checked_change: move |checked| edit_options.with_mut(|value| value.form_editable = checkbox_is_checked(checked)),
         } }
-        td { class: "aio-edit-grid__toggle", input {
-            aria_label: "允许查询 {field_label}", r#type: "checkbox",
-            checked: options().filterable,
-            onchange: move |event| filter_options.with_mut(|value| value.filterable = event.checked()),
+        td { class: "aio-edit-grid__toggle", Checkbox {
+            aria_label: "允许查询 {field_label}",
+            checked: Some(checkbox_state(options().filterable)),
+            on_checked_change: move |checked| filter_options.with_mut(|value| value.filterable = checkbox_is_checked(checked)),
         } }
-        td { class: "aio-edit-grid__toggle", input {
-            aria_label: "允许排序 {field_label}", r#type: "checkbox",
-            checked: options().sortable,
-            onchange: move |event| sort_options.with_mut(|value| value.sortable = event.checked()),
+        td { class: "aio-edit-grid__toggle", Checkbox {
+            aria_label: "允许排序 {field_label}",
+            checked: Some(checkbox_state(options().sortable)),
+            on_checked_change: move |checked| sort_options.with_mut(|value| value.sortable = checkbox_is_checked(checked)),
         } }
-        td { class: "aio-edit-grid__toggle", input {
-            aria_label: "唯一约束 {field_label}", r#type: "checkbox",
-            checked: options().unique,
-            onchange: move |event| unique_options.with_mut(|value| value.unique = event.checked()),
+        td { class: "aio-edit-grid__toggle", Checkbox {
+            aria_label: "唯一约束 {field_label}",
+            checked: Some(checkbox_state(options().unique)),
+            on_checked_change: move |checked| unique_options.with_mut(|value| value.unique = checkbox_is_checked(checked)),
         } }
-        td { class: "aio-edit-grid__toggle", input {
-            aria_label: "Excel 导入 {field_label}", r#type: "checkbox",
-            checked: options().excel_import,
-            onchange: move |event| import_options.with_mut(|value| value.excel_import = event.checked()),
+        td { class: "aio-edit-grid__toggle", Checkbox {
+            aria_label: "Excel 导入 {field_label}",
+            checked: Some(checkbox_state(options().excel_import)),
+            on_checked_change: move |checked| import_options.with_mut(|value| value.excel_import = checkbox_is_checked(checked)),
         } }
-        td { class: "aio-edit-grid__toggle", input {
-            aria_label: "Excel 导出 {field_label}", r#type: "checkbox",
-            checked: options().excel_export,
-            onchange: move |event| export_options.with_mut(|value| value.excel_export = event.checked()),
+        td { class: "aio-edit-grid__toggle", Checkbox {
+            aria_label: "Excel 导出 {field_label}",
+            checked: Some(checkbox_state(options().excel_export)),
+            on_checked_change: move |checked| export_options.with_mut(|value| value.excel_export = checkbox_is_checked(checked)),
         } }
-        td { class: "aio-edit-grid__toggle", input {
-            aria_label: "AI 结构化提取 {field_label}", r#type: "checkbox",
-            checked: options().ai_extract,
-            onchange: move |event| ai_options.with_mut(|value| value.ai_extract = event.checked()),
+        td { class: "aio-edit-grid__toggle", Checkbox {
+            aria_label: "AI 结构化提取 {field_label}",
+            checked: Some(checkbox_state(options().ai_extract)),
+            on_checked_change: move |checked| ai_options.with_mut(|value| value.ai_extract = checkbox_is_checked(checked)),
         } }
     }
 }
@@ -4260,13 +4262,12 @@ fn IndexGridRow(
             td { div { class: "aio-edit-grid__checks",
                 for field in &fields {
                     label {
-                        input {
-                            r#type: "checkbox",
-                            checked: selected_fields().contains(&field.id),
-                            onchange: {
+                        Checkbox {
+                            checked: Some(checkbox_state(selected_fields().contains(&field.id))),
+                            on_checked_change: {
                                 let field_id = field.id;
-                                move |event| selected_fields.with_mut(|selected| {
-                                    if event.checked() {
+                                move |checked| selected_fields.with_mut(|selected| {
+                                    if checkbox_is_checked(checked) {
                                         selected.insert(field_id);
                                     } else {
                                         selected.remove(&field_id);
@@ -4278,11 +4279,10 @@ fn IndexGridRow(
                     }
                 }
             } }
-            td { class: "aio-edit-grid__toggle", input {
-                r#type: "checkbox",
+            td { class: "aio-edit-grid__toggle", Checkbox {
                 aria_label: "联合唯一约束",
-                checked: unique(),
-                onchange: move |event| unique.set(event.checked()),
+                checked: Some(checkbox_state(unique())),
+                on_checked_change: move |checked| unique.set(checkbox_is_checked(checked)),
             } }
             td { class: "aio-edit-grid__actions",
                 Button {
@@ -4345,13 +4345,12 @@ fn NewIndexGridRow(
             td { div { class: "aio-edit-grid__checks",
                 for field in &fields {
                     label {
-                        input {
-                            r#type: "checkbox",
-                            checked: selected_fields().contains(&field.id),
-                            onchange: {
+                        Checkbox {
+                            checked: Some(checkbox_state(selected_fields().contains(&field.id))),
+                            on_checked_change: {
                                 let field_id = field.id;
-                                move |event| selected_fields.with_mut(|selected| {
-                                    if event.checked() {
+                                move |checked| selected_fields.with_mut(|selected| {
+                                    if checkbox_is_checked(checked) {
                                         selected.insert(field_id);
                                     } else {
                                         selected.remove(&field_id);
@@ -4366,11 +4365,10 @@ fn NewIndexGridRow(
                     span { class: "aio-edit-grid__placeholder", "请先添加字段" }
                 }
             } }
-            td { class: "aio-edit-grid__toggle", input {
-                r#type: "checkbox",
+            td { class: "aio-edit-grid__toggle", Checkbox {
                 aria_label: "新索引联合唯一约束",
-                checked: unique(),
-                onchange: move |event| unique.set(event.checked()),
+                checked: Some(checkbox_state(unique())),
+                on_checked_change: move |checked| unique.set(checkbox_is_checked(checked)),
             } }
             td { class: "aio-edit-grid__actions",
                 Button {

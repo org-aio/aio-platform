@@ -22,7 +22,7 @@ mod browser_bootstrap;
 #[cfg(target_arch = "wasm32")]
 mod browser_http;
 #[cfg(target_arch = "wasm32")]
-mod design_system;
+mod components;
 #[cfg(target_arch = "wasm32")]
 mod ui;
 #[cfg(target_arch = "wasm32")]

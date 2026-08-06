@@ -16,7 +16,12 @@ use crate::{
     ProgramImage, RestFormPageProvider, RestMethod, RuntimeRecordInput, RuntimeRecordPage,
     RuntimeRecordView, SymbolId, TreeTablePageProvider, ValueType,
     browser_http::{api_url, delete_api, get_api, patch_api, post_api},
-    design_system::{Button, ButtonSize, ButtonVariant},
+    components::{
+        button::{Button, ButtonSize, ButtonVariant},
+        checkbox::{Checkbox, checkbox_is_checked, checkbox_state},
+        input::Input,
+        textarea::Textarea,
+    },
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -433,7 +438,7 @@ fn MetadataTablePage(
                 if let Some(tree) = tree.as_ref() {
                     aside { class: "aio-runtime-tree",
                         strong { "分类" }
-                        button {
+                        Button {
                             class: if selected_tree().is_none() { "is-active" } else { "" },
                             onclick: move |_| selected_tree.set(None),
                             "全部"
@@ -466,15 +471,15 @@ fn MetadataTablePage(
                         },
                             for field_id in &filter_fields {
                                 if let Some((_, title, _)) = compiled_field(&model, *field_id) {
-                                    input { class: "aio-input", name: "{field_id}", placeholder: "{title}" }
+                                    Input { class: "aio-input", name: "{field_id}", placeholder: "{title}" }
                                 }
                             }
-                            Button { button_type: "submit",
+                            Button { r#type: "submit",
                                 Search { class: "size-4" }
                                 "查询"
                             }
                             Button {
-                                button_type: "reset",
+                                r#type: "reset",
                                 variant: ButtonVariant::Outline,
                                 onclick: move |_| {
                                     filters.set(BTreeMap::new());
@@ -495,7 +500,7 @@ fn MetadataTablePage(
                                                 .and_then(|slot| model.field_options.get(slot))
                                                 .is_some_and(|options| options.sortable)
                                             {
-                                                button {
+                                                Button {
                                                     class: "aio-runtime-sort",
                                                     title: "按 {title} 排序",
                                                     onclick: {
@@ -531,19 +536,19 @@ fn MetadataTablePage(
                                         }
                                         td { class: "aio-runtime-row-actions",
                                             if !matches!(row_actions.detail, MenuActionAccess::Hidden) {
-                                                button { title: "详情", aria_label: "详情", onclick: {
+                                                Button { title: "详情", aria_label: "详情", onclick: {
                                                     let record = record.clone();
                                                     move |_| dialog.set(Some(RecordDialog::Detail(record.clone())))
                                                 }, Eye { class: "size-4" } }
                                             }
                                             if !matches!(row_actions.edit, MenuActionAccess::Hidden) {
-                                                button { title: "编辑", aria_label: "编辑", onclick: {
+                                                Button { title: "编辑", aria_label: "编辑", onclick: {
                                                     let record = record.clone();
                                                     move |_| dialog.set(Some(RecordDialog::Edit(record.clone())))
                                                 }, Pencil { class: "size-4" } }
                                             }
                                             if !matches!(row_actions.delete, MenuActionAccess::Hidden) {
-                                                button { class: "is-destructive", title: "删除", aria_label: "删除", onclick: {
+                                                Button { class: "is-destructive", title: "删除", aria_label: "删除", onclick: {
                                                     let record = record.clone();
                                                     move |_| dialog.set(Some(RecordDialog::Delete(record.clone())))
                                                 }, Trash2 { class: "size-4" } }
@@ -692,7 +697,7 @@ fn RestEndpointForm(api_base_url: String, endpoint: CompiledPageEndpoint) -> Ele
                 }
             }
             footer {
-                Button { button_type: "submit", disabled: sending(),
+                Button { r#type: "submit", disabled: sending(),
                     if sending() { "发送中" } else { "发送请求" }
                 }
             }
@@ -722,7 +727,7 @@ fn rest_endpoint_input(input: &crate::CompiledEndpointInput) -> Element {
         };
     }
     rsx! {
-        input {
+        Input {
             name: "{input.name}",
             class: "aio-input",
             r#type: input_type,
@@ -874,7 +879,7 @@ fn tree_record_button(
     let record_id = record.id.clone();
     let active = selected_tree().as_deref() == Some(record.id.as_str());
     rsx! {
-        button {
+        Button {
             class: if active { "is-active" } else { "" },
             style: "padding-left: {indent}rem",
             onclick: move |_| selected_tree.set(Some(record_id.clone())),
@@ -980,15 +985,15 @@ fn RuntimeRecordDialog(
                 },
                     if can_ai_fill {
                         div { class: "aio-runtime-ai-fill",
-                            textarea {
+                            Textarea {
                                 class: "aio-input",
                                 aria_label: "AI 表单输入",
                                 placeholder: "描述要填写的数据",
                                 value: ai_prompt(),
-                                oninput: move |event| ai_prompt.set(event.value()),
+                                oninput: move |event: FormEvent| ai_prompt.set(event.value()),
                             }
                             Button {
-                                button_type: "button",
+                                r#type: "button",
                                 variant: ButtonVariant::Outline,
                                 disabled: ai_loading(),
                                 onclick: {
@@ -1027,23 +1032,21 @@ fn RuntimeRecordDialog(
                             }) {
                                 label { "{title}" }
                                 if matches!(value_type, ValueType::Boolean) {
-                                    input {
-                                        class: "aio-input",
+                                    Checkbox {
                                         name: "{name}",
-                                        r#type: "checkbox",
                                         disabled: readonly || model.field_options.get(&slot)
                                             .is_some_and(|options| !options.form_editable),
-                                        checked: form_state().get(name)
-                                            .is_some_and(|value| matches!(value.as_str(), "true" | "on" | "1")),
-                                        onchange: {
+                                        checked: Some(checkbox_state(form_state().get(name)
+                                            .is_some_and(|value| matches!(value.as_str(), "true" | "on" | "1")))),
+                                        on_checked_change: {
                                             let name = name.clone();
-                                            move |event| form_state.with_mut(|state| {
-                                                state.insert(name.clone(), event.checked().to_string());
+                                            move |checked| form_state.with_mut(|state| {
+                                                state.insert(name.clone(), checkbox_is_checked(checked).to_string());
                                             })
                                         },
                                     }
                                 } else {
-                                    input {
+                                    Input {
                                         class: "aio-input",
                                         name: "{name}",
                                         r#type: field_input_type(value_type),
@@ -1056,7 +1059,7 @@ fn RuntimeRecordDialog(
                                         value: form_state().get(name).cloned().unwrap_or_default(),
                                         oninput: {
                                             let name = name.clone();
-                                            move |event| form_state.with_mut(|state| {
+                                            move |event: FormEvent| form_state.with_mut(|state| {
                                                 state.insert(name.clone(), event.value());
                                             })
                                         },
@@ -1071,8 +1074,8 @@ fn RuntimeRecordDialog(
                         }
                     }
                     footer {
-                        Button { button_type: "button", variant: ButtonVariant::Ghost, onclick: move |_| dialog.set(None), "取消" }
-                        Button { button_type: "submit", if readonly { "关闭" } else { "保存" } }
+                        Button { r#type: "button", variant: ButtonVariant::Ghost, onclick: move |_| dialog.set(None), "取消" }
+                        Button { r#type: "submit", if readonly { "关闭" } else { "保存" } }
                     }
                 }
             }

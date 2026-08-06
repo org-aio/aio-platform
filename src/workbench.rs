@@ -16,6 +16,7 @@ use icons::{ListTree, PanelLeft, Plus, Settings};
 use crate::{
     browser_bootstrap::{load_from_document, page_title},
     browser_http::{api_url, get_api},
+    components::button::Button,
     ui::StudioPage,
 };
 
@@ -176,7 +177,8 @@ fn Workbench(route: AppRoute) -> Element {
     };
 
     rsx! {
-        document::Stylesheet { href: "/assets/dioxus-ui.css?v=91e8974" }
+        document::Stylesheet { href: "/assets/tailwind.css?v=4.1.5" }
+        document::Stylesheet { href: "/assets/dx-components-theme.css?v=bf007c15" }
         document::Stylesheet { href: "/assets/app.css?v=program-runtime-13" }
         div {
             class: "aio-shell-frame bg-background text-foreground",
@@ -184,7 +186,7 @@ fn Workbench(route: AppRoute) -> Element {
             aside { class: "aio-sidebar border-r bg-card",
                 header { class: "aio-sidebar-header",
                     div { class: "aio-sidebar-header-row",
-                        button {
+                        Button {
                             class: "aio-icon-button",
                             r#type: "button",
                             title: if sidebar_collapsed() { "展开侧栏" } else { "收起侧栏" },
@@ -226,7 +228,7 @@ fn Workbench(route: AppRoute) -> Element {
                             }
                         }
                         if snapshot.admin.as_ref().is_some_and(|state| state.can_add_scene) {
-                            button {
+                            Button {
                                 class: "aio-root-menu-add",
                                 r#type: "button",
                                 title: "添加场景",
@@ -406,7 +408,7 @@ fn native_menu(
                         }
                     }
                     if can_add_menu {
-                        button {
+                        Button {
                             class: "aio-sidebar-admin-action aio-sidebar-admin-action--primary",
                             r#type: "button",
                             disabled: !has_selected_scene,
@@ -417,7 +419,7 @@ fn native_menu(
                         }
                     }
                     if can_edit_current {
-                        button {
+                        Button {
                             class: "aio-sidebar-admin-action",
                             r#type: "button",
                             title: "页面设置",
@@ -473,7 +475,7 @@ fn scene_link(
             }
         },
         None => rsx! {
-            button {
+            Button {
                 class,
                 r#type: "button",
                 onclick: move |_| selected_scene.set(Some(scene_id)),

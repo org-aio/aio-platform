@@ -23,6 +23,8 @@ uuid.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true, features = ["web", "launch", "hooks", "document"] }
+dioxus-icons = { version = "0.1.0", default-features = false }
+dioxus-primitives = { git = "https://github.com/DioxusLabs/components", rev = "bf007c15d0cf4d04d3181cc46cf12325aa773955", version = "0.0.1", default-features = false }
 dioxus-web = "0.7.9"
 futures-util = "0.3.31"
 gloo-net = { version = "0.6.0", features = ["http", "json", "eventsource"] }
