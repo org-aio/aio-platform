@@ -25,17 +25,17 @@ impl BadgeVariant {
     }
 }
 
-/// The props for the [`Badge`] component.
+/// [`Badge`] 组件属性。
 #[derive(Props, Clone, PartialEq)]
 pub struct BadgeProps {
     #[props(default)]
     pub variant: BadgeVariant,
 
-    /// Additional attributes to extend the badge element
+    /// 徽标元素的扩展属性。
     #[props(extends = GlobalAttributes)]
     pub attributes: Vec<Attribute>,
 
-    /// The children of the badge element
+    /// 徽标子元素。
     pub children: Element,
 }
 

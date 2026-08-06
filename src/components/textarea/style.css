@@ -1,4 +1,4 @@
-/* Base */
+/* 基础样式 */
 .dx-textarea {
   width: 100%;
   min-height: 4rem;
@@ -26,7 +26,7 @@
   color: var(--secondary-color-5);
 }
 
-/* Default Variant */
+/* 默认变体 */
 .dx-textarea[data-style="default"] {
   background: var(--light, var(--primary-color)) var(--dark, var(--primary-color-3));
   box-shadow: inset 0 0 0 1px var(--light, var(--primary-color-6)) var(--dark, var(--primary-color-7));
@@ -38,7 +38,7 @@
   color: var(--secondary-color-1);
 }
 
-/* Fade Variant */
+/* 淡化变体 */
 .dx-textarea[data-style="fade"] {
   background: var(--light, var(--primary-color)) var(--dark, var(--primary-color-3));
 }
@@ -49,7 +49,7 @@
   color: var(--secondary-color-1);
 }
 
-/* Outline Variant */
+/* 描边变体 */
 .dx-textarea[data-style="outline"] {
   border: 1px solid var(--primary-color-6);
   background-color: var(--light, var(--primary-color))
@@ -69,7 +69,7 @@
   border-color: var(--primary-error-color);
 }
 
-/* Ghost Variant */
+/* 透明变体 */
 .dx-textarea[data-style="ghost"] {
   background-color: transparent;
 }

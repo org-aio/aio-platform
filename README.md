@@ -29,7 +29,7 @@ Cargo 工件：`az-studio`
 
 本插件不实现资产、IoT、SSH 等领域能力；这些插件只保留类型化 API 或 Capability，业务页面统一由 Studio 配置。正式程序只在 PostgreSQL 中保存，不持久化 Dioxus `Element`、SQL、HTML、CSS 或 JavaScript。约定文件是显式代码扩展点，不是页面配置真源。
 
-Studio 的交互控件采用 [Dioxus Components](https://github.com/DioxusLabs/dioxus-components) `bf007c15` 的源码 registry，通过官方 `dx components add` 纳入实际使用的 Button、Badge、Input 和 Textarea。`app/assets/dx-components-theme.css` 提供同一提交的设计令牌，`app/assets/tailwind.css` 只提供整站布局工具类；上游未提供 Table，功能定义表格直接使用语义化 HTML，不维护第二套本地设计系统。
+Studio 的交互控件采用 [Dioxus Components](https://github.com/DioxusLabs/dioxus-components) `bf007c15` 的源码 registry，通过官方 `dx components add` 纳入实际使用的 Button、Badge、Input、Textarea 和 Checkbox。`app/assets/dx-components-theme.css` 提供同一提交的设计令牌，`app/assets/tailwind.css` 只提供整站布局工具类；上游未提供 Table，功能定义表格直接使用语义化 HTML，不维护第二套本地设计系统。完整网页开发约定见仓库 Skill `.agents/skills/aio-dioxus-web`。
 
 ```bash
 cargo test -p az-studio
