@@ -112,6 +112,53 @@ pub fn Badge(
 }
 
 #[component]
+pub fn Table(#[props(into, optional)] class: Option<String>, children: Element) -> Element {
+    let class = tw_merge!(
+        "w-full caption-bottom text-sm",
+        class.as_deref().unwrap_or("")
+    );
+    rsx! {
+        div { class: "relative w-full overflow-x-auto",
+            table { class, {children} }
+        }
+    }
+}
+
+#[component]
+pub fn TableHeader(children: Element) -> Element {
+    rsx! { thead { class: "[&_tr]:border-b", {children} } }
+}
+
+#[component]
+pub fn TableBody(children: Element) -> Element {
+    rsx! { tbody { class: "[&_tr:last-child]:border-0", {children} } }
+}
+
+#[component]
+pub fn TableRow(#[props(into, optional)] class: Option<String>, children: Element) -> Element {
+    let class = tw_merge!(
+        "border-b transition-colors hover:bg-muted/50",
+        class.as_deref().unwrap_or("")
+    );
+    rsx! { tr { class, {children} } }
+}
+
+#[component]
+pub fn TableHead(#[props(into, optional)] class: Option<String>, children: Element) -> Element {
+    let class = tw_merge!(
+        "h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground whitespace-nowrap",
+        class.as_deref().unwrap_or("")
+    );
+    rsx! { th { class, {children} } }
+}
+
+#[component]
+pub fn TableCell(#[props(into, optional)] class: Option<String>, children: Element) -> Element {
+    let class = tw_merge!("p-2 align-middle", class.as_deref().unwrap_or(""));
+    rsx! { td { class, {children} } }
+}
+
+#[component]
 pub fn Card(#[props(into, optional)] class: Option<String>, children: Element) -> Element {
     let class = tw_merge!(
         "flex flex-col gap-4 rounded-md border bg-card py-6 text-card-foreground shadow-sm",

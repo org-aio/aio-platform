@@ -409,6 +409,7 @@ mod tests {
             ]),
             required_fields: vec![0],
             expression_indexes: Vec::new(),
+            audit: crate::ModelAuditDefinition::default(),
         };
         let schema = form_state_schema(&model);
         assert_eq!(
@@ -442,6 +443,7 @@ mod tests {
             ]),
             required_fields: vec![0, 1],
             expression_indexes: Vec::new(),
+            audit: crate::ModelAuditDefinition::default(),
         };
         let response = FormStateExtractor::from_env()?
             .extract(&model, "用户名 test_ai，姓名张三", &json!({}), None)

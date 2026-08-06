@@ -400,6 +400,8 @@ impl ProgramStore {
             .context("开始同步 ProgramGraph 模型事务失败")?;
         for model in &definition.models {
             let model_symbol = model.id.to_string();
+            let audit_metadata_json =
+                serde_json::to_string(&model.audit).context("序列化模型审计配置失败")?;
             let conflicting_symbol = sqlx::query_scalar::<_, String>(
                 "SELECT program_symbol_id FROM engine_meta_models
                  WHERE name = $1 AND program_symbol_id IS NOT NULL AND program_symbol_id <> $2
@@ -418,13 +420,15 @@ impl ProgramStore {
             }
             let updated = sqlx::query(
                 "UPDATE engine_meta_models
-                 SET program_symbol_id = $1, name = $2, display_name = $3, updated_at_ms = $4
+                 SET program_symbol_id = $1, name = $2, display_name = $3,
+                     audit_metadata_json = $4, updated_at_ms = $5
                  WHERE program_symbol_id = $1
                     OR (program_symbol_id IS NULL AND name = $2)",
             )
             .bind(&model_symbol)
             .bind(&model.name)
             .bind(&model.title)
+            .bind(&audit_metadata_json)
             .bind(timestamp_ms())
             .execute(&mut *transaction)
             .await
@@ -435,13 +439,15 @@ impl ProgramStore {
             if updated.rows_affected() == 0 {
                 sqlx::query(
                     "INSERT INTO engine_meta_models
-                     (id, name, display_name, created_at_ms, updated_at_ms, program_symbol_id)
-                     VALUES ($1, $2, $3, $4, $4, $1)",
+                     (id, name, display_name, created_at_ms, updated_at_ms, program_symbol_id,
+                      audit_metadata_json)
+                     VALUES ($1, $2, $3, $4, $4, $1, $5)",
                 )
                 .bind(&model_symbol)
                 .bind(&model.name)
                 .bind(&model.title)
                 .bind(timestamp_ms())
+                .bind(&audit_metadata_json)
                 .execute(&mut *transaction)
                 .await
                 .with_context(|| format!("创建动态模型失败: {}", model.name))?;
@@ -780,16 +786,28 @@ async fn reconcile_expression_indexes(
             if fields.is_empty() {
                 continue;
             }
-            let index_name =
-                managed_index_name(program_id, &model.id.to_string(), &model.name, &fields);
+            let mut identity_fields = Vec::with_capacity(fields.len() + 1);
+            identity_fields.push(if index.unique {
+                "unique".to_owned()
+            } else {
+                "index".to_owned()
+            });
+            identity_fields.extend(fields.iter().cloned());
+            let index_name = managed_index_name(
+                program_id,
+                &model.id.to_string(),
+                &model.name,
+                &identity_fields,
+            );
             let expressions = fields
                 .iter()
                 .map(|field| format!("(payload ->> '{}')", quote_literal(field)))
                 .collect::<Vec<_>>()
                 .join(", ");
             let statement = format!(
-                "CREATE INDEX IF NOT EXISTS {index_name} ON engine_data_records ({expressions}) \
+                "CREATE {}INDEX IF NOT EXISTS {index_name} ON engine_data_records ({expressions}) \
                  WHERE model_name = '{}'",
+                if index.unique { "UNIQUE " } else { "" },
                 quote_literal(&model.name),
             );
             sqlx::query(&statement)

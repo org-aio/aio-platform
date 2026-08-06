@@ -5,23 +5,36 @@ use std::{
 };
 
 use crate::{
-    ChildCollection, DefinitionState, DraftSnapshot, EndpointInputDefinition,
+    ChildCollection, DefinitionState, DraftSnapshot, EffectKind, EndpointInputDefinition,
     EndpointInputLocation, EndpointOutputDefinition, FieldDefinition, GraphEntity, GraphPatch,
-    GraphPatchBatch, IndexPurpose, MenuDefinition, ModelDefinition, ModelIndexDefinition,
-    PageDefinition, PageEndpointDefinition, PageEndpointSource, PatchOrigin, PermissionDefinition,
-    RestMethod, RouteDefinition, SymbolId, ValueType, VibeRunAccepted, VibeRunRequest,
+    GraphPatchBatch, MenuDefinition, ModelDefinition, ModelIndexDefinition, PageDefinition,
+    PageEndpointDefinition, PageEndpointSource, PatchOrigin, PermissionDefinition,
+    ProgramDefinition, RestMethod, RouteDefinition, SymbolId, ValueType, VibeRunAccepted,
+    VibeRunRequest, permission_identifier_is_valid,
 };
 use dioxus::prelude::*;
 use serde_json::Value;
 
 use crate::browser_http::{get_api, patch_api, post_api};
-use crate::design_system::{Badge, BadgeVariant, Button, ButtonSize, ButtonVariant};
+use crate::design_system::{
+    Badge, BadgeVariant, Button, ButtonSize, ButtonVariant, Table, TableBody, TableCell, TableHead,
+    TableHeader, TableRow,
+};
 use gloo_timers::future::TimeoutFuture;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum StudioTab {
+    #[default]
+    Menus,
+    Permissions,
+}
 
 #[component]
 pub fn StudioPage(api_base_url: String, mut selected_scene: Signal<Option<SymbolId>>) -> Element {
     let draft_generation = use_signal(|| 0_u64);
+    let mut studio_tab = use_signal(StudioTab::default);
     let editing_menu = use_signal(|| None::<SymbolId>);
+    //
     let collapsed_menus = use_signal(BTreeSet::<SymbolId>::new);
     let status = use_signal(|| None::<String>);
     let draft_api = api_base_url.clone();
@@ -46,22 +59,46 @@ pub fn StudioPage(api_base_url: String, mut selected_scene: Signal<Option<Symbol
 
     rsx! {
         section { class: "aio-studio-shell min-h-[calc(100vh-8rem)] border bg-background",
-            header { class: "flex min-h-12 items-center justify-end border-b px-3",
+            header { class: "aio-studio-shell__toolbar border-b px-3",
+                nav { class: "aio-studio-view-tabs", aria_label: "Studio 管理视图",
+                    button {
+                        class: if studio_tab() == StudioTab::Menus { "is-active" } else { "" },
+                        r#type: "button",
+                        aria_label: "菜单管理",
+                        onclick: move |_| studio_tab.set(StudioTab::Menus),
+                        "菜单管理"
+                    }
+                    button {
+                        class: if studio_tab() == StudioTab::Permissions { "is-active" } else { "" },
+                        r#type: "button",
+                        aria_label: "权限定义",
+                        onclick: move |_| studio_tab.set(StudioTab::Permissions),
+                        "权限定义"
+                    }
+                }
                 if let Some(message) = status() {
                     Badge { variant: BadgeVariant::Outline, "{message}" }
                 }
             }
             main { class: "min-w-0 p-4",
                 match draft_snapshot {
-                    Some(Ok(draft)) => scenes_panel(
-                        &draft,
-                        selected_scene(),
-                        api_base_url.clone(),
-                        draft_generation,
-                        status,
-                        editing_menu,
-                        collapsed_menus,
-                    ),
+                    Some(Ok(draft)) => match studio_tab() {
+                        StudioTab::Menus => scenes_panel(
+                            &draft,
+                            selected_scene(),
+                            api_base_url.clone(),
+                            draft_generation,
+                            status,
+                            editing_menu,
+                            collapsed_menus,
+                        ),
+                        StudioTab::Permissions => permissions_panel(
+                            &draft,
+                            api_base_url.clone(),
+                            draft_generation,
+                            status,
+                        ),
+                    },
                     Some(Err(error)) => empty_panel(&error),
                     None => empty_panel("正在加载 Draft"),
                 }
@@ -411,6 +448,7 @@ fn scenes_panel(
         api_base_url,
         program_id: storage_id,
         version,
+        menus: Arc::new(draft.definition.menus.clone()),
         pages: Arc::new(draft.definition.pages.clone()),
         routes: Arc::new(draft.definition.routes.clone()),
         permissions: Arc::new(draft.definition.permissions.clone()),
@@ -446,7 +484,7 @@ fn scenes_panel(
                             root_id,
                             ChildCollection::Menus,
                             scene_count,
-                            table_context,
+                            table_context.clone(),
                         )}
                     } else {
                         div { class: "aio-menu-table__empty", "暂无场景" }
@@ -457,11 +495,327 @@ fn scenes_panel(
     }
 }
 
+fn permissions_panel(
+    draft: &DraftSnapshot,
+    api_base_url: String,
+    generation: Signal<u64>,
+    status: Signal<Option<String>>,
+) -> Element {
+    let permission_count = draft.definition.permissions.len();
+    let usage_counts = Arc::new(permission_usage_map(&draft.definition));
+    let context = PermissionTableContext {
+        api_base_url,
+        program_id: draft.program_id.clone(),
+        root_id: draft.definition.id,
+        version: draft.version,
+        permissions: Arc::new(draft.definition.permissions.clone()),
+        usage_counts,
+        generation,
+        status,
+    };
+    rsx! {
+        section { class: "aio-permission-management",
+            header { class: "aio-permission-management__toolbar",
+                div {
+                    h2 { "权限定义" }
+                    p { "权限目录供菜单、行操作、路由和函数复用" }
+                }
+                Badge { variant: BadgeVariant::Outline, "{permission_count} 项" }
+            }
+            div { class: "aio-permission-table-scroll",
+                div { class: "aio-permission-table", role: "table", aria_label: "权限定义",
+                    div { class: "aio-permission-table__header", role: "row",
+                        span { role: "columnheader", "权限标识" }
+                        span { role: "columnheader", "权限名称" }
+                        span { role: "columnheader", "允许 Effect" }
+                        span { role: "columnheader", "引用" }
+                        span { role: "columnheader", "操作" }
+                    }
+                    for permission in context.permissions.iter() {
+                        PermissionDefinitionRow {
+                            key: "{permission.id}:{context.version}",
+                            permission: permission.clone(),
+                            usage_count: context.usage_counts.get(&permission.id).copied().unwrap_or_default(),
+                            context: context.clone(),
+                        }
+                    }
+                    NewPermissionDefinitionRow {
+                        key: "new-permission:{context.version}",
+                        context,
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct PermissionTableContext {
+    api_base_url: String,
+    program_id: String,
+    root_id: SymbolId,
+    version: i64,
+    permissions: Arc<Vec<PermissionDefinition>>,
+    usage_counts: Arc<BTreeMap<SymbolId, usize>>,
+    generation: Signal<u64>,
+    status: Signal<Option<String>>,
+}
+
+#[component]
+fn PermissionDefinitionRow(
+    permission: PermissionDefinition,
+    usage_count: usize,
+    context: PermissionTableContext,
+) -> Element {
+    let permission_id = permission.id;
+    let permission_name = permission.name.clone();
+    let allowed_effects = permission.allowed_effects.clone();
+    let all_permissions = context.permissions.clone();
+    let mut submit_context = context.clone();
+    let delete_context = context;
+    let delete_disabled = usage_count > 0;
+    let delete_title = if delete_disabled {
+        format!("该权限被 {usage_count} 处定义引用，不能删除")
+    } else {
+        format!("删除权限 {permission_name}")
+    };
+    rsx! {
+        form { class: "aio-permission-table__row", role: "row", onsubmit: move |event| {
+            event.prevent_default();
+            let name = form_text(&event, "name").trim().to_owned();
+            let title = form_text(&event, "title").trim().to_owned();
+            if !permission_identifier_is_valid(&name) {
+                submit_context.status.set(Some("权限标识必须采用小写的 领域:动作 格式，例如 asset:read".to_owned()));
+                return;
+            }
+            if title.is_empty() {
+                submit_context.status.set(Some("权限名称不能为空".to_owned()));
+                return;
+            }
+            if all_permissions.iter().any(|item| item.id != permission_id && item.name == name) {
+                submit_context.status.set(Some(format!("权限标识已存在: {name}")));
+                return;
+            }
+            let allowed_effects = permission_effects_from_form(&event);
+            submit_patches(
+                submit_context.api_base_url.clone(),
+                submit_context.program_id.clone(),
+                submit_context.version,
+                vec![
+                    GraphPatch::Rename {
+                        target_id: permission_id,
+                        name,
+                        title: Some(title),
+                    },
+                    GraphPatch::SetProperty {
+                        target_id: permission_id,
+                        property: crate::EditableProperty::PermissionEffects,
+                        value: serde_json::json!(allowed_effects),
+                    },
+                ],
+                submit_context.generation,
+                submit_context.status,
+            );
+        },
+            input {
+                class: "aio-input",
+                name: "name",
+                aria_label: "权限标识 {permission_name}",
+                value: permission.name,
+                placeholder: "例如 asset:read",
+            }
+            input {
+                class: "aio-input",
+                name: "title",
+                aria_label: "权限名称 {permission_name}",
+                value: permission.title,
+                placeholder: "例如 查看资产",
+            }
+            {permission_effect_fields(&allowed_effects)}
+            span { class: "aio-permission-table__usage", role: "cell",
+                if usage_count == 0 { "未引用" } else { "{usage_count} 处" }
+            }
+            div { class: "aio-permission-table__actions", role: "cell",
+                Button {
+                    button_type: "submit",
+                    size: ButtonSize::IconSm,
+                    variant: ButtonVariant::Ghost,
+                    title: "保存权限 {permission_name}",
+                    aria_label: "保存权限 {permission_name}",
+                    icons::Save { class: "size-4" }
+                }
+                Button {
+                    size: ButtonSize::IconSm,
+                    variant: ButtonVariant::Ghost,
+                    disabled: delete_disabled,
+                    title: "{delete_title}",
+                    aria_label: "{delete_title}",
+                    onclick: move |_| submit_patches(
+                        delete_context.api_base_url.clone(),
+                        delete_context.program_id.clone(),
+                        delete_context.version,
+                        vec![GraphPatch::Delete { target_id: permission_id }],
+                        delete_context.generation,
+                        delete_context.status,
+                    ),
+                    icons::X { class: "size-4" }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn NewPermissionDefinitionRow(context: PermissionTableContext) -> Element {
+    let next_index = context.permissions.len();
+    let existing_permissions = context.permissions.clone();
+    let mut submit_context = context;
+    rsx! {
+        form { class: "aio-permission-table__row aio-permission-table__row--new", role: "row", onsubmit: move |event| {
+            event.prevent_default();
+            let name = form_text(&event, "name").trim().to_owned();
+            let title = form_text(&event, "title").trim().to_owned();
+            if !permission_identifier_is_valid(&name) {
+                submit_context.status.set(Some("权限标识必须采用小写的 领域:动作 格式，例如 asset:read".to_owned()));
+                return;
+            }
+            if title.is_empty() {
+                submit_context.status.set(Some("权限名称不能为空".to_owned()));
+                return;
+            }
+            if existing_permissions.iter().any(|item| item.name == name) {
+                submit_context.status.set(Some(format!("权限标识已存在: {name}")));
+                return;
+            }
+            let permission = PermissionDefinition {
+                id: SymbolId::new(),
+                name,
+                title,
+                allowed_effects: permission_effects_from_form(&event),
+            };
+            submit_patches(
+                submit_context.api_base_url.clone(),
+                submit_context.program_id.clone(),
+                submit_context.version,
+                vec![GraphPatch::Insert {
+                    parent_id: submit_context.root_id,
+                    collection: ChildCollection::Permissions,
+                    index: next_index,
+                    entity: GraphEntity::Permission(permission),
+                }],
+                submit_context.generation,
+                submit_context.status,
+            );
+        },
+            input {
+                class: "aio-input",
+                name: "name",
+                aria_label: "新权限标识",
+                placeholder: "例如 asset:read",
+            }
+            input {
+                class: "aio-input",
+                name: "title",
+                aria_label: "新权限名称",
+                placeholder: "例如 查看资产",
+            }
+            {permission_effect_fields(&[])}
+            span { class: "aio-permission-table__usage", role: "cell", "新定义" }
+            div { class: "aio-permission-table__actions", role: "cell",
+                Button {
+                    button_type: "submit",
+                    size: ButtonSize::Sm,
+                    title: "添加权限定义",
+                    aria_label: "添加权限定义",
+                    icons::Plus { class: "size-4" }
+                    "添加"
+                }
+            }
+        }
+    }
+}
+
+fn permission_effect_fields(selected: &[EffectKind]) -> Element {
+    rsx! {
+        div { class: "aio-permission-table__effects", role: "cell",
+            for effect in EffectKind::all() {
+                label {
+                    input {
+                        r#type: "checkbox",
+                        name: "{permission_effect_input_name(effect)}",
+                        checked: selected.contains(&effect),
+                        aria_label: "允许 {effect.label()}",
+                    }
+                    span { "{effect.label()}" }
+                }
+            }
+        }
+    }
+}
+
+fn permission_effect_input_name(effect: EffectKind) -> String {
+    format!("permission_effect_{}", effect.key())
+}
+
+fn permission_effects_from_form(event: &FormEvent) -> Vec<EffectKind> {
+    EffectKind::all()
+        .into_iter()
+        .filter(|effect| !form_text(event, &permission_effect_input_name(*effect)).is_empty())
+        .collect()
+}
+
+fn permission_usage_map(definition: &ProgramDefinition) -> BTreeMap<SymbolId, usize> {
+    let mut usages = definition
+        .permissions
+        .iter()
+        .map(|permission| (permission.id, 0))
+        .collect::<BTreeMap<_, _>>();
+    for menu in &definition.menus {
+        collect_menu_permission_usage(menu, &mut usages);
+    }
+    for route in &definition.routes {
+        for permission_id in &route.required_permissions {
+            increment_permission_usage(&mut usages, *permission_id);
+        }
+    }
+    for function in &definition.functions {
+        for permission_id in &function.required_permissions {
+            increment_permission_usage(&mut usages, *permission_id);
+        }
+    }
+    usages
+}
+
+fn collect_menu_permission_usage(menu: &MenuDefinition, usages: &mut BTreeMap<SymbolId, usize>) {
+    for permission_id in &menu.required_permissions {
+        increment_permission_usage(usages, *permission_id);
+    }
+    for access in [
+        &menu.row_actions.detail,
+        &menu.row_actions.edit,
+        &menu.row_actions.delete,
+    ] {
+        if let crate::MenuActionAccess::Permission { permission_id } = access {
+            increment_permission_usage(usages, *permission_id);
+        }
+    }
+    for child in &menu.children {
+        collect_menu_permission_usage(child, usages);
+    }
+}
+
+fn increment_permission_usage(usages: &mut BTreeMap<SymbolId, usize>, permission_id: SymbolId) {
+    if let Some(count) = usages.get_mut(&permission_id) {
+        *count = count.saturating_add(1);
+    }
+}
+
 #[derive(Clone)]
 struct MenuTableContext {
     api_base_url: String,
     program_id: String,
     version: i64,
+    menus: Arc<Vec<MenuDefinition>>,
     pages: Arc<Vec<PageDefinition>>,
     routes: Arc<Vec<RouteDefinition>>,
     permissions: Arc<Vec<PermissionDefinition>>,
@@ -535,6 +889,8 @@ fn menu_table_rows(
     let mut add_context = context.clone();
     let delete_context = context.clone();
     let enable_context = context.clone();
+    let delete_is_scene = depth == 0;
+    let delete_kind = if delete_is_scene { "场景" } else { "菜单" };
     rsx! {
         div { class: "aio-menu-table__contents",
             div {
@@ -651,15 +1007,21 @@ fn menu_table_rows(
                     button {
                         class: "aio-menu-table__delete",
                         r#type: "button",
+                        title: "删除{delete_kind}",
+                        aria_label: "删除{delete_kind}",
                         onclick: move |_| submit_patches(
                             delete_context.api_base_url.clone(),
                             delete_context.program_id.clone(),
                             delete_context.version,
-                            vec![GraphPatch::Delete { target_id: menu_id }],
+                            delete_menu_patches(
+                                &delete_context.menus,
+                                &delete_context.routes,
+                                menu_id,
+                            ),
                             delete_context.generation,
                             delete_context.status,
                         ),
-                        "删除"
+                        icons::X { class: "size-4" }
                     }
                 }
             }
@@ -687,6 +1049,153 @@ fn menu_table_rows(
                     )}
                 }
             }
+        }
+    }
+}
+
+fn delete_menu_patches(
+    menus: &[MenuDefinition],
+    routes: &[RouteDefinition],
+    target_id: SymbolId,
+) -> Vec<GraphPatch> {
+    let Some(target) = find_menu(menus, target_id) else {
+        return vec![GraphPatch::Delete { target_id }];
+    };
+    let mut page_ids = BTreeSet::new();
+    collect_menu_page_ids(target, &mut page_ids);
+    let mut patches = vec![GraphPatch::Delete { target_id }];
+
+    for page_id in page_ids {
+        if menus
+            .iter()
+            .any(|menu| menu_references_page_outside(menu, target_id, page_id))
+        {
+            continue;
+        }
+        patches.extend(
+            routes
+                .iter()
+                .filter(|route| route.page_id == page_id)
+                .map(|route| GraphPatch::Delete {
+                    target_id: route.id,
+                }),
+        );
+        patches.push(GraphPatch::Delete { target_id: page_id });
+    }
+
+    patches
+}
+
+fn find_menu(menus: &[MenuDefinition], target_id: SymbolId) -> Option<&MenuDefinition> {
+    menus.iter().find_map(|menu| {
+        if menu.id == target_id {
+            Some(menu)
+        } else {
+            find_menu(&menu.children, target_id)
+        }
+    })
+}
+
+fn collect_menu_page_ids(menu: &MenuDefinition, page_ids: &mut BTreeSet<SymbolId>) {
+    if let Some(page_id) = menu.page_id {
+        page_ids.insert(page_id);
+    }
+    for child in &menu.children {
+        collect_menu_page_ids(child, page_ids);
+    }
+}
+
+fn menu_references_page_outside(
+    menu: &MenuDefinition,
+    excluded_menu_id: SymbolId,
+    page_id: SymbolId,
+) -> bool {
+    if menu.id == excluded_menu_id {
+        return false;
+    }
+    menu.page_id == Some(page_id)
+        || menu
+            .children
+            .iter()
+            .any(|child| menu_references_page_outside(child, excluded_menu_id, page_id))
+}
+
+#[cfg(test)]
+mod menu_delete_tests {
+    use super::*;
+
+    #[test]
+    fn deleting_a_scene_keeps_pages_referenced_by_other_menus() {
+        let target_scene_id = SymbolId::new();
+        let target_menu_id = SymbolId::new();
+        let retained_scene_id = SymbolId::new();
+        let retained_menu_id = SymbolId::new();
+        let exclusive_page_id = SymbolId::new();
+        let shared_page_id = SymbolId::new();
+        let exclusive_route_id = SymbolId::new();
+        let shared_route_id = SymbolId::new();
+        let menus = vec![
+            menu(
+                target_scene_id,
+                None,
+                vec![
+                    menu(target_menu_id, Some(exclusive_page_id), Vec::new()),
+                    menu(SymbolId::new(), Some(shared_page_id), Vec::new()),
+                ],
+            ),
+            menu(
+                retained_scene_id,
+                None,
+                vec![menu(retained_menu_id, Some(shared_page_id), Vec::new())],
+            ),
+        ];
+        let routes = vec![
+            route(exclusive_route_id, exclusive_page_id),
+            route(shared_route_id, shared_page_id),
+        ];
+
+        let deleted_ids = delete_menu_patches(&menus, &routes, target_scene_id)
+            .into_iter()
+            .map(|patch| match patch {
+                GraphPatch::Delete { target_id } => target_id,
+                _ => unreachable!("删除场景只应产生删除补丁"),
+            })
+            .collect::<BTreeSet<_>>();
+
+        assert!(deleted_ids.contains(&target_scene_id));
+        assert!(deleted_ids.contains(&exclusive_route_id));
+        assert!(deleted_ids.contains(&exclusive_page_id));
+        assert!(!deleted_ids.contains(&shared_route_id));
+        assert!(!deleted_ids.contains(&shared_page_id));
+    }
+
+    fn menu(
+        id: SymbolId,
+        page_id: Option<SymbolId>,
+        children: Vec<MenuDefinition>,
+    ) -> MenuDefinition {
+        MenuDefinition {
+            id,
+            name: "menu".to_owned(),
+            title: "菜单".to_owned(),
+            state: DefinitionState::Known,
+            icon: None,
+            page_id,
+            enabled: true,
+            children,
+            required_permissions: Vec::new(),
+            row_actions: crate::MenuRowActions::default(),
+        }
+    }
+
+    fn route(id: SymbolId, page_id: SymbolId) -> RouteDefinition {
+        RouteDefinition {
+            id,
+            name: "route".to_owned(),
+            path: "/route".to_owned(),
+            page_id,
+            state: DefinitionState::Known,
+            required_permissions: Vec::new(),
         }
     }
 }
@@ -828,7 +1337,11 @@ fn menu_edit_row(
                 select { id: "menu-permission-{menu_id}", name: "permission_id", class: "aio-input",
                     option { value: "", selected: selected_permission.is_none(), "无权限限制" }
                     for permission in context.permissions.iter() {
-                        option { value: "{permission.id}", selected: selected_permission == Some(permission.id), "{permission.name}" }
+                        option {
+                            value: "{permission.id}",
+                            selected: selected_permission == Some(permission.id),
+                            "{permission.name} · {permission.title}"
+                        }
                     }
                 }
             }
@@ -905,7 +1418,7 @@ fn menu_action_select(
                     option {
                         value: "permission:{permission.id}",
                         selected: selected == format!("permission:{}", permission.id),
-                        "{permission.name}"
+                        "{permission.name} · {permission.title}"
                     }
                 }
             }
@@ -957,6 +1470,8 @@ fn PageRendererSettings(
     let mut table_model = use_signal(move || initial_table_model);
     let mut tree_model = use_signal(move || initial_tree_model);
     let mut settings_tab = use_signal(PageSettingsTab::default);
+    let initial_endpoint = page.endpoints.first().map(|endpoint| endpoint.id);
+    let selected_endpoint = use_signal(move || initial_endpoint);
     let expected_path = crate::convention_page_path(&program_name, &page.name);
     let selected_table = SymbolId::parse(&table_model()).ok();
     let selected_tree = SymbolId::parse(&tree_model()).ok();
@@ -1184,6 +1699,7 @@ fn PageRendererSettings(
                         functions_api,
                         generation,
                         status,
+                        selected_endpoint,
                     )}
                 }
             }
@@ -1316,13 +1832,10 @@ fn endpoint_panel(
     api_base_url: String,
     generation: Signal<u64>,
     status: Signal<Option<String>>,
+    mut selected_endpoint: Signal<Option<SymbolId>>,
 ) -> Element {
     let compiled_page = crate::compile_page(&draft.definition, &page);
-    let built_in_endpoints = compiled_page
-        .endpoints
-        .into_iter()
-        .filter(|endpoint| endpoint.source == PageEndpointSource::BuiltIn)
-        .collect::<Vec<_>>();
+    let compiled_endpoints = compiled_page.endpoints;
     let custom_endpoints = page.endpoints.clone();
     let page_id = page.id;
     let endpoint_count = custom_endpoints.len();
@@ -1330,26 +1843,28 @@ fn endpoint_panel(
     let program_id = draft.program_id.clone();
     let create_api = api_base_url.clone();
     let create_program = program_id.clone();
+    let create_endpoints = custom_endpoints.clone();
     let ai_api = api_base_url.clone();
     let page_name = page.name.clone();
     let page_title = page.title.clone();
+    let delete_api = api_base_url.clone();
+    let delete_program = program_id.clone();
     rsx! {
         section { class: "aio-endpoint-workbench",
             header { class: "aio-endpoint-workbench__header",
                 div {
-                    h2 { "接口目录" }
-                    p { "{page.title}" }
+                    h2 { "功能定义" }
+                    p { "{page.title} · REST 路由与数据契约" }
                 }
                 Button {
                     onclick: move |_| {
+                        let endpoint_id = SymbolId::new();
                         let endpoint = PageEndpointDefinition {
-                            id: SymbolId::new(),
-                            name: format!("custom_endpoint_{}", endpoint_count + 1),
-                            title: "自定义接口".to_owned(),
+                            id: endpoint_id,
+                            title: String::new(),
                             state: DefinitionState::Known,
-                            intent: String::new(),
                             method: RestMethod::Post,
-                            path: format!("/api/{page_name}/custom-endpoint-{}", endpoint_count + 1),
+                            path: next_endpoint_path(&page_name, &create_endpoints),
                             inputs: Vec::new(),
                             outputs: Vec::new(),
                         };
@@ -1366,29 +1881,10 @@ fn endpoint_panel(
                             generation,
                             status,
                         );
+                        selected_endpoint.set(Some(endpoint_id));
                     },
                     icons::Plus { class: "size-4" }
                     "新增接口"
-                }
-            }
-            if !built_in_endpoints.is_empty() {
-                section { class: "aio-endpoint-section",
-                    div { class: "aio-endpoint-section__title",
-                        h3 { "内置接口" }
-                        Badge { variant: BadgeVariant::Outline, "{built_in_endpoints.len()}" }
-                    }
-                    div { class: "aio-endpoint-catalog",
-                        for endpoint in built_in_endpoints {
-                            article { class: "aio-endpoint-catalog__item",
-                                span { class: method_class(endpoint.method), "{endpoint.method.as_str()}" }
-                                div {
-                                    strong { "{endpoint.title}" }
-                                    code { "{endpoint.path}" }
-                                }
-                                code { class: "aio-endpoint-catalog__provider", "{short_provider_key(&endpoint.route_instruction.provider_key)}" }
-                            }
-                        }
-                    }
                 }
             }
             section { class: "aio-endpoint-section",
@@ -1427,24 +1923,127 @@ fn endpoint_panel(
             }
             section { class: "aio-endpoint-section",
                 div { class: "aio-endpoint-section__title",
-                    h3 { "自定义接口" }
-                    Badge { variant: BadgeVariant::Outline, "{custom_endpoints.len()}" }
+                    h3 { "接口列表" }
+                    Badge { variant: BadgeVariant::Outline, "{compiled_endpoints.len()}" }
                 }
-                if custom_endpoints.is_empty() {
-                    {empty_panel("暂无自定义接口")}
+                if compiled_endpoints.is_empty() {
+                    {empty_panel("暂无接口定义")}
                 } else {
-                    div { class: "aio-endpoint-editor-list",
-                        for endpoint in custom_endpoints {
-                            {endpoint_editor(
-                                endpoint,
+                    Table { class: Some("aio-endpoint-table".to_owned()),
+                        TableHeader {
+                            TableRow {
+                                TableHead { "来源" }
+                                TableHead { "方法" }
+                                TableHead { "REST 路径" }
+                                TableHead { "显示名称" }
+                                TableHead { "入参" }
+                                TableHead { "响应" }
+                                TableHead { class: Some("text-right".to_owned()), "操作" }
+                            }
+                        }
+                        TableBody {
+                            for endpoint in &compiled_endpoints {
+                                {endpoint_table_row(
+                                    endpoint.clone(),
+                                    delete_api.clone(),
+                                    delete_program.clone(),
+                                    version,
+                                    generation,
+                                    status,
+                                    selected_endpoint,
+                                )}
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(endpoint_id) = selected_endpoint() {
+                if let Some(endpoint) = custom_endpoints.iter().find(|endpoint| endpoint.id == endpoint_id).cloned() {
+                    {endpoint_editor(
+                        endpoint,
+                        api_base_url.clone(),
+                        program_id.clone(),
+                        version,
+                        generation,
+                        status,
+                    )}
+                }
+            }
+        }
+    }
+}
+
+fn next_endpoint_path(page_name: &str, endpoints: &[PageEndpointDefinition]) -> String {
+    let mut index = endpoints.len() + 1;
+    loop {
+        let path = format!("/api/{page_name}/custom-endpoint-{index}");
+        if endpoints.iter().all(|endpoint| endpoint.path != path) {
+            return path;
+        }
+        index += 1;
+    }
+}
+
+fn endpoint_table_row(
+    endpoint: crate::CompiledPageEndpoint,
+    api_base_url: String,
+    program_id: String,
+    version: i64,
+    generation: Signal<u64>,
+    status: Signal<Option<String>>,
+    mut selected_endpoint: Signal<Option<SymbolId>>,
+) -> Element {
+    let endpoint_id = SymbolId::parse(&endpoint.id).ok();
+    rsx! {
+        TableRow { key: "{endpoint.id}",
+            TableCell {
+                if endpoint.source == PageEndpointSource::BuiltIn {
+                    Badge { variant: BadgeVariant::Outline, "内置" }
+                } else {
+                    Badge { variant: BadgeVariant::Outline, "自定义" }
+                }
+            }
+            TableCell { span { class: method_class(endpoint.method), "{endpoint.method.as_str()}" } }
+            TableCell { code { class: "aio-endpoint-table__path", "{endpoint.path}" } }
+            TableCell { strong { "{endpoint.title}" } }
+            TableCell { "{endpoint.inputs.len()}" }
+            TableCell { "{endpoint.outputs.len()}" }
+            TableCell { class: Some("text-right".to_owned()),
+                if let Some(endpoint_id) = endpoint_id {
+                    Button {
+                        size: ButtonSize::IconSm,
+                        variant: if selected_endpoint() == Some(endpoint_id) {
+                            ButtonVariant::Secondary
+                        } else {
+                            ButtonVariant::Ghost
+                        },
+                        title: "编辑接口",
+                        aria_label: "编辑接口",
+                        onclick: move |_| selected_endpoint.set(Some(endpoint_id)),
+                        icons::Pencil { class: "size-4" }
+                    }
+                    Button {
+                        size: ButtonSize::IconSm,
+                        variant: ButtonVariant::Ghost,
+                        title: "删除接口",
+                        aria_label: "删除接口",
+                        onclick: move |_| {
+                            submit_patches(
                                 api_base_url.clone(),
                                 program_id.clone(),
                                 version,
+                                vec![GraphPatch::Delete { target_id: endpoint_id }],
                                 generation,
                                 status,
-                            )}
-                        }
+                            );
+                            if selected_endpoint() == Some(endpoint_id) {
+                                selected_endpoint.set(None);
+                            }
+                        },
+                        icons::Trash2 { class: "size-4" }
                     }
+                } else {
+                    code { class: "aio-endpoint-table__provider", "{short_provider_key(&endpoint.route_instruction.provider_key)}" }
                 }
             }
         }
@@ -1459,7 +2058,6 @@ fn endpoint_editor(
     generation: Signal<u64>,
     status: Signal<Option<String>>,
 ) -> Element {
-    let endpoint_id = endpoint.id;
     let save_endpoint = endpoint.clone();
     let save_api = api_base_url.clone();
     let save_program = program_id.clone();
@@ -1469,17 +2067,14 @@ fn endpoint_editor(
     let add_output_endpoint = endpoint.clone();
     let add_output_api = api_base_url.clone();
     let add_output_program = program_id.clone();
-    let delete_api = api_base_url;
-    let delete_program = program_id;
     rsx! {
         form { class: "aio-endpoint-editor", onsubmit: move |event| {
             event.prevent_default();
-            let name = form_text(&event, "name").trim().to_owned();
             let title = form_text(&event, "title").trim().to_owned();
             let path = form_text(&event, "path").trim().to_owned();
-            if name.is_empty() || title.is_empty() || !path.starts_with('/') {
+            if !path.starts_with('/') {
                 let mut status = status;
-                status.set(Some("接口标识、标题不能为空，路径必须以 / 开头".to_owned()));
+                status.set(Some("REST 路径必须以 / 开头".to_owned()));
                 return;
             }
             let inputs = save_endpoint
@@ -1494,10 +2089,8 @@ fn endpoint_editor(
                 .collect();
             let updated = PageEndpointDefinition {
                 id: save_endpoint.id,
-                name,
                 title,
                 state: save_endpoint.state.clone(),
-                intent: form_text(&event, "intent").trim().to_owned(),
                 method: rest_method_from_key(&form_text(&event, "method")),
                 path,
                 inputs,
@@ -1524,33 +2117,11 @@ fn endpoint_editor(
                         placeholder: "/api/users/batch-disable"
                     }
                 }
-                Button {
-                    button_type: "button",
-                    size: ButtonSize::IconSm,
-                    variant: ButtonVariant::Ghost,
-                    title: "删除接口",
-                    aria_label: "删除接口",
-                    onclick: move |_| submit_patches(
-                        delete_api.clone(),
-                        delete_program.clone(),
-                        version,
-                        vec![GraphPatch::Delete { target_id: endpoint_id }],
-                        generation,
-                        status,
-                    ),
-                    icons::Trash2 { class: "size-4" }
-                }
             }
             div { class: "aio-endpoint-editor__identity",
-                label { "接口标识"
-                    input { name: "name", class: "aio-input", value: "{endpoint.name}" }
-                }
-                label { "显示名称"
+                label { "显示名称（可选）"
                     input { name: "title", class: "aio-input", value: "{endpoint.title}" }
                 }
-            }
-            label { class: "aio-endpoint-editor__intent", "中文需求"
-                textarea { name: "intent", class: "aio-input", rows: "2", value: "{endpoint.intent}" }
             }
             section { class: "aio-endpoint-parameters",
                 header {
@@ -1586,25 +2157,29 @@ fn endpoint_editor(
                 if endpoint.inputs.is_empty() {
                     div { class: "aio-endpoint-parameters__empty", "无入参" }
                 } else {
-                    div { class: "aio-endpoint-parameter-table",
-                        div { class: "aio-endpoint-parameter-table__head",
-                            span { "名称" }
-                            span { "说明" }
-                            span { "位置" }
-                            span { "类型" }
-                            span { "必填" }
-                            span {}
+                    Table { class: Some("aio-endpoint-parameter-table".to_owned()),
+                        TableHeader {
+                            TableRow {
+                                TableHead { "名称" }
+                                TableHead { "说明" }
+                                TableHead { "位置" }
+                                TableHead { "类型" }
+                                TableHead { "必填" }
+                                TableHead {}
+                            }
                         }
-                        for input in &endpoint.inputs {
-                            {endpoint_input_row(
-                                input.clone(),
-                                endpoint.clone(),
-                                save_api.clone(),
-                                save_program.clone(),
-                                version,
-                                generation,
-                                status,
-                            )}
+                        TableBody {
+                            for input in &endpoint.inputs {
+                                {endpoint_input_row(
+                                    input.clone(),
+                                    endpoint.clone(),
+                                    save_api.clone(),
+                                    save_program.clone(),
+                                    version,
+                                    generation,
+                                    status,
+                                )}
+                            }
                         }
                     }
                 }
@@ -1641,17 +2216,27 @@ fn endpoint_editor(
                 if endpoint.outputs.is_empty() {
                     div { class: "aio-endpoint-parameters__empty", "无响应字段" }
                 } else {
-                    div { class: "aio-endpoint-output-grid",
-                        for output in &endpoint.outputs {
-                            {endpoint_output_row(
-                                output.clone(),
-                                endpoint.clone(),
-                                save_api.clone(),
-                                save_program.clone(),
-                                version,
-                                generation,
-                                status,
-                            )}
+                    Table { class: Some("aio-endpoint-output-grid".to_owned()),
+                        TableHeader {
+                            TableRow {
+                                TableHead { "名称" }
+                                TableHead { "说明" }
+                                TableHead { "类型" }
+                                TableHead {}
+                            }
+                        }
+                        TableBody {
+                            for output in &endpoint.outputs {
+                                {endpoint_output_row(
+                                    output.clone(),
+                                    endpoint.clone(),
+                                    save_api.clone(),
+                                    save_program.clone(),
+                                    version,
+                                    generation,
+                                    status,
+                                )}
+                            }
                         }
                     }
                 }
@@ -1682,39 +2267,44 @@ fn endpoint_input_row(
     let required_field = endpoint_input_field_name(input.id, "required");
     let input_id = input.id;
     rsx! {
-        div { class: "aio-endpoint-parameter-table__row",
-            input { name: name_field, class: "aio-input", value: "{input.name}" }
-            input { name: title_field, class: "aio-input", value: "{input.title}" }
-            select { name: location_field, class: "aio-input",
-                {endpoint_location_options(input.location)}
+        TableRow { class: Some("aio-endpoint-parameter-table__row".to_owned()),
+            TableCell { input { name: name_field, class: "aio-input", value: "{input.name}" } }
+            TableCell { input { name: title_field, class: "aio-input", value: "{input.title}" } }
+            TableCell { select { name: location_field, class: "aio-input",
+                    {endpoint_location_options(input.location)}
+                }
             }
-            {endpoint_value_type_select(type_field, &input.value_type)}
-            input {
-                name: required_field,
-                r#type: "checkbox",
-                value: "true",
-                checked: input.required,
-                aria_label: "必填"
+            TableCell { {endpoint_value_type_select(type_field, &input.value_type)} }
+            TableCell { class: Some("aio-endpoint-parameter-table__required".to_owned()),
+                input {
+                    name: required_field,
+                    r#type: "checkbox",
+                    value: "true",
+                    checked: input.required,
+                    aria_label: "必填"
+                }
             }
-            Button {
-                button_type: "button",
-                size: ButtonSize::IconSm,
-                variant: ButtonVariant::Ghost,
-                title: "删除入参",
-                aria_label: "删除入参",
-                onclick: move |_| {
-                    let mut updated = endpoint.clone();
-                    updated.inputs.retain(|value| value.id != input_id);
-                    submit_endpoint_update(
-                        updated,
-                        api_base_url.clone(),
-                        program_id.clone(),
-                        version,
-                        generation,
-                        status,
-                    );
-                },
-                icons::X { class: "size-4" }
+            TableCell { class: Some("aio-endpoint-parameter-table__action".to_owned()),
+                Button {
+                    button_type: "button",
+                    size: ButtonSize::IconSm,
+                    variant: ButtonVariant::Ghost,
+                    title: "删除入参",
+                    aria_label: "删除入参",
+                    onclick: move |_| {
+                        let mut updated = endpoint.clone();
+                        updated.inputs.retain(|value| value.id != input_id);
+                        submit_endpoint_update(
+                            updated,
+                            api_base_url.clone(),
+                            program_id.clone(),
+                            version,
+                            generation,
+                            status,
+                        );
+                    },
+                    icons::X { class: "size-4" }
+                }
             }
         }
     }
@@ -1734,29 +2324,31 @@ fn endpoint_output_row(
     let type_field = endpoint_output_field_name(output.id, "type");
     let output_id = output.id;
     rsx! {
-        div { class: "aio-endpoint-output-grid__row",
-            input { name: name_field, class: "aio-input", value: "{output.name}" }
-            input { name: title_field, class: "aio-input", value: "{output.title}" }
-            {endpoint_value_type_select(type_field, &output.value_type)}
-            Button {
-                button_type: "button",
-                size: ButtonSize::IconSm,
-                variant: ButtonVariant::Ghost,
-                title: "删除出参",
-                aria_label: "删除出参",
-                onclick: move |_| {
-                    let mut updated = endpoint.clone();
-                    updated.outputs.retain(|value| value.id != output_id);
-                    submit_endpoint_update(
-                        updated,
-                        api_base_url.clone(),
-                        program_id.clone(),
-                        version,
-                        generation,
-                        status,
-                    );
-                },
-                icons::X { class: "size-4" }
+        TableRow { class: Some("aio-endpoint-output-grid__row".to_owned()),
+            TableCell { input { name: name_field, class: "aio-input", value: "{output.name}" } }
+            TableCell { input { name: title_field, class: "aio-input", value: "{output.title}" } }
+            TableCell { {endpoint_value_type_select(type_field, &output.value_type)} }
+            TableCell { class: Some("aio-endpoint-parameter-table__action".to_owned()),
+                Button {
+                    button_type: "button",
+                    size: ButtonSize::IconSm,
+                    variant: ButtonVariant::Ghost,
+                    title: "删除出参",
+                    aria_label: "删除出参",
+                    onclick: move |_| {
+                        let mut updated = endpoint.clone();
+                        updated.outputs.retain(|value| value.id != output_id);
+                        submit_endpoint_update(
+                            updated,
+                            api_base_url.clone(),
+                            program_id.clone(),
+                            version,
+                            generation,
+                            status,
+                        );
+                    },
+                    icons::X { class: "size-4" }
+                }
             }
         }
     }
@@ -1848,9 +2440,9 @@ fn generate_endpoint_with_ai(
         let prompt = format!(
             "只为页面 {page_title}（SymbolId: {page_id}）新增一个自定义 REST 接口。\
              必须使用 GraphPatch::Insert，parent_id 为该页面，collection 为 page_endpoints，\
-             entity 为 page_endpoint。根据中文需求生成 snake_case 接口标识、中文标题、HTTP 方法、\
-             本应用相对路径、完整 inputs 和 outputs；路径参数必须在 path 中使用同名花括号。\
-             intent 原样保存。中文需求：{intent}"
+             entity 为 page_endpoint。根据中文需求生成可选中文显示名、HTTP 方法、本应用相对路径、\
+             完整 inputs 和 outputs；REST 路径就是接口标识，不得新增 name 或 intent 字段。\
+             路径参数必须在 path 中使用同名花括号。中文需求只用于本次生成：{intent}"
         );
         let request = VibeRunRequest {
             prompt,
@@ -2029,6 +2621,9 @@ fn models_panel(
                                 state: DefinitionState::Known,
                                 fields: Vec::new(),
                                 indexes: Vec::new(),
+                                queries: Vec::new(),
+                                validations: Vec::new(),
+                                audit: crate::ModelAuditDefinition::default(),
                             }),
                         }], generation, status,
                     );
@@ -2065,6 +2660,7 @@ fn models_panel(
                         ModelGrid {
                             key: "{model.id}:{version}",
                             model,
+                            all_models: draft.definition.models.clone(),
                             api_base_url: api_base_url.clone(),
                             program_id: storage_id.clone(),
                             version,
@@ -2141,6 +2737,7 @@ fn copy_json_to_clipboard(json: String, mut status: Signal<Option<String>>) {
 #[component]
 fn ModelGrid(
     model: ModelDefinition,
+    all_models: Vec<ModelDefinition>,
     api_base_url: String,
     program_id: String,
     version: i64,
@@ -2150,8 +2747,14 @@ fn ModelGrid(
     let model_id = model.id;
     let field_count = model.fields.len();
     let index_count = model.indexes.len();
+    let query_count = model.queries.len();
+    let validation_count = model.validations.len();
     let fields = model.fields.clone();
     let indexes = model.indexes.clone();
+    let queries = model.queries.clone();
+    let validations = model.validations.clone();
+    let audit = model.audit.clone();
+    let relation_editor = use_signal(|| None::<SymbolId>);
     let initial_model_name = model.name.clone();
     let initial_model_title = model.title.clone();
     let mut model_name = use_signal(move || initial_model_name);
@@ -2208,6 +2811,20 @@ fn ModelGrid(
                 }
             }
             div { class: "aio-model-grid__section-heading",
+                h3 { "审计字段" }
+                span { "{audit.fields.len()} 项" }
+            }
+            ModelAuditEditor {
+                model_id,
+                fields: fields.clone(),
+                audit,
+                api_base_url: api_base_url.clone(),
+                program_id: program_id.clone(),
+                version,
+                generation,
+                status,
+            }
+            div { class: "aio-model-grid__section-heading",
                 h3 { "字段" }
                 span { "{field_count} 项" }
             }
@@ -2217,6 +2834,7 @@ fn ModelGrid(
                         th { "字段标识" }
                         th { "字段标题" }
                         th { "类型" }
+                        th { "关联" }
                         th { class: "aio-edit-grid__toggle", "必填" }
                         th { class: "aio-edit-grid__toggle", "列表" }
                         th { class: "aio-edit-grid__toggle", "详情" }
@@ -2244,6 +2862,7 @@ fn ModelGrid(
                                 version,
                                 generation,
                                 status,
+                                relation_editor,
                             }
                         }
                         NewFieldGridRow {
@@ -2260,14 +2879,14 @@ fn ModelGrid(
                 }
             }
             div { class: "aio-model-grid__section-heading",
-                h3 { "表达式索引" }
+                h3 { "索引" }
                 span { "{index_count} 项" }
             }
             div { class: "aio-edit-grid aio-edit-grid--indexes",
                 table {
                     thead { tr {
                         th { "索引字段" }
-                        th { "用途" }
+                        th { "唯一" }
                         th { class: "aio-edit-grid__actions", "操作" }
                     } }
                     tbody {
@@ -2287,9 +2906,9 @@ fn ModelGrid(
                             key: "new-index:{model_id}:{version}",
                             model_id,
                             index_count,
-                            fields,
-                            api_base_url,
-                            program_id,
+                            fields: fields.clone(),
+                            api_base_url: api_base_url.clone(),
+                            program_id: program_id.clone(),
                             version,
                             generation,
                             status,
@@ -2297,7 +2916,256 @@ fn ModelGrid(
                     }
                 }
             }
+            div { class: "aio-model-grid__section-heading",
+                h3 { "命名查询" }
+                span { "{query_count} 项" }
+            }
+            div { class: "aio-model-metadata-editor",
+                for query in &queries {
+                    div { class: "aio-model-metadata-editor__saved",
+                        div {
+                            strong { "{query.title}" }
+                            code { "{query.name}" }
+                            span { "{query.conditions.len()} 个条件" }
+                        }
+                        Button {
+                            size: ButtonSize::IconSm,
+                            variant: ButtonVariant::Ghost,
+                            title: "删除查询 {query.title}",
+                            aria_label: "删除查询 {query.name}",
+                            onclick: {
+                                let query_id = query.id;
+                                let api_base_url = api_base_url.clone();
+                                let program_id = program_id.clone();
+                                move |_| submit_patches(
+                                    api_base_url.clone(),
+                                    program_id.clone(),
+                                    version,
+                                    vec![GraphPatch::Delete { target_id: query_id }],
+                                    generation,
+                                    status,
+                                )
+                            },
+                            icons::X { class: "size-4" }
+                        }
+                    }
+                }
+                QueryBuilder {
+                    model_id,
+                    query_count,
+                    fields: fields.clone(),
+                    all_models: all_models.clone(),
+                    api_base_url: api_base_url.clone(),
+                    program_id: program_id.clone(),
+                    version,
+                    generation,
+                    status,
+                }
+            }
+            div { class: "aio-model-grid__section-heading",
+                h3 { "模型校验" }
+                span { "{validation_count} 项" }
+            }
+            div { class: "aio-model-metadata-editor",
+                for validation in &validations {
+                    div { class: "aio-model-metadata-editor__saved",
+                        div {
+                            strong { "{validation.message}" }
+                            code { "{model_validation_label(&validation.rule)}" }
+                        }
+                        Button {
+                            size: ButtonSize::IconSm,
+                            variant: ButtonVariant::Ghost,
+                            title: "删除模型校验",
+                            aria_label: "删除模型校验",
+                            onclick: {
+                                let validation_id = validation.id;
+                                let api_base_url = api_base_url.clone();
+                                let program_id = program_id.clone();
+                                move |_| submit_patches(
+                                    api_base_url.clone(),
+                                    program_id.clone(),
+                                    version,
+                                    vec![GraphPatch::Delete { target_id: validation_id }],
+                                    generation,
+                                    status,
+                                )
+                            },
+                            icons::X { class: "size-4" }
+                        }
+                    }
+                }
+                ModelValidationBuilder {
+                    model_id,
+                    validation_count,
+                    fields: fields.clone(),
+                    api_base_url: api_base_url.clone(),
+                    program_id: program_id.clone(),
+                    version,
+                    generation,
+                    status,
+                }
+            }
+            if let Some(field_id) = relation_editor() {
+                if let Some(field) = model.fields.iter().find(|field| field.id == field_id).cloned() {
+                    RelationEditor {
+                        field,
+                        source_model: model.clone(),
+                        all_models,
+                        api_base_url: api_base_url.clone(),
+                        program_id: program_id.clone(),
+                        version,
+                        generation,
+                        status,
+                        relation_editor,
+                    }
+                }
+            }
         }
+    }
+}
+
+#[component]
+fn ModelAuditEditor(
+    model_id: SymbolId,
+    fields: Vec<FieldDefinition>,
+    audit: crate::ModelAuditDefinition,
+    api_base_url: String,
+    program_id: String,
+    version: i64,
+    generation: Signal<u64>,
+    mut status: Signal<Option<String>>,
+) -> Element {
+    let initial_kinds = audit
+        .fields
+        .iter()
+        .map(|field| field.kind)
+        .collect::<BTreeSet<_>>();
+    let bindings = audit
+        .fields
+        .iter()
+        .map(|field| (field.kind, field.field_id))
+        .collect::<BTreeMap<_, _>>();
+    let mut selected = use_signal(move || initial_kinds);
+    rsx! {
+        form {
+            class: "aio-model-audit-editor",
+            onsubmit: move |event| {
+                event.prevent_default();
+                let selected_kinds = selected();
+                let mut audit_fields = Vec::with_capacity(selected_kinds.len());
+                let mut patches = Vec::new();
+                let mut next_field_index = fields.len();
+                for kind in crate::AuditFieldKind::all() {
+                    if !selected_kinds.contains(&kind) {
+                        continue;
+                    }
+                    let field_id = if let Some(field_id) = bindings.get(&kind) {
+                        *field_id
+                    } else if let Some(field) = fields
+                        .iter()
+                        .find(|field| field.name == kind.default_name())
+                    {
+                        if field.value_type != kind.default_value_type() {
+                            status.set(Some(format!(
+                                "审计字段 {} 必须使用 {} 类型",
+                                kind.default_name(),
+                                value_type_label(&kind.default_value_type())
+                            )));
+                            return;
+                        }
+                        field.id
+                    } else {
+                        let field_id = SymbolId::new();
+                        let field = audit_field_definition(kind, field_id);
+                        patches.push(GraphPatch::Insert {
+                            parent_id: model_id,
+                            collection: ChildCollection::Fields,
+                            index: next_field_index,
+                            entity: GraphEntity::Field(field),
+                        });
+                        next_field_index = next_field_index.saturating_add(1);
+                        field_id
+                    };
+                    audit_fields.push(crate::ModelAuditField { kind, field_id });
+                }
+                patches.push(GraphPatch::SetProperty {
+                    target_id: model_id,
+                    property: crate::EditableProperty::ModelAudit,
+                    value: serde_json::json!(crate::ModelAuditDefinition {
+                        fields: audit_fields,
+                    }),
+                });
+                submit_patches(
+                    api_base_url.clone(),
+                    program_id.clone(),
+                    version,
+                    patches,
+                    generation,
+                    status,
+                );
+            },
+            div { class: "aio-model-audit-editor__roles",
+                for kind in crate::AuditFieldKind::all() {
+                    label {
+                        input {
+                            r#type: "checkbox",
+                            checked: selected().contains(&kind),
+                            aria_label: "启用审计字段 {kind.label()}",
+                            onchange: move |event| selected.with_mut(|kinds| {
+                                if event.checked() {
+                                    kinds.insert(kind);
+                                } else {
+                                    kinds.remove(&kind);
+                                }
+                            }),
+                        }
+                        span { "{kind.label()}" }
+                        code { "{kind.default_name()}" }
+                    }
+                }
+            }
+            footer {
+                Button {
+                    button_type: "submit",
+                    size: ButtonSize::Sm,
+                    variant: ButtonVariant::Outline,
+                    title: "保存审计字段",
+                    aria_label: "保存审计字段",
+                    icons::Save { class: "size-4" }
+                    "保存审计字段"
+                }
+            }
+        }
+    }
+}
+
+fn audit_field_definition(kind: crate::AuditFieldKind, id: SymbolId) -> FieldDefinition {
+    let mut options = crate::FieldOptions::default();
+    options.form_visible = false;
+    options.form_editable = false;
+    options.excel_import = false;
+    options.ai_extract = false;
+    options.filterable = matches!(
+        kind,
+        crate::AuditFieldKind::TenantId | crate::AuditFieldKind::Deleted
+    );
+    options.sortable = matches!(
+        kind,
+        crate::AuditFieldKind::CreatedAt
+            | crate::AuditFieldKind::UpdatedAt
+            | crate::AuditFieldKind::DeletedAt
+            | crate::AuditFieldKind::Version
+    );
+    FieldDefinition {
+        id,
+        name: kind.default_name().to_owned(),
+        title: kind.default_title().to_owned(),
+        value_type: kind.default_value_type(),
+        state: DefinitionState::Known,
+        required: false,
+        options,
+        relation: None,
     }
 }
 
@@ -2309,6 +3177,7 @@ fn FieldGridRow(
     version: i64,
     generation: Signal<u64>,
     mut status: Signal<Option<String>>,
+    mut relation_editor: Signal<Option<SymbolId>>,
 ) -> Element {
     let field_id = field.id;
     let current_value_type = field.value_type.clone();
@@ -2325,8 +3194,7 @@ fn FieldGridRow(
         .unwrap_or_default();
     let initial_placeholder = field.options.placeholder.clone().unwrap_or_default();
     let initial_help_text = field.options.help_text.clone().unwrap_or_default();
-    let initial_validation =
-        serde_json::to_string(&field.options.validation).unwrap_or_else(|_| "{}".to_owned());
+    let initial_validation = field.options.validation.clone();
     let mut name = use_signal(move || initial_name);
     let mut title = use_signal(move || initial_title);
     let mut value_type = use_signal(move || initial_type);
@@ -2335,7 +3203,7 @@ fn FieldGridRow(
     let mut default_value = use_signal(move || initial_default_value);
     let mut placeholder = use_signal(move || initial_placeholder);
     let mut help_text = use_signal(move || initial_help_text);
-    let mut validation = use_signal(move || initial_validation);
+    let validation = use_signal(move || initial_validation);
     rsx! {
         tr { "data-field-id": "{field_id}",
             td { input {
@@ -2350,9 +3218,20 @@ fn FieldGridRow(
             } }
             td { select {
                 aria_label: "字段类型 {field.name}",
+                disabled: field.relation.is_some(),
                 onchange: move |event| value_type.set(event.value()),
                 {editable_value_type_options(&current_value_type, value_type())}
             } }
+            td { class: "aio-edit-grid__actions",
+                Button {
+                    size: ButtonSize::IconSm,
+                    variant: if field.relation.is_some() { ButtonVariant::Outline } else { ButtonVariant::Ghost },
+                    title: "设置关联 {field.title}",
+                    aria_label: "设置关联 {field.name}",
+                    onclick: move |_| relation_editor.set(Some(field_id)),
+                    icons::Link { class: "size-4" }
+                }
+            }
             td { class: "aio-edit-grid__toggle", input {
                 aria_label: "字段必填 {field.name}",
                 r#type: "checkbox",
@@ -2376,13 +3255,7 @@ fn FieldGridRow(
                 value: help_text(),
                 oninput: move |event| help_text.set(event.value()),
             } }
-            td { input {
-                aria_label: "校验规则 {field.name}",
-                title: "JSON: min_length, max_length, minimum, maximum, pattern",
-                placeholder: "{{}}",
-                value: validation(),
-                oninput: move |event| validation.set(event.value()),
-            } }
+            FieldValidationCell { validation, field_label: field.title.clone() }
             td { class: "aio-edit-grid__actions",
                 Button {
                     size: ButtonSize::IconSm,
@@ -2400,15 +3273,7 @@ fn FieldGridRow(
                             &value_type(),
                             &current_value_type,
                         );
-                        let next_validation = match serde_json::from_str::<crate::FieldValidation>(
-                            validation().trim(),
-                        ) {
-                            Ok(value) => value,
-                            Err(error) => {
-                                status.set(Some(format!("校验规则必须是合法 JSON: {error}")));
-                                return;
-                            }
-                        };
+                        let next_validation = validation();
                         let mut next_options = options();
                         next_options.default_value = editable_default_value(&default_value());
                         next_options.placeholder = non_empty_text(&placeholder());
@@ -2450,6 +3315,633 @@ fn FieldGridRow(
 }
 
 #[component]
+fn QueryBuilder(
+    model_id: SymbolId,
+    query_count: usize,
+    fields: Vec<FieldDefinition>,
+    all_models: Vec<ModelDefinition>,
+    api_base_url: String,
+    program_id: String,
+    version: i64,
+    generation: Signal<u64>,
+    mut status: Signal<Option<String>>,
+) -> Element {
+    let mut name = use_signal(String::new);
+    let mut title = use_signal(String::new);
+    let mut conjunction = use_signal(|| "all".to_owned());
+    let mut field_id = use_signal(String::new);
+    let mut field_operator = use_signal(|| "contains".to_owned());
+    let mut field_parameter = use_signal(String::new);
+    let mut relation_field_id = use_signal(String::new);
+    let mut relation_target_field_id = use_signal(String::new);
+    let mut relation_operator = use_signal(|| "contains".to_owned());
+    let mut relation_parameter = use_signal(String::new);
+    let target_fields = SymbolId::parse(&relation_field_id())
+        .ok()
+        .and_then(|field_id| fields.iter().find(|field| field.id == field_id))
+        .and_then(|field| field.relation.as_ref())
+        .and_then(|relation| {
+            all_models
+                .iter()
+                .find(|model| model.id == relation.target_model_id)
+        })
+        .map(|model| model.fields.clone())
+        .unwrap_or_default();
+    rsx! {
+        form {
+            class: "aio-model-metadata-editor__form",
+            onsubmit: move |event| {
+                event.prevent_default();
+                let query_name = name().trim().to_owned();
+                let query_title = title().trim().to_owned();
+                if query_name.is_empty() || query_title.is_empty() {
+                    status.set(Some("查询标识和标题不能为空".to_owned()));
+                    return;
+                }
+                let mut conditions = Vec::new();
+                if let Ok(selected_field_id) = SymbolId::parse(&field_id()) {
+                    conditions.push(crate::QueryCondition::Field {
+                        field_id: selected_field_id,
+                        operator: query_operator_from_key(&field_operator()),
+                        parameter: field_parameter().trim().to_owned(),
+                    });
+                }
+                if let (Ok(selected_relation_id), Ok(selected_target_id)) = (
+                    SymbolId::parse(&relation_field_id()),
+                    SymbolId::parse(&relation_target_field_id()),
+                ) {
+                    conditions.push(crate::QueryCondition::Relation {
+                        relation_field_id: selected_relation_id,
+                        target_field_id: selected_target_id,
+                        operator: query_operator_from_key(&relation_operator()),
+                        parameter: relation_parameter().trim().to_owned(),
+                    });
+                }
+                if conditions.is_empty() || conditions.iter().any(query_condition_has_empty_parameter) {
+                    status.set(Some("至少配置一个带参数名的查询条件".to_owned()));
+                    return;
+                }
+                submit_patches(
+                    api_base_url.clone(),
+                    program_id.clone(),
+                    version,
+                    vec![GraphPatch::Insert {
+                        parent_id: model_id,
+                        collection: ChildCollection::ModelQueries,
+                        index: query_count,
+                        entity: GraphEntity::ModelQuery(crate::ModelQueryDefinition {
+                            id: SymbolId::new(),
+                            name: query_name,
+                            title: query_title,
+                            conjunction: query_conjunction_from_key(&conjunction()),
+                            conditions,
+                        }),
+                    }],
+                    generation,
+                    status,
+                );
+            },
+            label {
+                "查询标识"
+                input {
+                    class: "aio-input",
+                    value: name(),
+                    oninput: move |event| name.set(event.value()),
+                }
+            }
+            label {
+                "查询标题"
+                input {
+                    class: "aio-input",
+                    value: title(),
+                    oninput: move |event| title.set(event.value()),
+                }
+            }
+            label {
+                "条件关系"
+                select {
+                    class: "aio-input",
+                    value: conjunction(),
+                    onchange: move |event| conjunction.set(event.value()),
+                    option { value: "all", "全部满足" }
+                    option { value: "any", "任一满足" }
+                }
+            }
+            label {
+                "本模型字段"
+                select {
+                    class: "aio-input",
+                    value: field_id(),
+                    onchange: move |event| field_id.set(event.value()),
+                    option { value: "", "不添加本模型条件" }
+                    for field in &fields {
+                        option { value: "{field.id}", "{field.title}" }
+                    }
+                }
+            }
+            label {
+                "本模型匹配"
+                select {
+                    class: "aio-input",
+                    value: field_operator(),
+                    onchange: move |event| field_operator.set(event.value()),
+                    {query_operator_options(&field_operator())}
+                }
+            }
+            label {
+                "本模型参数"
+                input {
+                    class: "aio-input",
+                    placeholder: "例如 department_name",
+                    value: field_parameter(),
+                    oninput: move |event| field_parameter.set(event.value()),
+                }
+            }
+            label {
+                "关联字段"
+                select {
+                    class: "aio-input",
+                    value: relation_field_id(),
+                    onchange: move |event| relation_field_id.set(event.value()),
+                    option { value: "", "不添加关联条件" }
+                    for field in fields.iter().filter(|field| field.relation.is_some()) {
+                        option { value: "{field.id}", "{field.title}" }
+                    }
+                }
+            }
+            label {
+                "关联表字段"
+                select {
+                    class: "aio-input",
+                    value: relation_target_field_id(),
+                    onchange: move |event| relation_target_field_id.set(event.value()),
+                    option { value: "", "选择字段" }
+                    for field in &target_fields {
+                        option { value: "{field.id}", "{field.title}" }
+                    }
+                }
+            }
+            label {
+                "关联匹配"
+                select {
+                    class: "aio-input",
+                    value: relation_operator(),
+                    onchange: move |event| relation_operator.set(event.value()),
+                    {query_operator_options(&relation_operator())}
+                }
+            }
+            label {
+                "关联参数"
+                input {
+                    class: "aio-input",
+                    placeholder: "例如 user_name",
+                    value: relation_parameter(),
+                    oninput: move |event| relation_parameter.set(event.value()),
+                }
+            }
+            footer {
+                Button {
+                    button_type: "submit",
+                    title: "添加命名查询",
+                    aria_label: "添加命名查询",
+                    icons::Plus { class: "size-4" }
+                    "添加查询"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ModelValidationBuilder(
+    model_id: SymbolId,
+    validation_count: usize,
+    fields: Vec<FieldDefinition>,
+    api_base_url: String,
+    program_id: String,
+    version: i64,
+    generation: Signal<u64>,
+    mut status: Signal<Option<String>>,
+) -> Element {
+    let mut kind = use_signal(|| "required_when_present".to_owned());
+    let mut field_id = use_signal(String::new);
+    let mut other_field_id = use_signal(String::new);
+    let mut message = use_signal(String::new);
+    let has_fields = fields.len() >= 2;
+    rsx! {
+        form {
+            class: "aio-model-metadata-editor__form",
+            onsubmit: move |event| {
+                event.prevent_default();
+                let Ok(selected_field_id) = SymbolId::parse(&field_id()) else {
+                    status.set(Some("请选择校验字段".to_owned()));
+                    return;
+                };
+                let Ok(selected_other_field_id) = SymbolId::parse(&other_field_id()) else {
+                    status.set(Some("请选择关联校验字段".to_owned()));
+                    return;
+                };
+                if selected_field_id == selected_other_field_id || message().trim().is_empty() {
+                    status.set(Some("校验字段必须不同，且提示不能为空".to_owned()));
+                    return;
+                }
+                let rule = match kind().as_str() {
+                    "fields_required_together" => crate::ModelValidationRule::FieldsRequiredTogether {
+                        field_ids: vec![selected_field_id, selected_other_field_id],
+                    },
+                    "at_least_one_required" => crate::ModelValidationRule::AtLeastOneRequired {
+                        field_ids: vec![selected_field_id, selected_other_field_id],
+                    },
+                    _ => crate::ModelValidationRule::RequiredWhenPresent {
+                        field_id: selected_field_id,
+                        when_field_id: selected_other_field_id,
+                    },
+                };
+                submit_patches(
+                    api_base_url.clone(),
+                    program_id.clone(),
+                    version,
+                    vec![GraphPatch::Insert {
+                        parent_id: model_id,
+                        collection: ChildCollection::ModelValidations,
+                        index: validation_count,
+                        entity: GraphEntity::ModelValidation(crate::ModelValidationDefinition {
+                            id: SymbolId::new(),
+                            message: message().trim().to_owned(),
+                            rule,
+                        }),
+                    }],
+                    generation,
+                    status,
+                );
+            },
+            label {
+                "规则"
+                select {
+                    class: "aio-input",
+                    value: kind(),
+                    onchange: move |event| kind.set(event.value()),
+                    option { value: "required_when_present", "条件必填" }
+                    option { value: "fields_required_together", "联合必填" }
+                    option { value: "at_least_one_required", "至少一个必填" }
+                }
+            }
+            label {
+                "字段"
+                select {
+                    class: "aio-input",
+                    value: field_id(),
+                    onchange: move |event| field_id.set(event.value()),
+                    option { value: "", "选择字段" }
+                    for field in &fields {
+                        option { value: "{field.id}", "{field.title}" }
+                    }
+                }
+            }
+            label {
+                "依赖字段"
+                select {
+                    class: "aio-input",
+                    value: other_field_id(),
+                    onchange: move |event| other_field_id.set(event.value()),
+                    option { value: "", "选择字段" }
+                    for field in &fields {
+                        option { value: "{field.id}", "{field.title}" }
+                    }
+                }
+            }
+            label {
+                "失败提示"
+                input {
+                    class: "aio-input",
+                    value: message(),
+                    oninput: move |event| message.set(event.value()),
+                }
+            }
+            footer {
+                Button {
+                    button_type: "submit",
+                    disabled: !has_fields,
+                    title: "添加模型校验",
+                    aria_label: "添加模型校验",
+                    icons::Plus { class: "size-4" }
+                    "添加校验"
+                }
+            }
+        }
+    }
+}
+
+fn query_condition_has_empty_parameter(condition: &crate::QueryCondition) -> bool {
+    match condition {
+        crate::QueryCondition::Field { parameter, .. }
+        | crate::QueryCondition::Relation { parameter, .. } => parameter.trim().is_empty(),
+    }
+}
+
+fn query_conjunction_from_key(value: &str) -> crate::QueryConjunction {
+    match value {
+        "any" => crate::QueryConjunction::Any,
+        _ => crate::QueryConjunction::All,
+    }
+}
+
+fn query_operator_from_key(value: &str) -> crate::QueryOperator {
+    match value {
+        "equals" => crate::QueryOperator::Equals,
+        "not_equals" => crate::QueryOperator::NotEquals,
+        "starts_with" => crate::QueryOperator::StartsWith,
+        "ends_with" => crate::QueryOperator::EndsWith,
+        "greater_than" => crate::QueryOperator::GreaterThan,
+        "greater_or_equal" => crate::QueryOperator::GreaterOrEqual,
+        "less_than" => crate::QueryOperator::LessThan,
+        "less_or_equal" => crate::QueryOperator::LessOrEqual,
+        _ => crate::QueryOperator::Contains,
+    }
+}
+
+fn query_operator_options(selected: &str) -> Element {
+    rsx! {
+        option { value: "contains", selected: selected == "contains", "包含" }
+        option { value: "equals", selected: selected == "equals", "等于" }
+        option { value: "not_equals", selected: selected == "not_equals", "不等于" }
+        option { value: "starts_with", selected: selected == "starts_with", "开头是" }
+        option { value: "ends_with", selected: selected == "ends_with", "结尾是" }
+        option { value: "greater_than", selected: selected == "greater_than", "大于" }
+        option { value: "greater_or_equal", selected: selected == "greater_or_equal", "大于等于" }
+        option { value: "less_than", selected: selected == "less_than", "小于" }
+        option { value: "less_or_equal", selected: selected == "less_or_equal", "小于等于" }
+    }
+}
+
+fn model_validation_label(rule: &crate::ModelValidationRule) -> &'static str {
+    match rule {
+        crate::ModelValidationRule::FieldsRequiredTogether { .. } => "联合必填",
+        crate::ModelValidationRule::AtLeastOneRequired { .. } => "至少一个必填",
+        crate::ModelValidationRule::RequiredWhenPresent { .. } => "条件必填",
+    }
+}
+
+#[component]
+fn RelationEditor(
+    field: FieldDefinition,
+    source_model: ModelDefinition,
+    all_models: Vec<ModelDefinition>,
+    api_base_url: String,
+    program_id: String,
+    version: i64,
+    generation: Signal<u64>,
+    mut status: Signal<Option<String>>,
+    mut relation_editor: Signal<Option<SymbolId>>,
+) -> Element {
+    let field_id = field.id;
+    let initial_kind = field
+        .relation
+        .as_ref()
+        .map(|relation| relation_kind_key(relation.kind).to_owned())
+        .unwrap_or_else(|| "many_to_one".to_owned());
+    let initial_model = field
+        .relation
+        .as_ref()
+        .map(|relation| relation.target_model_id.to_string())
+        .unwrap_or_default();
+    let initial_field = field
+        .relation
+        .as_ref()
+        .map(|relation| relation.target_field_id.to_string())
+        .unwrap_or_default();
+    let mut kind = use_signal(move || initial_kind);
+    let mut target_model = use_signal(move || initial_model);
+    let mut target_field = use_signal(move || initial_field);
+    let selected_target_model = SymbolId::parse(&target_model()).ok();
+    let target_fields = selected_target_model
+        .and_then(|model_id| all_models.iter().find(|model| model.id == model_id))
+        .map(|model| model.fields.clone())
+        .unwrap_or_default();
+    let has_relation = field.relation.is_some();
+    let previous_relation = field.relation.clone();
+    let mut close_editor = relation_editor;
+    let mut remove_editor = relation_editor;
+    let save_api = api_base_url.clone();
+    let save_program_id = program_id.clone();
+    let remove_api = api_base_url;
+    let remove_program_id = program_id;
+    rsx! {
+        div { class: "aio-page-settings__backdrop", onclick: move |_| close_editor.set(None) }
+        section {
+            class: "aio-page-settings__panel",
+            role: "dialog",
+            aria_modal: "true",
+            aria_label: "设置字段关联",
+            onclick: move |event| event.stop_propagation(),
+            header {
+                div {
+                    h2 { "字段关联" }
+                    p { "{source_model.title}.{field.title}" }
+                }
+                Button {
+                    size: ButtonSize::IconSm,
+                    variant: ButtonVariant::Ghost,
+                    title: "关闭",
+                    aria_label: "关闭",
+                    onclick: move |_| close_editor.set(None),
+                    icons::X { class: "size-4" }
+                }
+            }
+            form {
+                class: "aio-page-settings__form",
+                onsubmit: move |event| {
+                    event.prevent_default();
+                    let Ok(target_model_id) = SymbolId::parse(&target_model()) else {
+                        status.set(Some("请选择关联模型".to_owned()));
+                        return;
+                    };
+                    let Ok(target_field_id) = SymbolId::parse(&target_field()) else {
+                        status.set(Some("请选择对端字段".to_owned()));
+                        return;
+                    };
+                    let Some(target) = all_models.iter().find(|model| model.id == target_model_id) else {
+                        status.set(Some("关联模型不存在".to_owned()));
+                        return;
+                    };
+                    let Some(other_field) = target.fields.iter().find(|candidate| candidate.id == target_field_id) else {
+                        status.set(Some("对端字段不属于关联模型".to_owned()));
+                        return;
+                    };
+                    let relation_kind = relation_kind_from_key(&kind());
+                    if target_model_id == source_model.id
+                        && target_field_id == field_id
+                        && relation_kind != relation_kind.opposite()
+                    {
+                        status.set(Some("同一字段自关联只能使用对称基数".to_owned()));
+                        return;
+                    }
+                    if other_field.relation.as_ref().is_some_and(|relation| {
+                        relation.target_model_id != source_model.id || relation.target_field_id != field_id
+                    }) {
+                        status.set(Some("对端字段已关联到其他字段，请先解除原关联".to_owned()));
+                        return;
+                    }
+                    let source_relation = crate::FieldRelation {
+                        kind: relation_kind,
+                        target_model_id,
+                        target_field_id,
+                    };
+                    let target_relation = crate::FieldRelation {
+                        kind: relation_kind.opposite(),
+                        target_model_id: source_model.id,
+                        target_field_id: field_id,
+                    };
+                    let mut patches = vec![
+                        GraphPatch::SetProperty {
+                            target_id: field_id,
+                            property: crate::EditableProperty::FieldRelation,
+                            value: serde_json::json!(source_relation),
+                        },
+                        GraphPatch::SetProperty {
+                            target_id: field_id,
+                            property: crate::EditableProperty::FieldValueType,
+                            value: serde_json::json!(relation_value_type(relation_kind, target_model_id)),
+                        },
+                    ];
+                    if let Some(previous) = &previous_relation
+                        && (previous.target_model_id != target_model_id
+                            || previous.target_field_id != target_field_id)
+                    {
+                        patches.extend([
+                            GraphPatch::SetProperty {
+                                target_id: previous.target_field_id,
+                                property: crate::EditableProperty::FieldRelation,
+                                value: serde_json::Value::Null,
+                            },
+                            GraphPatch::SetProperty {
+                                target_id: previous.target_field_id,
+                                property: crate::EditableProperty::FieldValueType,
+                                value: serde_json::json!(ValueType::Text),
+                            },
+                        ]);
+                    }
+                    if target_field_id != field_id {
+                        patches.extend([
+                            GraphPatch::SetProperty {
+                                target_id: target_field_id,
+                                property: crate::EditableProperty::FieldRelation,
+                                value: serde_json::json!(target_relation),
+                            },
+                            GraphPatch::SetProperty {
+                                target_id: target_field_id,
+                                property: crate::EditableProperty::FieldValueType,
+                                value: serde_json::json!(relation_value_type(relation_kind.opposite(), source_model.id)),
+                            },
+                        ]);
+                    }
+                    submit_patches(
+                        save_api.clone(),
+                        save_program_id.clone(),
+                        version,
+                        patches,
+                        generation,
+                        status,
+                    );
+                    relation_editor.set(None);
+                },
+                label {
+                    "关联基数"
+                    select {
+                        class: "aio-input",
+                        value: kind(),
+                        onchange: move |event| kind.set(event.value()),
+                        option { value: "one_to_one", "OneToOne" }
+                        option { value: "many_to_one", "ManyToOne" }
+                        option { value: "one_to_many", "OneToMany" }
+                        option { value: "many_to_many", "ManyToMany" }
+                    }
+                }
+                label {
+                    "关联模型"
+                    select {
+                        class: "aio-input",
+                        value: target_model(),
+                        onchange: move |event| target_model.set(event.value()),
+                        option { value: "", "选择模型" }
+                        for model in &all_models {
+                            option { value: "{model.id}", "{model.title} · {model.name}" }
+                        }
+                    }
+                }
+                label {
+                    "对端字段"
+                    select {
+                        class: "aio-input",
+                        value: target_field(),
+                        onchange: move |event| target_field.set(event.value()),
+                        option { value: "", "选择字段" }
+                        for target in &target_fields {
+                            option { value: "{target.id}", "{target.title} · {target.name}" }
+                        }
+                    }
+                }
+                footer {
+                    if has_relation {
+                        Button {
+                            variant: ButtonVariant::Ghost,
+                            title: "解除关联",
+                            aria_label: "解除关联",
+                            onclick: move |_| {
+                                let mut patches = vec![
+                                    GraphPatch::SetProperty {
+                                        target_id: field_id,
+                                        property: crate::EditableProperty::FieldRelation,
+                                        value: serde_json::Value::Null,
+                                    },
+                                    GraphPatch::SetProperty {
+                                        target_id: field_id,
+                                        property: crate::EditableProperty::FieldValueType,
+                                        value: serde_json::json!(ValueType::Text),
+                                    },
+                                ];
+                                if let Some(relation) = &field.relation
+                                    && (relation.target_model_id != source_model.id
+                                        || relation.target_field_id != field_id)
+                                {
+                                    patches.extend([
+                                        GraphPatch::SetProperty {
+                                            target_id: relation.target_field_id,
+                                            property: crate::EditableProperty::FieldRelation,
+                                            value: serde_json::Value::Null,
+                                        },
+                                        GraphPatch::SetProperty {
+                                            target_id: relation.target_field_id,
+                                            property: crate::EditableProperty::FieldValueType,
+                                            value: serde_json::json!(ValueType::Text),
+                                        },
+                                    ]);
+                                }
+                                submit_patches(
+                                    remove_api.clone(),
+                                    remove_program_id.clone(),
+                                    version,
+                                    patches,
+                                    generation,
+                                    status,
+                                );
+                                remove_editor.set(None);
+                            },
+                            icons::Unlink { class: "size-4" }
+                        }
+                    }
+                    Button {
+                        button_type: "submit",
+                        icons::Save { class: "size-4" }
+                        "保存关联"
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
 fn NewFieldGridRow(
     model_id: SymbolId,
     field_count: usize,
@@ -2467,7 +3959,7 @@ fn NewFieldGridRow(
     let mut default_value = use_signal(String::new);
     let mut placeholder = use_signal(String::new);
     let mut help_text = use_signal(String::new);
-    let mut validation = use_signal(|| "{}".to_owned());
+    let validation = use_signal(crate::FieldValidation::default);
     rsx! {
         tr { class: "aio-edit-grid__new-row",
             td { input {
@@ -2487,6 +3979,7 @@ fn NewFieldGridRow(
                 onchange: move |event| value_type.set(event.value()),
                 {editable_value_type_options(&ValueType::Text, value_type())}
             } }
+            td { class: "aio-edit-grid__actions" }
             td { class: "aio-edit-grid__toggle", input {
                 aria_label: "新字段必填",
                 r#type: "checkbox",
@@ -2510,13 +4003,7 @@ fn NewFieldGridRow(
                 value: help_text(),
                 oninput: move |event| help_text.set(event.value()),
             } }
-            td { input {
-                aria_label: "新字段校验规则",
-                title: "JSON: min_length, max_length, minimum, maximum, pattern",
-                placeholder: "{{}}",
-                value: validation(),
-                oninput: move |event| validation.set(event.value()),
-            } }
+            FieldValidationCell { validation, field_label: "新字段".to_owned() }
             td { class: "aio-edit-grid__actions",
                 Button {
                     size: ButtonSize::IconSm,
@@ -2530,15 +4017,7 @@ fn NewFieldGridRow(
                             status.set(Some("新字段标识和标题不能为空".to_owned()));
                             return;
                         }
-                        let next_validation = match serde_json::from_str::<crate::FieldValidation>(
-                            validation().trim(),
-                        ) {
-                            Ok(value) => value,
-                            Err(error) => {
-                                status.set(Some(format!("校验规则必须是合法 JSON: {error}")));
-                                return;
-                            }
-                        };
+                        let next_validation = validation();
                         let mut next_options = options();
                         next_options.default_value = editable_default_value(&default_value());
                         next_options.placeholder = non_empty_text(&placeholder());
@@ -2561,7 +4040,7 @@ fn NewFieldGridRow(
                                     state: DefinitionState::Known,
                                     required: required(),
                                     options: next_options,
-                                    relation_model_id: None,
+                                    relation: None,
                                 }),
                             }],
                             generation,
@@ -2573,6 +4052,113 @@ fn NewFieldGridRow(
             }
         }
     }
+}
+
+#[component]
+fn FieldValidationCell(validation: Signal<crate::FieldValidation>, field_label: String) -> Element {
+    let mut min_length = validation;
+    let mut max_length = validation;
+    let mut minimum = validation;
+    let mut maximum = validation;
+    let mut min_items = validation;
+    let mut max_items = validation;
+    let mut pattern = validation;
+    let mut unique_items = validation;
+    rsx! {
+        td { class: "aio-edit-grid__validation",
+            div { class: "aio-edit-grid__validation-grid",
+                label { title: "最小文本长度",
+                    span { "最短" }
+                    input {
+                        r#type: "number",
+                        min: "0",
+                        aria_label: "最小文本长度 {field_label}",
+                        value: optional_u32(validation().min_length),
+                        oninput: move |event| min_length.with_mut(|value| value.min_length = parse_optional_u32(&event.value())),
+                    }
+                }
+                label { title: "最大文本长度",
+                    span { "最长" }
+                    input {
+                        r#type: "number",
+                        min: "0",
+                        aria_label: "最大文本长度 {field_label}",
+                        value: optional_u32(validation().max_length),
+                        oninput: move |event| max_length.with_mut(|value| value.max_length = parse_optional_u32(&event.value())),
+                    }
+                }
+                label { title: "最小数值",
+                    span { "最小" }
+                    input {
+                        aria_label: "最小数值 {field_label}",
+                        value: optional_f64(validation().minimum),
+                        oninput: move |event| minimum.with_mut(|value| value.minimum = parse_optional_f64(&event.value())),
+                    }
+                }
+                label { title: "最大数值",
+                    span { "最大" }
+                    input {
+                        aria_label: "最大数值 {field_label}",
+                        value: optional_f64(validation().maximum),
+                        oninput: move |event| maximum.with_mut(|value| value.maximum = parse_optional_f64(&event.value())),
+                    }
+                }
+                label { title: "列表最少项数",
+                    span { "至少" }
+                    input {
+                        r#type: "number",
+                        min: "0",
+                        aria_label: "列表最少项数 {field_label}",
+                        value: optional_u32(validation().min_items),
+                        oninput: move |event| min_items.with_mut(|value| value.min_items = parse_optional_u32(&event.value())),
+                    }
+                }
+                label { title: "列表最多项数",
+                    span { "至多" }
+                    input {
+                        r#type: "number",
+                        min: "0",
+                        aria_label: "列表最多项数 {field_label}",
+                        value: optional_u32(validation().max_items),
+                        oninput: move |event| max_items.with_mut(|value| value.max_items = parse_optional_u32(&event.value())),
+                    }
+                }
+                label { class: "aio-edit-grid__validation-pattern", title: "正则表达式",
+                    span { "正则" }
+                    input {
+                        aria_label: "正则表达式 {field_label}",
+                        value: validation().pattern.clone().unwrap_or_default(),
+                        oninput: move |event| pattern.with_mut(|value| value.pattern = non_empty_text(&event.value())),
+                    }
+                }
+                label { class: "aio-edit-grid__validation-unique",
+                    input {
+                        r#type: "checkbox",
+                        aria_label: "列表元素不能重复 {field_label}",
+                        checked: validation().unique_items,
+                        onchange: move |event| unique_items.with_mut(|value| value.unique_items = event.checked()),
+                    }
+                    span { "列表元素唯一" }
+                }
+            }
+        }
+    }
+}
+
+fn optional_u32(value: Option<u32>) -> String {
+    value.map(|value| value.to_string()).unwrap_or_default()
+}
+
+fn parse_optional_u32(value: &str) -> Option<u32> {
+    value.trim().parse().ok()
+}
+
+fn optional_f64(value: Option<f64>) -> String {
+    value.map(|value| value.to_string()).unwrap_or_default()
+}
+
+fn parse_optional_f64(value: &str) -> Option<f64> {
+    value.trim().parse().ok()
 }
 
 #[component]
@@ -2667,9 +4253,8 @@ fn IndexGridRow(
 ) -> Element {
     let index_id = index.id;
     let initial_fields = index.fields.iter().copied().collect::<BTreeSet<_>>();
-    let initial_purpose = index_purpose_key(&index.purpose).to_owned();
     let mut selected_fields = use_signal(move || initial_fields);
-    let mut purpose = use_signal(move || initial_purpose);
+    let mut unique = use_signal(move || index.unique);
     rsx! {
         tr { "data-index-id": "{index_id}",
             td { div { class: "aio-edit-grid__checks",
@@ -2693,13 +4278,11 @@ fn IndexGridRow(
                     }
                 }
             } }
-            td { select {
-                aria_label: "索引用途",
-                value: purpose(),
-                onchange: move |event| purpose.set(event.value()),
-                option { value: "filter", "筛选" }
-                option { value: "sort", "排序" }
-                option { value: "relation", "关联" }
+            td { class: "aio-edit-grid__toggle", input {
+                r#type: "checkbox",
+                aria_label: "联合唯一约束",
+                checked: unique(),
+                onchange: move |event| unique.set(event.checked()),
             } }
             td { class: "aio-edit-grid__actions",
                 Button {
@@ -2728,8 +4311,8 @@ fn IndexGridRow(
                                 },
                                 GraphPatch::SetProperty {
                                     target_id: index_id,
-                                    property: crate::EditableProperty::ModelIndexPurpose,
-                                    value: serde_json::json!(index_purpose_from_key(&purpose())),
+                                    property: crate::EditableProperty::ModelIndexUnique,
+                                    value: serde_json::json!(unique()),
                                 },
                             ],
                             generation,
@@ -2755,7 +4338,7 @@ fn NewIndexGridRow(
     mut status: Signal<Option<String>>,
 ) -> Element {
     let mut selected_fields = use_signal(BTreeSet::<SymbolId>::new);
-    let mut purpose = use_signal(|| "filter".to_owned());
+    let mut unique = use_signal(|| false);
     let has_fields = !fields.is_empty();
     rsx! {
         tr { class: "aio-edit-grid__new-row",
@@ -2783,13 +4366,11 @@ fn NewIndexGridRow(
                     span { class: "aio-edit-grid__placeholder", "请先添加字段" }
                 }
             } }
-            td { select {
-                aria_label: "新索引用途",
-                value: purpose(),
-                onchange: move |event| purpose.set(event.value()),
-                option { value: "filter", "筛选" }
-                option { value: "sort", "排序" }
-                option { value: "relation", "关联" }
+            td { class: "aio-edit-grid__toggle", input {
+                r#type: "checkbox",
+                aria_label: "新索引联合唯一约束",
+                checked: unique(),
+                onchange: move |event| unique.set(event.checked()),
             } }
             td { class: "aio-edit-grid__actions",
                 Button {
@@ -2818,7 +4399,7 @@ fn NewIndexGridRow(
                                 entity: GraphEntity::ModelIndex(ModelIndexDefinition {
                                     id: SymbolId::new(),
                                     fields: ordered_fields,
-                                    purpose: index_purpose_from_key(&purpose()),
+                                    unique: unique(),
                                 }),
                             }],
                             generation,
@@ -2875,19 +4456,34 @@ fn editable_value_type_from_key(key: &str, current: &ValueType) -> ValueType {
     }
 }
 
-fn index_purpose_key(purpose: &IndexPurpose) -> &'static str {
-    match purpose {
-        IndexPurpose::Filter => "filter",
-        IndexPurpose::Sort => "sort",
-        IndexPurpose::Relation => "relation",
+fn relation_kind_key(kind: crate::RelationKind) -> &'static str {
+    match kind {
+        crate::RelationKind::OneToOne => "one_to_one",
+        crate::RelationKind::ManyToOne => "many_to_one",
+        crate::RelationKind::OneToMany => "one_to_many",
+        crate::RelationKind::ManyToMany => "many_to_many",
     }
 }
 
-fn index_purpose_from_key(key: &str) -> IndexPurpose {
-    match key {
-        "sort" => IndexPurpose::Sort,
-        "relation" => IndexPurpose::Relation,
-        _ => IndexPurpose::Filter,
+fn relation_kind_from_key(value: &str) -> crate::RelationKind {
+    match value {
+        "one_to_one" => crate::RelationKind::OneToOne,
+        "one_to_many" => crate::RelationKind::OneToMany,
+        "many_to_many" => crate::RelationKind::ManyToMany,
+        _ => crate::RelationKind::ManyToOne,
+    }
+}
+
+fn relation_value_type(kind: crate::RelationKind, target_model_id: SymbolId) -> ValueType {
+    let value = ValueType::Object {
+        model_id: target_model_id,
+    };
+    if kind.is_collection() {
+        ValueType::List {
+            item: Box::new(value),
+        }
+    } else {
+        value
     }
 }
 

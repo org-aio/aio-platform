@@ -2,9 +2,8 @@
 
 use az_plugin_core::verify_database_url;
 use az_studio::{
-    CapabilityCatalog, GraphEntity, GraphPatch, GraphPatchBatch, ImageTarget, IndexPurpose,
-    ModelDefinition, ModelIndexDefinition, PatchOrigin, ProgramCompiler, StudioPageParams,
-    SymbolId, ValueType,
+    CapabilityCatalog, GraphEntity, GraphPatch, GraphPatchBatch, ImageTarget, ModelDefinition,
+    ModelIndexDefinition, PatchOrigin, ProgramCompiler, StudioPageParams, SymbolId, ValueType,
     program_store::{DraftVersionConflict, ProgramStore},
 };
 use serde_json::json;
@@ -58,13 +57,16 @@ async fn program_store_enforces_versions_revisions_cache_and_activation() -> any
                                 unique: true,
                                 ..az_studio::FieldOptions::default()
                             },
-                            relation_model_id: None,
+                            relation: None,
                         }],
                         indexes: vec![ModelIndexDefinition {
                             id: index_id,
                             fields: vec![field_id],
-                            purpose: IndexPurpose::Filter,
+                            unique: false,
                         }],
+                        queries: Vec::new(),
+                        validations: Vec::new(),
+                        audit: az_studio::ModelAuditDefinition::default(),
                     }),
                 },
             ],

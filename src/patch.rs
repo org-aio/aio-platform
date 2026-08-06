@@ -2,8 +2,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    FieldDefinition, FunctionDefinition, FunctionNode, GraphEdge, MenuDefinition, ModelDefinition,
-    ModelIndexDefinition, PageDefinition, PageEndpointDefinition, PermissionDefinition,
+    FieldDefinition, FunctionDefinition, FunctionNode, GraphEdge, MenuDefinition,
+    ModelAuditDefinition, ModelDefinition, ModelIndexDefinition, ModelQueryDefinition,
+    ModelValidationDefinition, PageDefinition, PageEndpointDefinition, PermissionDefinition,
     PortDefinition, ProgramDefinition, RouteDefinition, SymbolId,
 };
 
@@ -74,6 +75,8 @@ pub enum ChildCollection {
     Models,
     Fields,
     ModelIndexes,
+    ModelQueries,
+    ModelValidations,
     Pages,
     PageEndpoints,
     Functions,
@@ -91,6 +94,8 @@ pub enum GraphEntity {
     Model(ModelDefinition),
     Field(FieldDefinition),
     ModelIndex(ModelIndexDefinition),
+    ModelQuery(ModelQueryDefinition),
+    ModelValidation(ModelValidationDefinition),
     Page(PageDefinition),
     PageEndpoint(PageEndpointDefinition),
     Function(FunctionDefinition),
@@ -108,6 +113,8 @@ impl GraphEntity {
             Self::Model(value) => value.id,
             Self::Field(value) => value.id,
             Self::ModelIndex(value) => value.id,
+            Self::ModelQuery(value) => value.id,
+            Self::ModelValidation(value) => value.id,
             Self::Page(value) => value.id,
             Self::PageEndpoint(value) => value.id,
             Self::Function(value) => value.id,
@@ -129,14 +136,19 @@ pub enum EditableProperty {
     MenuEnabled,
     MenuPermissions,
     MenuRowActions,
+    PermissionEffects,
     PageRenderer,
     PageEndpoint,
     DefinitionState,
     FieldRequired,
     FieldValueType,
+    FieldRelation,
     FieldOptions,
     ModelIndexFields,
-    ModelIndexPurpose,
+    ModelIndexUnique,
+    ModelQuery,
+    ModelValidation,
+    ModelAudit,
     FunctionNodePosition,
 }
 
@@ -309,6 +321,22 @@ impl ProgramDefinition {
                     .ok_or(PatchError::ParentNotFound(parent_id))?;
                 insert_at(&mut model.indexes, index, value)
             }
+            (ChildCollection::ModelQueries, GraphEntity::ModelQuery(value)) => {
+                let model = self
+                    .models
+                    .iter_mut()
+                    .find(|model| model.id == parent_id)
+                    .ok_or(PatchError::ParentNotFound(parent_id))?;
+                insert_at(&mut model.queries, index, value)
+            }
+            (ChildCollection::ModelValidations, GraphEntity::ModelValidation(value)) => {
+                let model = self
+                    .models
+                    .iter_mut()
+                    .find(|model| model.id == parent_id)
+                    .ok_or(PatchError::ParentNotFound(parent_id))?;
+                insert_at(&mut model.validations, index, value)
+            }
             (ChildCollection::FunctionInputs, GraphEntity::Port(value)) => {
                 let function = self
                     .functions
@@ -346,6 +374,12 @@ impl ProgramDefinition {
             }
             if let Ok(value) = remove_by_id(&mut model.indexes, target_id, |value| value.id) {
                 return Ok(GraphEntity::ModelIndex(value));
+            }
+            if let Ok(value) = remove_by_id(&mut model.queries, target_id, |value| value.id) {
+                return Ok(GraphEntity::ModelQuery(value));
+            }
+            if let Ok(value) = remove_by_id(&mut model.validations, target_id, |value| value.id) {
+                return Ok(GraphEntity::ModelValidation(value));
             }
         }
         if let Ok(value) = remove_by_id(&mut self.pages, target_id, |value| value.id) {
@@ -445,6 +479,22 @@ impl ProgramDefinition {
                     .find(|model| model.id == parent_id)
                     .ok_or(PatchError::ParentNotFound(parent_id))?;
                 reorder_values(&mut model.indexes, ordered_ids, |value| value.id)
+            }
+            ChildCollection::ModelQueries => {
+                let model = self
+                    .models
+                    .iter_mut()
+                    .find(|model| model.id == parent_id)
+                    .ok_or(PatchError::ParentNotFound(parent_id))?;
+                reorder_values(&mut model.queries, ordered_ids, |value| value.id)
+            }
+            ChildCollection::ModelValidations => {
+                let model = self
+                    .models
+                    .iter_mut()
+                    .find(|model| model.id == parent_id)
+                    .ok_or(PatchError::ParentNotFound(parent_id))?;
+                reorder_values(&mut model.validations, ordered_ids, |value| value.id)
             }
             ChildCollection::FunctionInputs => {
                 let function = self
@@ -550,6 +600,16 @@ impl ProgramDefinition {
                     .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
                 Ok(())
             }
+            EditableProperty::PermissionEffects => {
+                let permission = self
+                    .permissions
+                    .iter_mut()
+                    .find(|permission| permission.id == target_id)
+                    .ok_or(PatchError::TargetNotFound(target_id))?;
+                permission.allowed_effects = serde_json::from_value(value.clone())
+                    .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
+                Ok(())
+            }
             EditableProperty::PageRenderer => {
                 let page = self
                     .pages
@@ -598,11 +658,18 @@ impl ProgramDefinition {
                     .ok_or(PatchError::TargetNotFound(target_id))?;
                 let value_type = serde_json::from_value(value.clone())
                     .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
-                field.relation_model_id = match &value_type {
-                    crate::ValueType::Object { model_id } => Some(*model_id),
-                    _ => None,
-                };
                 field.value_type = value_type;
+                Ok(())
+            }
+            EditableProperty::FieldRelation => {
+                let field = self
+                    .models
+                    .iter_mut()
+                    .flat_map(|model| &mut model.fields)
+                    .find(|item| item.id == target_id)
+                    .ok_or(PatchError::TargetNotFound(target_id))?;
+                field.relation = serde_json::from_value(value.clone())
+                    .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
                 Ok(())
             }
             EditableProperty::FieldOptions => {
@@ -631,14 +698,60 @@ impl ProgramDefinition {
                 index.fields = fields;
                 Ok(())
             }
-            EditableProperty::ModelIndexPurpose => {
+            EditableProperty::ModelIndexUnique => {
                 let index = self
                     .models
                     .iter_mut()
                     .flat_map(|model| &mut model.indexes)
                     .find(|item| item.id == target_id)
                     .ok_or(PatchError::TargetNotFound(target_id))?;
-                index.purpose = serde_json::from_value(value.clone())
+                index.unique = value.as_bool().ok_or_else(|| {
+                    PatchError::InvalidValue("索引唯一约束必须是布尔值".to_owned())
+                })?;
+                Ok(())
+            }
+            EditableProperty::ModelQuery => {
+                let query = self
+                    .models
+                    .iter_mut()
+                    .flat_map(|model| &mut model.queries)
+                    .find(|item| item.id == target_id)
+                    .ok_or(PatchError::TargetNotFound(target_id))?;
+                let replacement = serde_json::from_value::<ModelQueryDefinition>(value.clone())
+                    .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
+                if replacement.id != target_id {
+                    return Err(PatchError::InvalidValue(
+                        "查询更新不能改变 SymbolId".to_owned(),
+                    ));
+                }
+                *query = replacement;
+                Ok(())
+            }
+            EditableProperty::ModelValidation => {
+                let validation = self
+                    .models
+                    .iter_mut()
+                    .flat_map(|model| &mut model.validations)
+                    .find(|item| item.id == target_id)
+                    .ok_or(PatchError::TargetNotFound(target_id))?;
+                let replacement =
+                    serde_json::from_value::<ModelValidationDefinition>(value.clone())
+                        .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
+                if replacement.id != target_id {
+                    return Err(PatchError::InvalidValue(
+                        "模型校验更新不能改变 SymbolId".to_owned(),
+                    ));
+                }
+                *validation = replacement;
+                Ok(())
+            }
+            EditableProperty::ModelAudit => {
+                let model = self
+                    .models
+                    .iter_mut()
+                    .find(|model| model.id == target_id)
+                    .ok_or(PatchError::TargetNotFound(target_id))?;
+                model.audit = serde_json::from_value::<ModelAuditDefinition>(value.clone())
                     .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
                 Ok(())
             }
@@ -662,6 +775,15 @@ impl ProgramDefinition {
                 let title = json_string(value)?;
                 if target_id == self.id {
                     self.title = title;
+                    return Ok(());
+                }
+                if let Some(endpoint) = self
+                    .pages
+                    .iter_mut()
+                    .flat_map(|page| &mut page.endpoints)
+                    .find(|endpoint| endpoint.id == target_id)
+                {
+                    endpoint.title = title;
                     return Ok(());
                 }
                 if let Some((_, Some(current_title))) = self.find_name_title_mut(target_id) {
@@ -700,6 +822,16 @@ impl ProgramDefinition {
                 .iter()
                 .flat_map(|model| &model.indexes)
                 .any(|index| index.id == target)
+            || self
+                .models
+                .iter()
+                .flat_map(|model| &model.queries)
+                .any(|query| query.id == target)
+            || self
+                .models
+                .iter()
+                .flat_map(|model| &model.validations)
+                .any(|validation| validation.id == target)
             || self.functions.iter().any(|function| {
                 function.inputs.iter().any(|port| port.id == target)
                     || function.outputs.iter().any(|port| port.id == target)
@@ -728,9 +860,6 @@ impl ProgramDefinition {
         for page in &mut self.pages {
             if page.id == target {
                 return Some((&mut page.name, Some(&mut page.title)));
-            }
-            if let Some(endpoint) = page.endpoints.iter_mut().find(|value| value.id == target) {
-                return Some((&mut endpoint.name, Some(&mut endpoint.title)));
             }
         }
         for function in &mut self.functions {
@@ -913,8 +1042,8 @@ fn take_menu_from(values: &mut Vec<MenuDefinition>, target: SymbolId) -> Option<
 mod tests {
     use super::*;
     use crate::{
-        MenuActionAccess, MenuRowActions, PageEndpointDefinition, PageRendererDefinition,
-        RestMethod, TableDefinition,
+        EffectKind, MenuActionAccess, MenuRowActions, PageEndpointDefinition,
+        PageRendererDefinition, PermissionDefinition, RestMethod, TableDefinition,
     };
 
     #[test]
@@ -977,6 +1106,28 @@ mod tests {
     }
 
     #[test]
+    fn permission_effects_use_property_patch() -> anyhow::Result<()> {
+        let mut program = ProgramDefinition::empty("inventory", "资产");
+        let permission_id = SymbolId::new();
+        program.permissions.push(PermissionDefinition {
+            id: permission_id,
+            name: "asset:write".to_owned(),
+            title: "维护资产".to_owned(),
+            allowed_effects: Vec::new(),
+        });
+        program.apply_patch(&GraphPatch::SetProperty {
+            target_id: permission_id,
+            property: EditableProperty::PermissionEffects,
+            value: serde_json::json!([EffectKind::DatabaseRead, EffectKind::DatabaseWrite]),
+        })?;
+        assert_eq!(
+            program.permissions[0].allowed_effects,
+            vec![EffectKind::DatabaseRead, EffectKind::DatabaseWrite]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn patch_batch_is_atomic_on_invalid_target() {
         let mut program = ProgramDefinition::empty("inventory", "资产");
         let original = program.clone();
@@ -1008,10 +1159,8 @@ mod tests {
         });
         let endpoint = PageEndpointDefinition {
             id: endpoint_id,
-            name: "archive".to_owned(),
             title: "归档资产".to_owned(),
             state: crate::DefinitionState::Known,
-            intent: "归档指定资产".to_owned(),
             method: RestMethod::Post,
             path: "/api/assets/archive".to_owned(),
             inputs: Vec::new(),
@@ -1057,7 +1206,7 @@ mod tests {
                     state: crate::DefinitionState::Known,
                     required: false,
                     options: crate::FieldOptions::default(),
-                    relation_model_id: None,
+                    relation: None,
                 },
                 FieldDefinition {
                     id: second_field_id,
@@ -1067,14 +1216,17 @@ mod tests {
                     state: crate::DefinitionState::Known,
                     required: false,
                     options: crate::FieldOptions::default(),
-                    relation_model_id: None,
+                    relation: None,
                 },
             ],
             indexes: vec![ModelIndexDefinition {
                 id: index_id,
                 fields: vec![first_field_id],
-                purpose: crate::IndexPurpose::Filter,
+                unique: false,
             }],
+            queries: Vec::new(),
+            validations: Vec::new(),
+            audit: crate::ModelAuditDefinition::default(),
         });
 
         program.apply_patch_batch(&GraphPatchBatch {
@@ -1106,8 +1258,18 @@ mod tests {
                 },
                 GraphPatch::SetProperty {
                     target_id: index_id,
-                    property: EditableProperty::ModelIndexPurpose,
-                    value: serde_json::to_value(crate::IndexPurpose::Sort)?,
+                    property: EditableProperty::ModelIndexUnique,
+                    value: serde_json::json!(true),
+                },
+                GraphPatch::SetProperty {
+                    target_id: model_id,
+                    property: EditableProperty::ModelAudit,
+                    value: serde_json::json!(crate::ModelAuditDefinition {
+                        fields: vec![crate::ModelAuditField {
+                            kind: crate::AuditFieldKind::Version,
+                            field_id: second_field_id,
+                        }],
+                    }),
                 },
             ],
         })?;
@@ -1126,9 +1288,10 @@ mod tests {
             program.models[0].indexes[0].fields,
             vec![first_field_id, second_field_id]
         );
+        assert_eq!(program.models[0].indexes[0].unique, true);
         assert_eq!(
-            program.models[0].indexes[0].purpose,
-            crate::IndexPurpose::Sort
+            program.models[0].audit.fields[0].kind,
+            crate::AuditFieldKind::Version
         );
         Ok(())
     }

@@ -6,7 +6,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 /// 当前数据库程序协议版本。
-pub const PROGRAM_SCHEMA_VERSION: u32 = 7;
+pub const PROGRAM_SCHEMA_VERSION: u32 = 10;
 
 /// 创建时分配且永不因改名、改路由而变化的符号身份。
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -169,6 +169,12 @@ pub struct ModelDefinition {
     pub fields: Vec<FieldDefinition>,
     #[serde(default)]
     pub indexes: Vec<ModelIndexDefinition>,
+    #[serde(default)]
+    pub queries: Vec<ModelQueryDefinition>,
+    #[serde(default)]
+    pub validations: Vec<ModelValidationDefinition>,
+    #[serde(default)]
+    pub audit: ModelAuditDefinition,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -183,7 +189,41 @@ pub struct FieldDefinition {
     pub required: bool,
     pub options: FieldOptions,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub relation_model_id: Option<SymbolId>,
+    pub relation: Option<FieldRelation>,
+}
+
+/// 关系必须由两端字段共同定义，避免只保存目标模型而无法确定关联路径。
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FieldRelation {
+    pub kind: RelationKind,
+    pub target_model_id: SymbolId,
+    pub target_field_id: SymbolId,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RelationKind {
+    OneToOne,
+    ManyToOne,
+    OneToMany,
+    ManyToMany,
+}
+
+impl RelationKind {
+    #[must_use]
+    pub const fn opposite(self) -> Self {
+        match self {
+            Self::OneToOne => Self::OneToOne,
+            Self::ManyToOne => Self::OneToMany,
+            Self::OneToMany => Self::ManyToOne,
+            Self::ManyToMany => Self::ManyToMany,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_collection(self) -> bool {
+        matches!(self, Self::OneToMany | Self::ManyToMany)
+    }
 }
 
 /// 字段在列表、表单、交换与 AI 场景中的唯一行为定义。
@@ -242,21 +282,192 @@ pub struct FieldValidation {
     pub maximum: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pattern: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_items: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_items: Option<u32>,
+    #[serde(default)]
+    pub unique_items: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ModelIndexDefinition {
     pub id: SymbolId,
     pub fields: Vec<SymbolId>,
-    pub purpose: IndexPurpose,
+    #[serde(default)]
+    pub unique: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueryConjunction {
+    #[default]
+    All,
+    Any,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ModelQueryDefinition {
+    pub id: SymbolId,
+    pub name: String,
+    pub title: String,
+    #[serde(default)]
+    pub conjunction: QueryConjunction,
+    #[serde(default)]
+    pub conditions: Vec<QueryCondition>,
+}
+
+/// 查询条件的值来自命名参数，禁止把查询表达式作为字符串保存。
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum QueryCondition {
+    Field {
+        field_id: SymbolId,
+        operator: QueryOperator,
+        parameter: String,
+    },
+    Relation {
+        relation_field_id: SymbolId,
+        target_field_id: SymbolId,
+        operator: QueryOperator,
+        parameter: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum IndexPurpose {
-    Filter,
-    Sort,
-    Relation,
+pub enum QueryOperator {
+    Equals,
+    NotEquals,
+    Contains,
+    StartsWith,
+    EndsWith,
+    GreaterThan,
+    GreaterOrEqual,
+    LessThan,
+    LessOrEqual,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ModelValidationDefinition {
+    pub id: SymbolId,
+    pub message: String,
+    pub rule: ModelValidationRule,
+}
+
+/// 模型可组合的审计角色；角色只声明语义，具体字段由 `field_id` 绑定。
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ModelAuditDefinition {
+    #[serde(default)]
+    pub fields: Vec<ModelAuditField>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ModelAuditField {
+    pub kind: AuditFieldKind,
+    pub field_id: SymbolId,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuditFieldKind {
+    TenantId,
+    CreatedAt,
+    CreatedBy,
+    UpdatedAt,
+    UpdatedBy,
+    Deleted,
+    DeletedAt,
+    DeletedBy,
+    Version,
+}
+
+impl AuditFieldKind {
+    #[must_use]
+    pub const fn all() -> [Self; 9] {
+        [
+            Self::TenantId,
+            Self::CreatedAt,
+            Self::CreatedBy,
+            Self::UpdatedAt,
+            Self::UpdatedBy,
+            Self::Deleted,
+            Self::DeletedAt,
+            Self::DeletedBy,
+            Self::Version,
+        ]
+    }
+
+    #[must_use]
+    pub const fn default_name(self) -> &'static str {
+        match self {
+            Self::TenantId => "tenant_id",
+            Self::CreatedAt => "created_at",
+            Self::CreatedBy => "created_by",
+            Self::UpdatedAt => "updated_at",
+            Self::UpdatedBy => "updated_by",
+            Self::Deleted => "deleted",
+            Self::DeletedAt => "deleted_at",
+            Self::DeletedBy => "deleted_by",
+            Self::Version => "version",
+        }
+    }
+
+    #[must_use]
+    pub const fn default_title(self) -> &'static str {
+        match self {
+            Self::TenantId => "租户",
+            Self::CreatedAt => "创建时间",
+            Self::CreatedBy => "创建人",
+            Self::UpdatedAt => "更新时间",
+            Self::UpdatedBy => "更新人",
+            Self::Deleted => "逻辑删除",
+            Self::DeletedAt => "删除时间",
+            Self::DeletedBy => "删除人",
+            Self::Version => "版本号",
+        }
+    }
+
+    #[must_use]
+    pub const fn default_value_type(self) -> ValueType {
+        match self {
+            Self::CreatedAt | Self::UpdatedAt | Self::DeletedAt => ValueType::TimestampMs,
+            Self::Deleted => ValueType::Boolean,
+            Self::Version => ValueType::Integer,
+            Self::TenantId | Self::CreatedBy | Self::UpdatedBy | Self::DeletedBy => ValueType::Text,
+        }
+    }
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::TenantId => "租户",
+            Self::CreatedAt => "创建时间",
+            Self::CreatedBy => "创建人",
+            Self::UpdatedAt => "更新时间",
+            Self::UpdatedBy => "更新人",
+            Self::Deleted => "逻辑删除",
+            Self::DeletedAt => "删除时间",
+            Self::DeletedBy => "删除人",
+            Self::Version => "版本号",
+        }
+    }
+}
+
+/// 模型级校验覆盖字段之间的依赖，不与单字段格式校验混在一起。
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ModelValidationRule {
+    FieldsRequiredTogether {
+        field_ids: Vec<SymbolId>,
+    },
+    AtLeastOneRequired {
+        field_ids: Vec<SymbolId>,
+    },
+    RequiredWhenPresent {
+        field_id: SymbolId,
+        when_field_id: SymbolId,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -293,17 +504,36 @@ pub struct PageDefinition {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PageEndpointDefinition {
     pub id: SymbolId,
-    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub title: String,
     #[serde(default)]
     pub state: DefinitionState,
-    pub intent: String,
     pub method: RestMethod,
     pub path: String,
     #[serde(default)]
     pub inputs: Vec<EndpointInputDefinition>,
     #[serde(default)]
     pub outputs: Vec<EndpointOutputDefinition>,
+}
+
+impl PageEndpointDefinition {
+    #[must_use]
+    pub fn display_title(&self) -> String {
+        let title = self.title.trim();
+        if !title.is_empty() {
+            return title.to_owned();
+        }
+
+        self.path
+            .trim_end_matches('/')
+            .rsplit('/')
+            .find(|segment| {
+                !segment.is_empty() && !(segment.starts_with('{') && segment.ends_with('}'))
+            })
+            .map(|segment| segment.replace(['-', '_'], " "))
+            .filter(|segment| !segment.is_empty())
+            .unwrap_or_else(|| "REST 接口".to_owned())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -660,6 +890,77 @@ pub enum EffectKind {
     Capability,
 }
 
+impl EffectKind {
+    #[must_use]
+    pub const fn all() -> [Self; 7] {
+        [
+            Self::ClientState,
+            Self::Navigation,
+            Self::UserPrompt,
+            Self::DatabaseRead,
+            Self::DatabaseWrite,
+            Self::Secret,
+            Self::Capability,
+        ]
+    }
+
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::ClientState => "client_state",
+            Self::Navigation => "navigation",
+            Self::UserPrompt => "user_prompt",
+            Self::DatabaseRead => "database_read",
+            Self::DatabaseWrite => "database_write",
+            Self::Secret => "secret",
+            Self::Capability => "capability",
+        }
+    }
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ClientState => "客户端状态",
+            Self::Navigation => "页面跳转",
+            Self::UserPrompt => "用户交互",
+            Self::DatabaseRead => "数据读取",
+            Self::DatabaseWrite => "数据写入",
+            Self::Secret => "机密访问",
+            Self::Capability => "能力调用",
+        }
+    }
+}
+
+/// 权限标识采用 `领域:动作` 的稳定格式，例如 `asset:read`。
+pub(crate) fn permission_identifier_is_valid(value: &str) -> bool {
+    let mut segments = value.split(':');
+    let Some(first) = segments.next() else {
+        return false;
+    };
+    if !permission_identifier_segment_is_valid(first) {
+        return false;
+    }
+    let mut has_action = false;
+    for segment in segments {
+        if !permission_identifier_segment_is_valid(segment) {
+            return false;
+        }
+        has_action = true;
+    }
+    has_action
+}
+
+fn permission_identifier_segment_is_valid(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    first.is_ascii_lowercase()
+        && bytes.all(|value| {
+            value.is_ascii_lowercase() || value.is_ascii_digit() || matches!(value, b'_' | b'-')
+        })
+}
+
 /// Capability 目录是编译期链接白名单，不包含可执行实现。
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CapabilityCatalog {
@@ -692,4 +993,37 @@ pub(crate) fn validate_route_path(path: &str) -> Result<()> {
         bail!("路由包含禁止片段: {path}");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PageEndpointDefinition;
+
+    #[test]
+    fn endpoint_identity_is_derived_from_rest_path() -> anyhow::Result<()> {
+        let endpoint: PageEndpointDefinition = serde_json::from_value(serde_json::json!({
+            "id": "5cbf910c-05af-4537-94d3-673c3b4c444b",
+            "name": "legacy_endpoint",
+            "title": "",
+            "intent": "旧的生成需求",
+            "method": "POST",
+            "path": "/api/assets/batch-disable",
+            "inputs": [],
+            "outputs": []
+        }))?;
+        let value = serde_json::to_value(&endpoint)?;
+
+        assert_eq!(endpoint.display_title(), "batch disable");
+        assert!(
+            !value
+                .as_object()
+                .is_some_and(|object| object.contains_key("name"))
+        );
+        assert!(
+            !value
+                .as_object()
+                .is_some_and(|object| object.contains_key("intent"))
+        );
+        Ok(())
+    }
 }

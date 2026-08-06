@@ -1,26 +1,92 @@
-use std::sync::Arc;
+use std::{convert::Infallible, fmt, str::FromStr, sync::Arc};
 
 use crate::{
     BuiltInPageContext, BuiltInPageIndex, CompiledPageRenderer, ConventionPageContext,
     ConventionPageIndex, MenuRowActions, ProgramImage, SymbolId,
 };
 use crate::{PublishedProgram, WorkbenchBootstrap};
-use dioxus::prelude::*;
+use dioxus::prelude::{
+    dioxus_router::{SegmentType, SiteMapSegment},
+    *,
+};
 use futures_util::StreamExt;
 use gloo_net::eventsource::futures::EventSource;
-use icons::{PanelLeft, Plus, Settings};
+use icons::{ListTree, PanelLeft, Plus, Settings};
 
 use crate::{
-    browser_bootstrap::{initial_route, load_from_document, page_title, push_route},
+    browser_bootstrap::{load_from_document, page_title},
     browser_http::{api_url, get_api},
     ui::StudioPage,
 };
 
+#[derive(Clone, Debug, PartialEq)]
+struct AppRoute {
+    path: String,
+    suffix: String,
+}
+
+impl AppRoute {
+    fn from_path(path: &str) -> Self {
+        Self {
+            path: normalize_route_path(path),
+            suffix: String::new(),
+        }
+    }
+}
+
+impl FromStr for AppRoute {
+    type Err = Infallible;
+
+    fn from_str(route: &str) -> Result<Self, Self::Err> {
+        let suffix_start = route
+            .find(|character| character == '?' || character == '#')
+            .unwrap_or(route.len());
+        Ok(Self {
+            path: normalize_route_path(&route[..suffix_start]),
+            suffix: route[suffix_start..].to_owned(),
+        })
+    }
+}
+
+impl fmt::Display for AppRoute {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}{}", self.path, self.suffix)
+    }
+}
+
+impl Routable for AppRoute {
+    const SITE_MAP: &'static [SiteMapSegment] = &[SiteMapSegment {
+        segment_type: SegmentType::CatchAll("path"),
+        children: &[],
+    }];
+
+    fn render(&self, _level: usize) -> Element {
+        rsx! { Workbench { route: self.clone() } }
+    }
+}
+
+fn normalize_route_path(path: &str) -> String {
+    let normalized = if path.is_empty() || path == "/" {
+        "/studio"
+    } else {
+        path
+    };
+    if normalized.starts_with('/') {
+        normalized.to_owned()
+    } else {
+        format!("/{normalized}")
+    }
+}
+
 #[allow(non_snake_case)]
 pub fn App() -> Element {
+    rsx! { Router::<AppRoute> {} }
+}
+
+#[component]
+fn Workbench(route: AppRoute) -> Element {
     let mut bootstrap = use_signal(load_from_document);
-    let initial_route = initial_route(&bootstrap.read());
-    let active_route = use_signal(move || initial_route);
+    let route_path = route.path;
     let mut selected_scene = use_signal(|| None::<SymbolId>);
     let mut pending_scene = use_signal(|| None::<SymbolId>);
     let mut sidebar_collapsed = use_signal(|| false);
@@ -39,9 +105,8 @@ pub fn App() -> Element {
             bootstrap.set(value.clone());
         }
     });
-    use_effect(move || {
+    use_effect(use_reactive(&route_path, move |route| {
         let snapshot = bootstrap();
-        let route = active_route();
         let selected = selected_scene();
         let pending = pending_scene();
         let next = scene_for_route(&snapshot, &route)
@@ -61,10 +126,9 @@ pub fn App() -> Element {
         if pending.is_some() && pending == next {
             pending_scene.set(None);
         }
-    });
+    }));
 
-    let image = use_resource(move || {
-        let route = active_route();
+    let image = use_resource(use_reactive(&route_path, move |route| {
         let bootstrap = bootstrap();
         let _generation = image_generation();
         async move {
@@ -75,7 +139,7 @@ pub fn App() -> Element {
                 .await
                 .map(Some)
         }
-    });
+    }));
 
     let _events = use_resource(move || {
         let bootstrap = bootstrap();
@@ -95,7 +159,7 @@ pub fn App() -> Element {
     });
 
     let loaded_image = image.read().as_ref().cloned();
-    let route = active_route();
+    let route = route_path;
     let snapshot = bootstrap();
     let title = page_title(&snapshot, &route);
     let editor_target = snapshot.route(&route).map(|(_, route)| route.page_id);
@@ -134,7 +198,6 @@ pub fn App() -> Element {
                     {native_menu(
                         &snapshot,
                         &route,
-                        active_route,
                         page_settings_open,
                         menu_creator_open,
                         creator_target.is_some(),
@@ -142,7 +205,7 @@ pub fn App() -> Element {
                     if let Some((program, scene)) = selected_scene()
                         .and_then(|scene_id| scene_by_id(&snapshot, scene_id))
                     {
-                        {scene_menu(program, scene, &route, active_route)}
+                        {scene_menu(program, scene, &route)}
                     }
                 }
             }
@@ -158,7 +221,6 @@ pub fn App() -> Element {
                                     scene,
                                     program,
                                     selected_scene() == Some(scene.id),
-                                    active_route,
                                     selected_scene,
                                 )}
                             }
@@ -315,7 +377,6 @@ fn row_actions_for_page(
 fn native_menu(
     bootstrap: &WorkbenchBootstrap,
     active_route: &str,
-    active_route_signal: Signal<String>,
     mut page_settings_open: Signal<bool>,
     mut menu_creator_open: Signal<bool>,
     has_selected_scene: bool,
@@ -325,11 +386,25 @@ fn native_menu(
     let can_edit_current =
         has_current_page && admin.as_ref().is_some_and(|state| state.can_edit_page);
     let can_add_menu = admin.as_ref().is_some_and(|state| state.can_add_menu);
+    let can_manage_menus = admin.is_some();
     rsx! {
         section { class: "space-y-1",
             div { class: "aio-sidebar-section-heading",
                 p { class: "aio-sidebar-section-title text-xs font-semibold uppercase text-muted-foreground", "管理工具" }
                 div { class: "aio-sidebar-section-actions",
+                    if can_manage_menus {
+                        Link {
+                            class: if active_route == "/studio" {
+                                "aio-sidebar-admin-action aio-sidebar-admin-action--primary"
+                            } else {
+                                "aio-sidebar-admin-action"
+                            },
+                            to: AppRoute::from_path("/studio"),
+                            title: "管理场景与菜单",
+                            aria_label: "管理场景与菜单",
+                            ListTree { class: "size-4" }
+                        }
+                    }
                     if can_add_menu {
                         button {
                             class: "aio-sidebar-admin-action aio-sidebar-admin-action--primary",
@@ -354,7 +429,7 @@ fn native_menu(
                 }
             }
             for entry in &bootstrap.native_entries {
-                {menu_link(&entry.route, &entry.title, "◇", active_route, active_route_signal)}
+                {menu_link(&entry.route, &entry.title, "◇", active_route)}
             }
         }
     }
@@ -364,12 +439,11 @@ fn scene_menu(
     program: &PublishedProgram,
     scene: &crate::MenuDefinition,
     active_route: &str,
-    active_route_signal: Signal<String>,
 ) -> Element {
     rsx! {
         section { class: "space-y-1",
             for menu in &scene.children {
-                {program_menu(menu, program, active_route, active_route_signal)}
+                {program_menu(menu, program, active_route)}
             }
         }
     }
@@ -379,7 +453,6 @@ fn scene_link(
     scene: &crate::MenuDefinition,
     program: &PublishedProgram,
     active: bool,
-    mut active_route: Signal<String>,
     mut selected_scene: Signal<Option<SymbolId>>,
 ) -> Element {
     let scene_id = scene.id;
@@ -390,19 +463,23 @@ fn scene_link(
     } else {
         "aio-root-menu-item"
     };
-    rsx! {
-        button {
-            class,
-            r#type: "button",
-            onclick: move |_| {
-                selected_scene.set(Some(scene_id));
-                if let Some(route) = &route {
-                    active_route.set(route.clone());
-                    push_route(route);
-                }
-            },
-            "{title}"
-        }
+    match route {
+        Some(route) => rsx! {
+            Link {
+                class,
+                to: AppRoute::from_path(&route),
+                onclick: move |_| selected_scene.set(Some(scene_id)),
+                "{title}"
+            }
+        },
+        None => rsx! {
+            button {
+                class,
+                r#type: "button",
+                onclick: move |_| selected_scene.set(Some(scene_id)),
+                "{title}"
+            }
+        },
     }
 }
 
@@ -458,7 +535,6 @@ fn program_menu(
     menu: &crate::MenuDefinition,
     program: &PublishedProgram,
     active_route: &str,
-    active_route_signal: Signal<String>,
 ) -> Element {
     let route = menu.page_id.and_then(|page_id| {
         program
@@ -471,14 +547,14 @@ fn program_menu(
     rsx! {
         div { class: "space-y-1",
             if let Some(route) = route {
-                {menu_link(&route, &menu.title, icon, active_route, active_route_signal)}
+                {menu_link(&route, &menu.title, icon, active_route)}
             } else {
                 div { class: "px-3 py-2 text-sm font-medium", "{icon}  {menu.title}" }
             }
             if !menu.children.is_empty() {
                 div { class: "ml-3 space-y-1 border-l pl-2",
                     for child in &menu.children {
-                        {program_menu(child, program, active_route, active_route_signal)}
+                        {program_menu(child, program, active_route)}
                     }
                 }
             }
@@ -486,28 +562,16 @@ fn program_menu(
     }
 }
 
-fn menu_link(
-    route: &str,
-    label: &str,
-    icon: &str,
-    active_route: &str,
-    mut active_route_signal: Signal<String>,
-) -> Element {
+fn menu_link(route: &str, label: &str, icon: &str, active_route: &str) -> Element {
     let class = if route == active_route {
         "aio-sidebar-menu-link flex items-center gap-2 rounded-md bg-muted px-3 py-2 text-sm text-foreground"
     } else {
         "aio-sidebar-menu-link flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
     };
-    let route = route.to_owned();
     rsx! {
-        a {
+        Link {
             class,
-            href: format!("?route={route}"),
-            onclick: move |event| {
-                event.prevent_default();
-                active_route_signal.set(route.clone());
-                push_route(&route);
-            },
+            to: AppRoute::from_path(route),
             span { class: "aio-sidebar-menu-icon w-4 shrink-0 text-center", "{icon}" }
             span { class: "aio-sidebar-menu-label min-w-0 truncate", "{label}" }
         }

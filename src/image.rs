@@ -79,7 +79,6 @@ pub enum CompiledPageRenderer {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CompiledPageEndpoint {
     pub id: String,
-    pub name: String,
     pub title: String,
     pub method: RestMethod,
     pub path: String,
@@ -116,7 +115,6 @@ pub enum PageEndpointSource {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RudiRouteInstruction {
     pub provider_key: String,
-    pub operation: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -178,12 +176,14 @@ pub struct CompiledModel {
     pub field_options: BTreeMap<u32, crate::FieldOptions>,
     pub required_fields: Vec<u32>,
     pub expression_indexes: Vec<CompiledExpressionIndex>,
+    pub audit: crate::ModelAuditDefinition,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CompiledExpressionIndex {
     pub fields: Vec<u32>,
     pub expression: String,
+    pub unique: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -13,7 +13,7 @@ use crate::{
     ModelDefinition, PROGRAM_SCHEMA_VERSION, PageDefinition, PageEndpointSource,
     PageRendererDefinition, ProgramDefinition, ProgramImage, RestFormPageProvider, RestMethod,
     RudiRouteInstruction, SymbolId, TableDefinition, TreeTablePageProvider, page_provider_key,
-    validate_route_path,
+    permission_identifier_is_valid, validate_route_path,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -165,6 +165,44 @@ impl<'a> ProgramCompiler<'a> {
                 Some(definition.id),
             ));
         }
+        let mut permission_names = BTreeSet::new();
+        for permission in &definition.permissions {
+            if !permission_identifier_is_valid(&permission.name) {
+                diagnostics.push(diagnostic(
+                    "PERMISSION_IDENTIFIER_INVALID",
+                    CompilerStage::Schema,
+                    format!("权限标识必须采用 领域:动作 格式: {}", permission.name),
+                    Some(permission.id),
+                ));
+            }
+            if permission.title.trim().is_empty() {
+                diagnostics.push(diagnostic(
+                    "PERMISSION_TITLE_EMPTY",
+                    CompilerStage::Schema,
+                    "权限标题不能为空",
+                    Some(permission.id),
+                ));
+            }
+            if !permission_names.insert(permission.name.as_str()) {
+                diagnostics.push(diagnostic(
+                    "PERMISSION_IDENTIFIER_DUPLICATE",
+                    CompilerStage::Schema,
+                    format!("权限标识重复: {}", permission.name),
+                    Some(permission.id),
+                ));
+            }
+            let mut effects = BTreeSet::new();
+            for effect in &permission.allowed_effects {
+                if !effects.insert(*effect) {
+                    diagnostics.push(diagnostic(
+                        "PERMISSION_EFFECT_DUPLICATE",
+                        CompilerStage::Schema,
+                        format!("权限 {} 重复声明 {:?} Effect", permission.name, effect),
+                        Some(permission.id),
+                    ));
+                }
+            }
+        }
         let mut route_paths = BTreeSet::new();
         for route in &definition.routes {
             if let Err(error) = validate_route_path(&route.path) {
@@ -222,7 +260,12 @@ impl<'a> ProgramCompiler<'a> {
                 }
                 validate_field_options(field, diagnostics);
             }
+            validate_model_indexes(model, diagnostics);
+            validate_model_queries(definition, model, diagnostics);
+            validate_model_validations(model, diagnostics);
+            validate_model_audit(model, diagnostics);
         }
+        validate_model_relations(definition, diagnostics);
         for page in &definition.pages {
             validate_page_endpoints(page, diagnostics);
         }
@@ -247,6 +290,12 @@ impl<'a> ProgramCompiler<'a> {
             }
             for index in &model.indexes {
                 insert_symbol(&mut symbols, index.id, diagnostics);
+            }
+            for query in &model.queries {
+                insert_symbol(&mut symbols, query.id, diagnostics);
+            }
+            for validation in &model.validations {
+                insert_symbol(&mut symbols, validation.id, diagnostics);
             }
         }
         for page in &definition.pages {
@@ -287,13 +336,6 @@ impl<'a> ProgramCompiler<'a> {
 
         for menu in &definition.menus {
             validate_menu_references(menu, &symbols, diagnostics);
-        }
-        for model in &definition.models {
-            for field in &model.fields {
-                if let Some(relation) = field.relation_model_id {
-                    check_reference(relation, &symbols, diagnostics, field.id);
-                }
-            }
         }
         for page in &definition.pages {
             validate_page_references(page, &symbols, diagnostics);
@@ -564,6 +606,7 @@ impl<'a> ProgramCompiler<'a> {
                         CompiledExpressionIndex {
                             fields: slots,
                             expression,
+                            unique: index.unique,
                         }
                     })
                     .collect();
@@ -580,6 +623,7 @@ impl<'a> ProgramCompiler<'a> {
                         field_options,
                         required_fields,
                         expression_indexes,
+                        audit: model.audit.clone(),
                     },
                 )
             })
@@ -681,28 +725,369 @@ fn validate_field_options(field: &FieldDefinition, diagnostics: &mut Vec<Diagnos
             Some(field.id),
         ));
     }
+    if validation
+        .min_items
+        .zip(validation.max_items)
+        .is_some_and(|(minimum, maximum)| minimum > maximum)
+    {
+        diagnostics.push(diagnostic(
+            "FIELD_COLLECTION_RANGE_INVALID",
+            CompilerStage::Schema,
+            format!("字段 {} 的最小集合长度不能大于最大集合长度", field.name),
+            Some(field.id),
+        ));
+    }
+    if (validation.min_items.is_some() || validation.max_items.is_some() || validation.unique_items)
+        && !matches!(field.value_type, crate::ValueType::List { .. })
+    {
+        diagnostics.push(diagnostic(
+            "FIELD_COLLECTION_VALIDATION_NON_LIST",
+            CompilerStage::Schema,
+            format!("字段 {} 的集合校验只能用于列表字段", field.name),
+            Some(field.id),
+        ));
+    }
+}
+
+fn validate_model_indexes(model: &ModelDefinition, diagnostics: &mut Vec<Diagnostic>) {
+    for index in &model.indexes {
+        if index.fields.is_empty() {
+            diagnostics.push(diagnostic(
+                "MODEL_INDEX_FIELDS_EMPTY",
+                CompilerStage::Schema,
+                format!("模型 {} 的索引至少需要一个字段", model.name),
+                Some(index.id),
+            ));
+            continue;
+        }
+        let mut seen = BTreeSet::new();
+        for field_id in &index.fields {
+            if !seen.insert(*field_id) {
+                diagnostics.push(diagnostic(
+                    "MODEL_INDEX_FIELD_DUPLICATE",
+                    CompilerStage::Schema,
+                    format!("模型 {} 的索引重复引用字段 {field_id}", model.name),
+                    Some(index.id),
+                ));
+            }
+            if model.fields.iter().all(|field| field.id != *field_id) {
+                diagnostics.push(diagnostic(
+                    "MODEL_INDEX_FIELD_MODEL_MISMATCH",
+                    CompilerStage::Linking,
+                    format!("索引字段 {field_id} 不属于模型 {}", model.name),
+                    Some(index.id),
+                ));
+            }
+        }
+    }
+}
+
+fn validate_model_audit(model: &ModelDefinition, diagnostics: &mut Vec<Diagnostic>) {
+    let mut kinds = BTreeSet::new();
+    let mut field_ids = BTreeSet::new();
+    for audit_field in &model.audit.fields {
+        if !kinds.insert(audit_field.kind) {
+            diagnostics.push(diagnostic(
+                "MODEL_AUDIT_KIND_DUPLICATE",
+                CompilerStage::Schema,
+                format!(
+                    "模型 {} 重复配置审计角色 {}",
+                    model.name,
+                    audit_field.kind.label()
+                ),
+                Some(model.id),
+            ));
+        }
+        if !field_ids.insert(audit_field.field_id) {
+            diagnostics.push(diagnostic(
+                "MODEL_AUDIT_FIELD_DUPLICATE",
+                CompilerStage::Schema,
+                format!("模型 {} 的多个审计角色绑定了同一字段", model.name),
+                Some(model.id),
+            ));
+        }
+        let Some(field) = model
+            .fields
+            .iter()
+            .find(|field| field.id == audit_field.field_id)
+        else {
+            diagnostics.push(diagnostic(
+                "MODEL_AUDIT_FIELD_MISSING",
+                CompilerStage::Linking,
+                format!(
+                    "模型 {} 的审计角色 {} 未绑定有效字段",
+                    model.name,
+                    audit_field.kind.label()
+                ),
+                Some(model.id),
+            ));
+            continue;
+        };
+        if field.value_type != audit_field.kind.default_value_type() {
+            diagnostics.push(diagnostic(
+                "MODEL_AUDIT_FIELD_TYPE_INVALID",
+                CompilerStage::Types,
+                format!(
+                    "模型 {} 的审计角色 {} 字段类型不匹配",
+                    model.name,
+                    audit_field.kind.label()
+                ),
+                Some(field.id),
+            ));
+        }
+    }
+}
+
+fn validate_model_relations(definition: &ProgramDefinition, diagnostics: &mut Vec<Diagnostic>) {
+    for model in &definition.models {
+        for field in &model.fields {
+            let Some(relation) = &field.relation else {
+                continue;
+            };
+            let Some(target_model) = definition
+                .models
+                .iter()
+                .find(|candidate| candidate.id == relation.target_model_id)
+            else {
+                diagnostics.push(diagnostic(
+                    "RELATION_TARGET_MODEL_MISSING",
+                    CompilerStage::Linking,
+                    format!("字段 {} 的关联模型不存在", field.name),
+                    Some(field.id),
+                ));
+                continue;
+            };
+            let Some(target_field) = target_model
+                .fields
+                .iter()
+                .find(|candidate| candidate.id == relation.target_field_id)
+            else {
+                diagnostics.push(diagnostic(
+                    "RELATION_TARGET_FIELD_MISSING",
+                    CompilerStage::Linking,
+                    format!(
+                        "字段 {} 的对端字段不属于模型 {}",
+                        field.name, target_model.name
+                    ),
+                    Some(field.id),
+                ));
+                continue;
+            };
+            let expected_type = relation_value_type(relation.kind, target_model.id);
+            if field.value_type != expected_type {
+                diagnostics.push(diagnostic(
+                    "RELATION_VALUE_TYPE_MISMATCH",
+                    CompilerStage::Types,
+                    format!("字段 {} 的类型必须与关联基数一致", field.name),
+                    Some(field.id),
+                ));
+            }
+            let Some(opposite) = &target_field.relation else {
+                diagnostics.push(diagnostic(
+                    "RELATION_OPPOSITE_MISSING",
+                    CompilerStage::Linking,
+                    format!(
+                        "字段 {} 未被对端字段 {} 反向声明",
+                        field.name, target_field.name
+                    ),
+                    Some(field.id),
+                ));
+                continue;
+            };
+            if opposite.target_model_id != model.id
+                || opposite.target_field_id != field.id
+                || opposite.kind != relation.kind.opposite()
+            {
+                diagnostics.push(diagnostic(
+                    "RELATION_OPPOSITE_MISMATCH",
+                    CompilerStage::Linking,
+                    format!(
+                        "字段 {} 与 {} 的关联定义不一致",
+                        field.name, target_field.name
+                    ),
+                    Some(field.id),
+                ));
+            }
+        }
+    }
+}
+
+fn relation_value_type(kind: crate::RelationKind, target_model_id: SymbolId) -> crate::ValueType {
+    let value = crate::ValueType::Object {
+        model_id: target_model_id,
+    };
+    if kind.is_collection() {
+        crate::ValueType::List {
+            item: Box::new(value),
+        }
+    } else {
+        value
+    }
+}
+
+fn validate_model_queries(
+    definition: &ProgramDefinition,
+    model: &ModelDefinition,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut names = BTreeSet::new();
+    for query in &model.queries {
+        if !is_data_identifier(&query.name) || !names.insert(query.name.as_str()) {
+            diagnostics.push(diagnostic(
+                "MODEL_QUERY_IDENTIFIER_INVALID",
+                CompilerStage::Schema,
+                format!("模型 {} 的查询标识无效或重复: {}", model.name, query.name),
+                Some(query.id),
+            ));
+        }
+        if query.title.trim().is_empty() || query.conditions.is_empty() {
+            diagnostics.push(diagnostic(
+                "MODEL_QUERY_INCOMPLETE",
+                CompilerStage::Schema,
+                format!(
+                    "模型 {} 的查询 {} 必须包含标题和条件",
+                    model.name, query.name
+                ),
+                Some(query.id),
+            ));
+        }
+        for condition in &query.conditions {
+            validate_query_condition(definition, model, query.id, condition, diagnostics);
+        }
+    }
+}
+
+fn validate_query_condition(
+    definition: &ProgramDefinition,
+    model: &ModelDefinition,
+    query_id: SymbolId,
+    condition: &crate::QueryCondition,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let (parameter, valid) = match condition {
+        crate::QueryCondition::Field {
+            field_id,
+            parameter,
+            ..
+        } => (
+            parameter,
+            model.fields.iter().any(|field| field.id == *field_id),
+        ),
+        crate::QueryCondition::Relation {
+            relation_field_id,
+            target_field_id,
+            parameter,
+            ..
+        } => {
+            let valid = model
+                .fields
+                .iter()
+                .find(|field| field.id == *relation_field_id)
+                .and_then(|field| field.relation.as_ref())
+                .and_then(|relation| {
+                    definition
+                        .models
+                        .iter()
+                        .find(|candidate| candidate.id == relation.target_model_id)
+                })
+                .is_some_and(|target_model| {
+                    target_model
+                        .fields
+                        .iter()
+                        .any(|field| field.id == *target_field_id)
+                });
+            (parameter, valid)
+        }
+    };
+    if !valid {
+        diagnostics.push(diagnostic(
+            "MODEL_QUERY_CONDITION_INVALID",
+            CompilerStage::Linking,
+            format!("模型 {} 的查询条件引用了无效字段或关联", model.name),
+            Some(query_id),
+        ));
+    }
+    if !is_data_identifier(parameter) {
+        diagnostics.push(diagnostic(
+            "MODEL_QUERY_PARAMETER_INVALID",
+            CompilerStage::Schema,
+            format!(
+                "模型 {} 的查询参数必须是 snake_case: {parameter}",
+                model.name
+            ),
+            Some(query_id),
+        ));
+    }
+}
+
+fn validate_model_validations(model: &ModelDefinition, diagnostics: &mut Vec<Diagnostic>) {
+    for validation in &model.validations {
+        if validation.message.trim().is_empty() {
+            diagnostics.push(diagnostic(
+                "MODEL_VALIDATION_MESSAGE_EMPTY",
+                CompilerStage::Schema,
+                format!("模型 {} 的校验提示不能为空", model.name),
+                Some(validation.id),
+            ));
+        }
+        match &validation.rule {
+            crate::ModelValidationRule::FieldsRequiredTogether { field_ids }
+            | crate::ModelValidationRule::AtLeastOneRequired { field_ids } => {
+                validate_validation_fields(model, validation.id, field_ids, diagnostics);
+                if field_ids.len() < 2 {
+                    diagnostics.push(diagnostic(
+                        "MODEL_VALIDATION_FIELD_COUNT_INVALID",
+                        CompilerStage::Schema,
+                        format!("模型 {} 的联合校验至少需要两个字段", model.name),
+                        Some(validation.id),
+                    ));
+                }
+            }
+            crate::ModelValidationRule::RequiredWhenPresent {
+                field_id,
+                when_field_id,
+            } => {
+                validate_validation_fields(
+                    model,
+                    validation.id,
+                    &[*field_id, *when_field_id],
+                    diagnostics,
+                );
+                if field_id == when_field_id {
+                    diagnostics.push(diagnostic(
+                        "MODEL_VALIDATION_SELF_DEPENDENCY",
+                        CompilerStage::Schema,
+                        format!("模型 {} 的条件必填不能引用同一字段", model.name),
+                        Some(validation.id),
+                    ));
+                }
+            }
+        }
+    }
+}
+
+fn validate_validation_fields(
+    model: &ModelDefinition,
+    validation_id: SymbolId,
+    field_ids: &[SymbolId],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut seen = BTreeSet::new();
+    for field_id in field_ids {
+        if !seen.insert(*field_id) || model.fields.iter().all(|field| field.id != *field_id) {
+            diagnostics.push(diagnostic(
+                "MODEL_VALIDATION_FIELD_INVALID",
+                CompilerStage::Linking,
+                format!("模型 {} 的校验字段无效或重复: {field_id}", model.name),
+                Some(validation_id),
+            ));
+        }
+    }
 }
 
 fn validate_page_endpoints(page: &PageDefinition, diagnostics: &mut Vec<Diagnostic>) {
-    let mut endpoint_names = BTreeSet::new();
     let mut endpoint_routes = BTreeSet::new();
     for endpoint in &page.endpoints {
-        if !is_data_identifier(&endpoint.name) {
-            diagnostics.push(diagnostic(
-                "PAGE_ENDPOINT_IDENTIFIER_INVALID",
-                CompilerStage::Schema,
-                format!("页面接口标识必须是 snake_case: {}", endpoint.name),
-                Some(endpoint.id),
-            ));
-        }
-        if !endpoint_names.insert(endpoint.name.as_str()) {
-            diagnostics.push(diagnostic(
-                "PAGE_ENDPOINT_IDENTIFIER_DUPLICATE",
-                CompilerStage::Schema,
-                format!("页面接口标识重复: {}.{}", page.name, endpoint.name),
-                Some(endpoint.id),
-            ));
-        }
         if let Err(error) = validate_route_path(&endpoint.path) {
             diagnostics.push(diagnostic(
                 "PAGE_ENDPOINT_PATH_INVALID",
@@ -731,8 +1116,10 @@ fn validate_page_endpoints(page: &PageDefinition, diagnostics: &mut Vec<Diagnost
                     "PAGE_ENDPOINT_INPUT_INVALID",
                     CompilerStage::Schema,
                     format!(
-                        "接口 {} 的入参标识无效或重复: {}",
-                        endpoint.name, input.name
+                        "接口 {} {} 的入参标识无效或重复: {}",
+                        endpoint.method.as_str(),
+                        endpoint.path,
+                        input.name
                     ),
                     Some(input.id),
                 ));
@@ -755,8 +1142,10 @@ fn validate_page_endpoints(page: &PageDefinition, diagnostics: &mut Vec<Diagnost
                     "PAGE_ENDPOINT_OUTPUT_INVALID",
                     CompilerStage::Schema,
                     format!(
-                        "接口 {} 的出参标识无效或重复: {}",
-                        endpoint.name, output.name
+                        "接口 {} {} 的出参标识无效或重复: {}",
+                        endpoint.method.as_str(),
+                        endpoint.path,
+                        output.name
                     ),
                     Some(output.id),
                 ));
@@ -809,8 +1198,7 @@ fn compile_page_endpoints(
             .filter(|endpoint| endpoint.state.is_known())
             .map(|endpoint| CompiledPageEndpoint {
                 id: endpoint.id.to_string(),
-                name: endpoint.name.clone(),
-                title: endpoint.title.clone(),
+                title: endpoint.display_title(),
                 method: endpoint.method,
                 path: endpoint.path.clone(),
                 inputs: endpoint
@@ -836,7 +1224,6 @@ fn compile_page_endpoints(
                 source: PageEndpointSource::Custom,
                 route_instruction: RudiRouteInstruction {
                     provider_key: provider_key.clone(),
-                    operation: endpoint.name.clone(),
                 },
             }),
     );
@@ -915,7 +1302,6 @@ fn built_in_page_endpoints(
                  inputs: Vec<CompiledEndpointInput>,
                  outputs: Vec<CompiledEndpointOutput>| CompiledPageEndpoint {
         id: format!("builtin:{}:{name}", page.id),
-        name: name.to_owned(),
         title,
         method,
         path,
@@ -924,7 +1310,6 @@ fn built_in_page_endpoints(
         source: PageEndpointSource::BuiltIn,
         route_instruction: RudiRouteInstruction {
             provider_key: provider_key.clone(),
-            operation: name.to_owned(),
         },
     };
     vec![
@@ -1684,8 +2069,8 @@ mod tests {
     use crate::{
         DefinitionState, EndpointInputDefinition, EndpointInputLocation, EndpointOutputDefinition,
         FieldDefinition, MenuActionAccess, MenuDefinition, MenuRowActions, ModelDefinition,
-        PageEndpointDefinition, PageRendererDefinition, RestMethod, RouteDefinition,
-        TableDefinition, TreeDefinition, ValueType,
+        PageEndpointDefinition, PageRendererDefinition, PermissionDefinition, RestMethod,
+        RouteDefinition, TableDefinition, TreeDefinition, ValueType,
     };
 
     fn model(name: &str, title: &str) -> ModelDefinition {
@@ -1706,7 +2091,7 @@ mod tests {
                         filterable: true,
                         ..crate::FieldOptions::default()
                     },
-                    relation_model_id: None,
+                    relation: None,
                 },
                 FieldDefinition {
                     id: SymbolId::new(),
@@ -1716,10 +2101,13 @@ mod tests {
                     state: DefinitionState::Known,
                     required: false,
                     options: crate::FieldOptions::default(),
-                    relation_model_id: None,
+                    relation: None,
                 },
             ],
             indexes: Vec::new(),
+            queries: Vec::new(),
+            validations: Vec::new(),
+            audit: crate::ModelAuditDefinition::default(),
         }
     }
 
@@ -1782,8 +2170,15 @@ mod tests {
             CompiledPageRenderer::CrudTable { .. }
         ));
         assert_eq!(page.endpoints.len(), 6);
-        assert_eq!(page.endpoints[0].name, "query");
-        assert_eq!(page.endpoints[4].name, "import");
+        let model_id = program.models[0].id;
+        assert_eq!(
+            page.endpoints[0].path,
+            format!("/api/runtime/models/{model_id}/records")
+        );
+        assert_eq!(
+            page.endpoints[4].path,
+            format!("/api/runtime/models/{model_id}/records/import")
+        );
         assert_eq!(
             page.endpoints[0].route_instruction.provider_key,
             page_provider_key::<CrudTablePageProvider>()
@@ -1793,15 +2188,259 @@ mod tests {
     }
 
     #[test]
+    fn rejects_invalid_or_duplicate_permission_identifiers() -> anyhow::Result<()> {
+        let mut program = crud_program();
+        program.permissions = vec![
+            PermissionDefinition {
+                id: SymbolId::new(),
+                name: "asset.read".to_owned(),
+                title: "查看资产".to_owned(),
+                allowed_effects: Vec::new(),
+            },
+            PermissionDefinition {
+                id: SymbolId::new(),
+                name: "asset.read".to_owned(),
+                title: "重复权限".to_owned(),
+                allowed_effects: Vec::new(),
+            },
+        ];
+        let failure = ProgramCompiler::new("test", &CapabilityCatalog::default())
+            .compile(&program, "revision-1", ImageTarget::Universal)
+            .err()
+            .ok_or_else(|| anyhow::anyhow!("无效权限定义不应通过编译"))?;
+        assert!(
+            failure
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "PERMISSION_IDENTIFIER_INVALID")
+        );
+        assert!(
+            failure
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "PERMISSION_IDENTIFIER_DUPLICATE")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn compiles_composable_model_audit_metadata() -> anyhow::Result<()> {
+        let tenant_id = SymbolId::new();
+        let deleted_id = SymbolId::new();
+        let model_id = SymbolId::new();
+        let model = ModelDefinition {
+            id: model_id,
+            name: "asset".to_owned(),
+            title: "资产".to_owned(),
+            state: DefinitionState::Known,
+            fields: vec![
+                FieldDefinition {
+                    id: tenant_id,
+                    name: "tenant_id".to_owned(),
+                    title: "租户".to_owned(),
+                    value_type: ValueType::Text,
+                    state: DefinitionState::Known,
+                    required: false,
+                    options: crate::FieldOptions::default(),
+                    relation: None,
+                },
+                FieldDefinition {
+                    id: deleted_id,
+                    name: "deleted".to_owned(),
+                    title: "逻辑删除".to_owned(),
+                    value_type: ValueType::Boolean,
+                    state: DefinitionState::Known,
+                    required: false,
+                    options: crate::FieldOptions::default(),
+                    relation: None,
+                },
+            ],
+            indexes: Vec::new(),
+            queries: Vec::new(),
+            validations: Vec::new(),
+            audit: crate::ModelAuditDefinition {
+                fields: vec![
+                    crate::ModelAuditField {
+                        kind: crate::AuditFieldKind::TenantId,
+                        field_id: tenant_id,
+                    },
+                    crate::ModelAuditField {
+                        kind: crate::AuditFieldKind::Deleted,
+                        field_id: deleted_id,
+                    },
+                ],
+            },
+        };
+        let mut program = ProgramDefinition::empty("inventory", "资产");
+        program.models.push(model);
+        let image = ProgramCompiler::new("test", &CapabilityCatalog::default()).compile(
+            &program,
+            "revision-audit",
+            ImageTarget::Universal,
+        )?;
+        assert_eq!(image.models[&model_id].audit.fields.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn compiles_bidirectional_relationship_query_and_validation_metadata() -> anyhow::Result<()> {
+        let mut program = ProgramDefinition::empty("directory", "组织目录");
+        let department_id = SymbolId::new();
+        let department_name_id = SymbolId::new();
+        let department_users_id = SymbolId::new();
+        let user_id = SymbolId::new();
+        let user_name_id = SymbolId::new();
+        let user_department_id = SymbolId::new();
+        let user_phone_id = SymbolId::new();
+        let user_email_id = SymbolId::new();
+        program.models.push(ModelDefinition {
+            id: department_id,
+            name: "department".to_owned(),
+            title: "部门".to_owned(),
+            state: DefinitionState::Known,
+            fields: vec![
+                FieldDefinition {
+                    id: department_name_id,
+                    name: "name".to_owned(),
+                    title: "部门名称".to_owned(),
+                    value_type: ValueType::Text,
+                    state: DefinitionState::Known,
+                    required: true,
+                    options: crate::FieldOptions::default(),
+                    relation: None,
+                },
+                FieldDefinition {
+                    id: department_users_id,
+                    name: "users".to_owned(),
+                    title: "用户".to_owned(),
+                    value_type: ValueType::List {
+                        item: Box::new(ValueType::Object { model_id: user_id }),
+                    },
+                    state: DefinitionState::Known,
+                    required: false,
+                    options: crate::FieldOptions {
+                        validation: crate::FieldValidation {
+                            unique_items: true,
+                            ..crate::FieldValidation::default()
+                        },
+                        ..crate::FieldOptions::default()
+                    },
+                    relation: Some(crate::FieldRelation {
+                        kind: crate::RelationKind::OneToMany,
+                        target_model_id: user_id,
+                        target_field_id: user_department_id,
+                    }),
+                },
+            ],
+            indexes: vec![crate::ModelIndexDefinition {
+                id: SymbolId::new(),
+                fields: vec![department_name_id],
+                unique: false,
+            }],
+            queries: vec![crate::ModelQueryDefinition {
+                id: SymbolId::new(),
+                name: "search_by_name".to_owned(),
+                title: "按部门和用户名查询".to_owned(),
+                conjunction: crate::QueryConjunction::All,
+                conditions: vec![
+                    crate::QueryCondition::Field {
+                        field_id: department_name_id,
+                        operator: crate::QueryOperator::Contains,
+                        parameter: "department_name".to_owned(),
+                    },
+                    crate::QueryCondition::Relation {
+                        relation_field_id: department_users_id,
+                        target_field_id: user_name_id,
+                        operator: crate::QueryOperator::Contains,
+                        parameter: "user_name".to_owned(),
+                    },
+                ],
+            }],
+            validations: Vec::new(),
+            audit: crate::ModelAuditDefinition::default(),
+        });
+        program.models.push(ModelDefinition {
+            id: user_id,
+            name: "user".to_owned(),
+            title: "用户".to_owned(),
+            state: DefinitionState::Known,
+            fields: vec![
+                FieldDefinition {
+                    id: user_name_id,
+                    name: "name".to_owned(),
+                    title: "用户名".to_owned(),
+                    value_type: ValueType::Text,
+                    state: DefinitionState::Known,
+                    required: true,
+                    options: crate::FieldOptions::default(),
+                    relation: None,
+                },
+                FieldDefinition {
+                    id: user_department_id,
+                    name: "department".to_owned(),
+                    title: "部门".to_owned(),
+                    value_type: ValueType::Object {
+                        model_id: department_id,
+                    },
+                    state: DefinitionState::Known,
+                    required: true,
+                    options: crate::FieldOptions::default(),
+                    relation: Some(crate::FieldRelation {
+                        kind: crate::RelationKind::ManyToOne,
+                        target_model_id: department_id,
+                        target_field_id: department_users_id,
+                    }),
+                },
+                FieldDefinition {
+                    id: user_phone_id,
+                    name: "phone".to_owned(),
+                    title: "手机号".to_owned(),
+                    value_type: ValueType::Text,
+                    state: DefinitionState::Known,
+                    required: false,
+                    options: crate::FieldOptions::default(),
+                    relation: None,
+                },
+                FieldDefinition {
+                    id: user_email_id,
+                    name: "email".to_owned(),
+                    title: "邮箱".to_owned(),
+                    value_type: ValueType::Text,
+                    state: DefinitionState::Known,
+                    required: false,
+                    options: crate::FieldOptions::default(),
+                    relation: None,
+                },
+            ],
+            indexes: Vec::new(),
+            queries: Vec::new(),
+            validations: vec![crate::ModelValidationDefinition {
+                id: SymbolId::new(),
+                message: "填写手机号时必须填写邮箱".to_owned(),
+                rule: crate::ModelValidationRule::RequiredWhenPresent {
+                    field_id: user_email_id,
+                    when_field_id: user_phone_id,
+                },
+            }],
+            audit: crate::ModelAuditDefinition::default(),
+        });
+        let image = ProgramCompiler::new("test", &CapabilityCatalog::default()).compile(
+            &program,
+            "revision-relationship",
+            ImageTarget::Universal,
+        )?;
+        assert_eq!(image.models.len(), 2);
+        Ok(())
+    }
+
+    #[test]
     fn compiles_custom_rest_endpoint_with_rudi_form_instruction() -> anyhow::Result<()> {
         let mut program = crud_program();
         let endpoint_id = SymbolId::new();
         program.pages[0].endpoints.push(PageEndpointDefinition {
             id: endpoint_id,
-            name: "batch_disable".to_owned(),
             title: "批量停用资产".to_owned(),
             state: DefinitionState::Known,
-            intent: "按分类批量停用资产".to_owned(),
             method: RestMethod::Post,
             path: "/api/assets/{category_id}/batch-disable".to_owned(),
             inputs: vec![EndpointInputDefinition {
@@ -1831,6 +2470,7 @@ mod tests {
             .find(|endpoint| endpoint.id == endpoint_id.to_string())
             .ok_or_else(|| anyhow::anyhow!("自定义接口未进入编译产物"))?;
         assert_eq!(endpoint.method, RestMethod::Post);
+        assert_eq!(endpoint.title, "批量停用资产");
         assert_eq!(endpoint.source, PageEndpointSource::Custom);
         assert_eq!(
             endpoint.route_instruction.provider_key,
