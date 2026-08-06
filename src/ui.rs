@@ -20,6 +20,11 @@ use crate::components::{
     badge::{Badge, BadgeVariant},
     button::{Button, ButtonSize, ButtonVariant},
     checkbox::{Checkbox, checkbox_is_checked, checkbox_state},
+    data_table::{
+        DataTable, DataTableAlign, DataTableCellContext, DataTableColumn, DataTableEditContext,
+        DataTableEditTrigger, DataTableFixed, DataTableSpan,
+    },
+    dialog::{Dialog, DialogDescription, DialogTitle},
     input::Input,
     textarea::Textarea,
 };
@@ -1471,8 +1476,8 @@ fn PageRendererSettings(
     let mut table_model = use_signal(move || initial_table_model);
     let mut tree_model = use_signal(move || initial_tree_model);
     let mut settings_tab = use_signal(PageSettingsTab::default);
-    let initial_endpoint = page.endpoints.first().map(|endpoint| endpoint.id);
-    let selected_endpoint = use_signal(move || initial_endpoint);
+    let editing_endpoint = use_signal(|| None::<SymbolId>);
+    let deleting_endpoint = use_signal(|| None::<SymbolId>);
     let expected_path = crate::convention_page_path(&program_name, &page.name);
     let selected_table = SymbolId::parse(&table_model()).ok();
     let selected_tree = SymbolId::parse(&tree_model()).ok();
@@ -1700,7 +1705,8 @@ fn PageRendererSettings(
                         functions_api,
                         generation,
                         status,
-                        selected_endpoint,
+                        editing_endpoint,
+                        deleting_endpoint,
                     )}
                 }
             }
@@ -1833,7 +1839,8 @@ fn endpoint_panel(
     api_base_url: String,
     generation: Signal<u64>,
     status: Signal<Option<String>>,
-    mut selected_endpoint: Signal<Option<SymbolId>>,
+    mut editing_endpoint: Signal<Option<SymbolId>>,
+    deleting_endpoint: Signal<Option<SymbolId>>,
 ) -> Element {
     let compiled_page = crate::compile_page(&draft.definition, &page);
     let compiled_endpoints = compiled_page.endpoints;
@@ -1848,8 +1855,37 @@ fn endpoint_panel(
     let ai_api = api_base_url.clone();
     let page_name = page.name.clone();
     let page_title = page.title.clone();
-    let delete_api = api_base_url.clone();
-    let delete_program = program_id.clone();
+    let endpoint_rows = compiled_endpoints
+        .iter()
+        .cloned()
+        .map(|compiled| {
+            let definition = custom_endpoints
+                .iter()
+                .find(|endpoint| endpoint.id.to_string() == compiled.id)
+                .cloned();
+            EndpointTableRow {
+                compiled,
+                definition,
+            }
+        })
+        .collect::<Vec<_>>();
+    let endpoint_spans = endpoint_source_spans(&endpoint_rows);
+    let endpoint_columns = endpoint_table_columns();
+    let selected_row_key = editing_endpoint().map(|id| id.to_string());
+    let editing_dialog_endpoint = editing_endpoint().and_then(|endpoint_id| {
+        custom_endpoints
+            .iter()
+            .find(|endpoint| endpoint.id == endpoint_id)
+            .cloned()
+    });
+    let deleting_dialog_endpoint = deleting_endpoint().and_then(|endpoint_id| {
+        custom_endpoints
+            .iter()
+            .find(|endpoint| endpoint.id == endpoint_id)
+            .cloned()
+    });
+    let inline_api = api_base_url.clone();
+    let inline_program = program_id.clone();
     rsx! {
         section { class: "aio-endpoint-workbench",
             header { class: "aio-endpoint-workbench__header",
@@ -1882,7 +1918,7 @@ fn endpoint_panel(
                             generation,
                             status,
                         );
-                        selected_endpoint.set(Some(endpoint_id));
+                        editing_endpoint.set(Some(endpoint_id));
                     },
                     icons::Plus { class: "size-4" }
                     "新增接口"
@@ -1930,46 +1966,61 @@ fn endpoint_panel(
                 if compiled_endpoints.is_empty() {
                     {empty_panel("暂无接口定义")}
                 } else {
-                    div { class: "relative w-full overflow-x-auto",
-                        table { class: "aio-endpoint-table",
-                            thead {
-                                tr {
-                                    th { "来源" }
-                                    th { "方法" }
-                                    th { "REST 路径" }
-                                    th { "显示名称" }
-                                    th { "入参" }
-                                    th { "响应" }
-                                    th { class: "text-right", "操作" }
-                                }
+                    DataTable::<EndpointTableRow> {
+                        class: "aio-endpoint-data-table",
+                        aria_label: "REST 功能定义",
+                        rows: endpoint_rows,
+                        columns: endpoint_columns,
+                        spans: endpoint_spans,
+                        selected_row_key,
+                        edit_trigger: DataTableEditTrigger::Click,
+                        max_height: "34rem",
+                        row_key: |row: EndpointTableRow| row.compiled.id.clone(),
+                        can_edit: |cell: DataTableCellContext<EndpointTableRow>| {
+                            cell.row.definition.is_some()
+                                && matches!(cell.column.key.as_str(), "path" | "title")
+                        },
+                        render_cell: move |cell: DataTableCellContext<EndpointTableRow>| {
+                            endpoint_table_cell(
+                                cell,
+                                editing_endpoint,
+                                deleting_endpoint,
+                            )
+                        },
+                        render_editor: move |edit: DataTableEditContext<EndpointTableRow>| rsx! {
+                            EndpointInlineCellEditor {
+                                edit,
+                                api_base_url: inline_api.clone(),
+                                program_id: inline_program.clone(),
+                                version,
+                                generation,
+                                status,
                             }
-                            tbody {
-                                for endpoint in &compiled_endpoints {
-                                    {endpoint_table_row(
-                                        endpoint.clone(),
-                                        delete_api.clone(),
-                                        delete_program.clone(),
-                                        version,
-                                        generation,
-                                        status,
-                                        selected_endpoint,
-                                    )}
-                                }
-                            }
-                        }
+                        },
                     }
                 }
             }
-            if let Some(endpoint_id) = selected_endpoint() {
-                if let Some(endpoint) = custom_endpoints.iter().find(|endpoint| endpoint.id == endpoint_id).cloned() {
-                    {endpoint_editor(
-                        endpoint,
-                        api_base_url.clone(),
-                        program_id.clone(),
-                        version,
-                        generation,
-                        status,
-                    )}
+            if let Some(endpoint) = editing_dialog_endpoint {
+                EndpointEditorDialog {
+                    endpoint,
+                    api_base_url: api_base_url.clone(),
+                    program_id: program_id.clone(),
+                    version,
+                    generation,
+                    status,
+                    editing_endpoint,
+                }
+            }
+            if let Some(endpoint) = deleting_dialog_endpoint {
+                EndpointDeleteDialog {
+                    endpoint,
+                    api_base_url,
+                    program_id,
+                    version,
+                    generation,
+                    status,
+                    editing_endpoint,
+                    deleting_endpoint,
                 }
             }
         }
@@ -1987,42 +2038,119 @@ fn next_endpoint_path(page_name: &str, endpoints: &[PageEndpointDefinition]) -> 
     }
 }
 
-fn endpoint_table_row(
-    endpoint: crate::CompiledPageEndpoint,
-    api_base_url: String,
-    program_id: String,
-    version: i64,
-    generation: Signal<u64>,
-    status: Signal<Option<String>>,
-    mut selected_endpoint: Signal<Option<SymbolId>>,
+#[derive(Clone, Debug, PartialEq)]
+struct EndpointTableRow {
+    compiled: crate::CompiledPageEndpoint,
+    definition: Option<PageEndpointDefinition>,
+}
+
+fn endpoint_table_columns() -> Vec<DataTableColumn> {
+    vec![
+        DataTableColumn::leaf("source", "来源")
+            .width(88)
+            .fixed(DataTableFixed::Left),
+        DataTableColumn::group(
+            "request",
+            "请求",
+            vec![
+                DataTableColumn::leaf("method", "方法")
+                    .width(88)
+                    .align(DataTableAlign::Center),
+                DataTableColumn::leaf("path", "REST 路径")
+                    .width(300)
+                    .editable(),
+            ],
+        ),
+        DataTableColumn::group(
+            "description",
+            "说明",
+            vec![
+                DataTableColumn::leaf("title", "显示名称")
+                    .width(180)
+                    .editable(),
+            ],
+        ),
+        DataTableColumn::group(
+            "contract",
+            "数据契约",
+            vec![
+                DataTableColumn::leaf("inputs", "入参")
+                    .width(72)
+                    .align(DataTableAlign::Center),
+                DataTableColumn::leaf("outputs", "响应")
+                    .width(72)
+                    .align(DataTableAlign::Center),
+            ],
+        ),
+        DataTableColumn::leaf("actions", "操作")
+            .width(96)
+            .align(DataTableAlign::End)
+            .fixed(DataTableFixed::Right),
+    ]
+}
+
+fn endpoint_source_spans(rows: &[EndpointTableRow]) -> Vec<DataTableSpan> {
+    let mut spans = Vec::new();
+    let mut start = 0;
+    while start < rows.len() {
+        let source = rows[start].compiled.source;
+        let mut end = start + 1;
+        while end < rows.len() && rows[end].compiled.source == source {
+            end += 1;
+        }
+        if end - start > 1 {
+            spans.push(DataTableSpan::new(start, "source", end - start, 1));
+        }
+        start = end;
+    }
+    spans
+}
+
+fn endpoint_table_cell(
+    cell: DataTableCellContext<EndpointTableRow>,
+    mut editing_endpoint: Signal<Option<SymbolId>>,
+    mut deleting_endpoint: Signal<Option<SymbolId>>,
 ) -> Element {
+    let endpoint = cell.row.compiled;
     let endpoint_id = SymbolId::parse(&endpoint.id).ok();
-    rsx! {
-        tr { key: "{endpoint.id}",
-            td {
+    match cell.column.key.as_str() {
+        "source" => rsx! {
+            div { class: "aio-endpoint-table__source",
                 if endpoint.source == PageEndpointSource::BuiltIn {
                     Badge { variant: BadgeVariant::Outline, "内置" }
                 } else {
                     Badge { variant: BadgeVariant::Outline, "自定义" }
                 }
             }
-            td { span { class: method_class(endpoint.method), "{endpoint.method.as_str()}" } }
-            td { code { class: "aio-endpoint-table__path", "{endpoint.path}" } }
-            td { strong { "{endpoint.title}" } }
-            td { "{endpoint.inputs.len()}" }
-            td { "{endpoint.outputs.len()}" }
-            td { class: "text-right",
+        },
+        "method" => rsx! {
+            span { class: method_class(endpoint.method), "{endpoint.method.as_str()}" }
+        },
+        "path" => rsx! {
+            code { class: "aio-endpoint-table__path", "{endpoint.path}" }
+        },
+        "title" => rsx! {
+            strong { "{endpoint.title}" }
+        },
+        "inputs" => rsx! { "{endpoint.inputs.len()}" },
+        "outputs" => rsx! { "{endpoint.outputs.len()}" },
+        "actions" => rsx! {
+            div { class: "aio-endpoint-table__actions",
                 if let Some(endpoint_id) = endpoint_id {
                     Button {
                         size: ButtonSize::IconSm,
-                        variant: if selected_endpoint() == Some(endpoint_id) {
+                        variant: if editing_endpoint() == Some(endpoint_id) {
                             ButtonVariant::Secondary
                         } else {
                             ButtonVariant::Ghost
                         },
                         title: "编辑接口",
                         aria_label: "编辑接口",
-                        onclick: move |_| selected_endpoint.set(Some(endpoint_id)),
+                        onclick: move |event: MouseEvent| {
+                            event.stop_propagation();
+                            deleting_endpoint.set(None);
+                            editing_endpoint.set(Some(endpoint_id));
+                        },
                         icons::Pencil { class: "size-4" }
                     }
                     Button {
@@ -2030,18 +2158,10 @@ fn endpoint_table_row(
                         variant: ButtonVariant::Ghost,
                         title: "删除接口",
                         aria_label: "删除接口",
-                        onclick: move |_| {
-                            submit_patches(
-                                api_base_url.clone(),
-                                program_id.clone(),
-                                version,
-                                vec![GraphPatch::Delete { target_id: endpoint_id }],
-                                generation,
-                                status,
-                            );
-                            if selected_endpoint() == Some(endpoint_id) {
-                                selected_endpoint.set(None);
-                            }
+                        onclick: move |event: MouseEvent| {
+                            event.stop_propagation();
+                            editing_endpoint.set(None);
+                            deleting_endpoint.set(Some(endpoint_id));
                         },
                         icons::Trash2 { class: "size-4" }
                     }
@@ -2049,6 +2169,200 @@ fn endpoint_table_row(
                     code { class: "aio-endpoint-table__provider", "{short_provider_key(&endpoint.route_instruction.provider_key)}" }
                 }
             }
+        },
+        _ => rsx! { "—" },
+    }
+}
+
+#[component]
+fn EndpointEditorDialog(
+    endpoint: PageEndpointDefinition,
+    api_base_url: String,
+    program_id: String,
+    version: i64,
+    generation: Signal<u64>,
+    status: Signal<Option<String>>,
+    mut editing_endpoint: Signal<Option<SymbolId>>,
+) -> Element {
+    let method = endpoint.method.as_str();
+    let path = endpoint.path.clone();
+    let close_editor = use_callback(move |_: ()| editing_endpoint.set(None));
+    rsx! {
+        Dialog {
+            class: "aio-endpoint-dialog",
+            open: true,
+            on_open_change: move |open: bool| {
+                if !open {
+                    editing_endpoint.set(None);
+                }
+            },
+            header { class: "aio-endpoint-dialog__header",
+                div { class: "aio-endpoint-dialog__heading",
+                    DialogTitle { "编辑接口" }
+                    DialogDescription { "{method} {path}" }
+                }
+                Button {
+                    r#type: "button",
+                    size: ButtonSize::IconSm,
+                    variant: ButtonVariant::Ghost,
+                    title: "关闭编辑接口",
+                    aria_label: "关闭编辑接口",
+                    onclick: move |_| editing_endpoint.set(None),
+                    icons::X { class: "size-4" }
+                }
+            }
+            div { class: "aio-endpoint-dialog__body",
+                {endpoint_editor(
+                    endpoint,
+                    api_base_url,
+                    program_id,
+                    version,
+                    generation,
+                    status,
+                    close_editor,
+                )}
+            }
+        }
+    }
+}
+
+#[component]
+fn EndpointDeleteDialog(
+    endpoint: PageEndpointDefinition,
+    api_base_url: String,
+    program_id: String,
+    version: i64,
+    generation: Signal<u64>,
+    status: Signal<Option<String>>,
+    mut editing_endpoint: Signal<Option<SymbolId>>,
+    mut deleting_endpoint: Signal<Option<SymbolId>>,
+) -> Element {
+    let endpoint_id = endpoint.id;
+    let method = endpoint.method.as_str();
+    let path = endpoint.path;
+    rsx! {
+        Dialog {
+            class: "aio-endpoint-confirm-dialog",
+            open: true,
+            on_open_change: move |open: bool| {
+                if !open {
+                    deleting_endpoint.set(None);
+                }
+            },
+            DialogTitle { "删除接口" }
+            DialogDescription {
+                "确认删除 {method} {path}？删除后不可恢复。"
+            }
+            footer { class: "aio-endpoint-confirm-dialog__actions",
+                Button {
+                    r#type: "button",
+                    variant: ButtonVariant::Ghost,
+                    onclick: move |_| deleting_endpoint.set(None),
+                    "取消"
+                }
+                Button {
+                    r#type: "button",
+                    variant: ButtonVariant::Destructive,
+                    onclick: move |_| {
+                        submit_patches(
+                            api_base_url.clone(),
+                            program_id.clone(),
+                            version,
+                            vec![GraphPatch::Delete { target_id: endpoint_id }],
+                            generation,
+                            status,
+                        );
+                        if editing_endpoint() == Some(endpoint_id) {
+                            editing_endpoint.set(None);
+                        }
+                        deleting_endpoint.set(None);
+                    },
+                    "删除"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn EndpointInlineCellEditor(
+    edit: DataTableEditContext<EndpointTableRow>,
+    api_base_url: String,
+    program_id: String,
+    version: i64,
+    generation: Signal<u64>,
+    mut status: Signal<Option<String>>,
+) -> Element {
+    let Some(endpoint) = edit.cell.row.definition.clone() else {
+        return rsx! { "—" };
+    };
+    let field = edit.cell.column.key.clone();
+    let initial_value = match field.as_str() {
+        "path" => endpoint.path.clone(),
+        "title" => endpoint.title.clone(),
+        _ => return rsx! { "—" },
+    };
+    let mut value = use_signal(move || initial_value.clone());
+    let mut submitted = use_signal(|| false);
+    let close = edit.close;
+    let submit_field = field.clone();
+    let submit = use_callback(move |_: ()| {
+        if submitted() {
+            return;
+        }
+        let next_value = value().trim().to_owned();
+        if submit_field == "path" && !next_value.starts_with('/') {
+            status.set(Some("REST 路径必须以 / 开头".to_owned()));
+            return;
+        }
+        let current_value = if submit_field == "path" {
+            endpoint.path.as_str()
+        } else {
+            endpoint.title.as_str()
+        };
+        if next_value == current_value {
+            close.call(());
+            return;
+        }
+        submitted.set(true);
+        let mut updated = endpoint.clone();
+        if submit_field == "path" {
+            updated.path = next_value;
+        } else {
+            updated.title = next_value;
+        }
+        submit_endpoint_update(
+            updated,
+            api_base_url.clone(),
+            program_id.clone(),
+            version,
+            generation,
+            status,
+        );
+        close.call(());
+    });
+
+    rsx! {
+        Input {
+            class: "aio-input aio-endpoint-inline-editor",
+            value: value(),
+            aria_label: if field == "path" { "编辑 REST 路径" } else { "编辑显示名称" },
+            onmounted: move |event: MountedEvent| async move {
+                let _ = event.data().set_focus(true).await;
+            },
+            oninput: move |event: FormEvent| value.set(event.value()),
+            onblur: move |_: FocusEvent| submit.call(()),
+            onkeydown: move |event: KeyboardEvent| match event.key() {
+                Key::Enter => {
+                    event.prevent_default();
+                    submit.call(());
+                }
+                Key::Escape => {
+                    event.prevent_default();
+                    close.call(());
+                }
+                _ => {}
+            },
         }
     }
 }
@@ -2060,6 +2374,7 @@ fn endpoint_editor(
     version: i64,
     generation: Signal<u64>,
     status: Signal<Option<String>>,
+    on_saved: EventHandler<()>,
 ) -> Element {
     let save_endpoint = endpoint.clone();
     let save_api = api_base_url.clone();
@@ -2107,6 +2422,7 @@ fn endpoint_editor(
                 generation,
                 status,
             );
+            on_saved.call(());
         },
             header { class: "aio-endpoint-editor__header",
                 div { class: "aio-endpoint-request-line",
@@ -2249,6 +2565,12 @@ fn endpoint_editor(
                 }
             }
             footer {
+                Button {
+                    r#type: "button",
+                    variant: ButtonVariant::Ghost,
+                    onclick: move |_| on_saved.call(()),
+                    "取消"
+                }
                 Button { r#type: "submit",
                     icons::Save { class: "size-4" }
                     "保存接口"

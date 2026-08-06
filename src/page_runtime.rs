@@ -19,6 +19,10 @@ use crate::{
     components::{
         button::{Button, ButtonSize, ButtonVariant},
         checkbox::{Checkbox, checkbox_is_checked, checkbox_state},
+        data_table::{
+            DataTable, DataTableAlign, DataTableCellContext, DataTableColumn, DataTableFixed,
+            DataTableHeaderContext,
+        },
         input::Input,
         textarea::Textarea,
     },
@@ -372,7 +376,8 @@ fn MetadataTablePage(
     });
     let record_page = records.read().as_ref().cloned();
     let tree_page = tree_records.read().as_ref().cloned();
-    let columns = table_columns(&model);
+    let field_columns = table_columns(&model);
+    let data_table_columns = runtime_table_columns(&model, &field_columns);
     let filter_fields = filter_fields(&model);
     let can_create = !matches!(row_actions.edit, MenuActionAccess::Hidden);
     let current_filters = filters();
@@ -406,6 +411,11 @@ fn MetadataTablePage(
         .unwrap_or_default();
     let has_previous = offset() > 0;
     let has_next = offset().saturating_add(page_size) < total as usize;
+    let empty_text = match record_page.as_ref() {
+        Some(Err(error)) => error.clone(),
+        None => "正在加载".to_owned(),
+        Some(Ok(_)) => "暂无数据".to_owned(),
+    };
     let custom_endpoints = page
         .endpoints
         .iter()
@@ -489,81 +499,32 @@ fn MetadataTablePage(
                             }
                         }
                     }
-                    div { class: "aio-runtime-table-wrap",
-                        table {
-                            thead { tr {
-                                th { "序号" }
-                                for field_id in &columns {
-                                    if let Some((_, title, _)) = compiled_field(&model, *field_id) {
-                                        th {
-                                            if model.field_slots.get(field_id)
-                                                .and_then(|slot| model.field_options.get(slot))
-                                                .is_some_and(|options| options.sortable)
-                                            {
-                                                Button {
-                                                    class: "aio-runtime-sort",
-                                                    title: "按 {title} 排序",
-                                                    onclick: {
-                                                        let field_id = *field_id;
-                                                        move |_| sort.set(match sort() {
-                                                            Some((current, ascending)) if current == field_id => {
-                                                                Some((field_id, !ascending))
-                                                            }
-                                                            _ => Some((field_id, true)),
-                                                        })
-                                                    },
-                                                    "{title}"
-                                                    match sort() {
-                                                        Some((current, true)) if current == *field_id => rsx! { ArrowUp { class: "size-3" } },
-                                                        Some((current, false)) if current == *field_id => rsx! { ArrowDown { class: "size-3" } },
-                                                        _ => rsx! { ArrowUpDown { class: "size-3" } },
-                                                    }
-                                                }
-                                            } else {
-                                                "{title}"
-                                            }
-                                        }
-                                    }
-                                }
-                                th { "操作" }
-                            } }
-                            tbody {
-                                for (index, record) in rows.iter().enumerate() {
-                                    tr {
-                                        td { "{offset() + index + 1}" }
-                                        for field_id in &columns {
-                                            td { "{record_field(record, &model, *field_id).map(value_to_text).unwrap_or_else(|| \"—\".to_owned())}" }
-                                        }
-                                        td { class: "aio-runtime-row-actions",
-                                            if !matches!(row_actions.detail, MenuActionAccess::Hidden) {
-                                                Button { title: "详情", aria_label: "详情", onclick: {
-                                                    let record = record.clone();
-                                                    move |_| dialog.set(Some(RecordDialog::Detail(record.clone())))
-                                                }, Eye { class: "size-4" } }
-                                            }
-                                            if !matches!(row_actions.edit, MenuActionAccess::Hidden) {
-                                                Button { title: "编辑", aria_label: "编辑", onclick: {
-                                                    let record = record.clone();
-                                                    move |_| dialog.set(Some(RecordDialog::Edit(record.clone())))
-                                                }, Pencil { class: "size-4" } }
-                                            }
-                                            if !matches!(row_actions.delete, MenuActionAccess::Hidden) {
-                                                Button { class: "is-destructive", title: "删除", aria_label: "删除", onclick: {
-                                                    let record = record.clone();
-                                                    move |_| dialog.set(Some(RecordDialog::Delete(record.clone())))
-                                                }, Trash2 { class: "size-4" } }
-                                            }
-                                        }
-                                    }
-                                }
+                    DataTable::<RuntimeRecordView> {
+                        class: "aio-runtime-data-table",
+                        aria_label: format!("{}数据表", model.title),
+                        rows,
+                        columns: data_table_columns,
+                        max_height: "calc(100vh - 19rem)",
+                        empty_text,
+                        row_key: |record: RuntimeRecordView| record.id.clone(),
+                        render_header: {
+                            let model = model.clone();
+                            move |header: DataTableHeaderContext| {
+                                runtime_table_header(header, &model, sort)
                             }
-                        }
-                        match record_page {
-                            Some(Err(error)) => rsx! { div { class: "aio-runtime-table-state is-error", "{error}" } },
-                            None => rsx! { div { class: "aio-runtime-table-state", "正在加载" } },
-                            Some(Ok(_)) if rows.is_empty() => rsx! { div { class: "aio-runtime-table-state", "暂无数据" } },
-                            Some(Ok(_)) => rsx! {},
-                        }
+                        },
+                        render_cell: {
+                            let model = model.clone();
+                            move |cell: DataTableCellContext<RuntimeRecordView>| {
+                                runtime_table_cell(
+                                    cell,
+                                    &model,
+                                    offset(),
+                                    row_actions.clone(),
+                                    dialog,
+                                )
+                            }
+                        },
                     }
                     footer { class: "aio-runtime-pagination",
                         span { "共 {total} 条" }
@@ -1277,6 +1238,145 @@ fn table_columns(model: &CompiledModel) -> Vec<SymbolId> {
                 .then_some(*field_id)
         })
         .collect()
+}
+
+fn runtime_table_columns(
+    model: &CompiledModel,
+    field_columns: &[SymbolId],
+) -> Vec<DataTableColumn> {
+    let fields = field_columns
+        .iter()
+        .filter_map(|field_id| {
+            let (_, title, value_type) = compiled_field(model, *field_id)?;
+            let width = match value_type {
+                ValueType::Boolean => 96,
+                ValueType::Integer | ValueType::Decimal | ValueType::TimestampMs => 128,
+                _ => 180,
+            };
+            Some(
+                DataTableColumn::leaf(format!("field:{field_id}"), title)
+                    .width(width)
+                    .align(DataTableAlign::Start),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut columns = vec![
+        DataTableColumn::leaf("index", "序号")
+            .width(72)
+            .align(DataTableAlign::Center)
+            .fixed(DataTableFixed::Left),
+    ];
+    if !fields.is_empty() {
+        columns.push(DataTableColumn::group(
+            "fields",
+            model.title.clone(),
+            fields,
+        ));
+    }
+    columns.push(
+        DataTableColumn::leaf("actions", "操作")
+            .width(120)
+            .align(DataTableAlign::End)
+            .fixed(DataTableFixed::Right),
+    );
+    columns
+}
+
+fn runtime_table_header(
+    header: DataTableHeaderContext,
+    model: &CompiledModel,
+    mut sort: Signal<Option<(SymbolId, bool)>>,
+) -> Element {
+    let Some(field_id) = header
+        .column
+        .key
+        .strip_prefix("field:")
+        .and_then(|value| SymbolId::parse(value).ok())
+    else {
+        return rsx! { "{header.column.title}" };
+    };
+    let sortable = model
+        .field_slots
+        .get(&field_id)
+        .and_then(|slot| model.field_options.get(slot))
+        .is_some_and(|options| options.sortable);
+    if !sortable {
+        return rsx! { "{header.column.title}" };
+    }
+    let title = header.column.title;
+    rsx! {
+        Button {
+            class: "aio-runtime-sort",
+            title: "按 {title} 排序",
+            onclick: move |_| sort.set(match sort() {
+                Some((current, ascending)) if current == field_id => {
+                    Some((field_id, !ascending))
+                }
+                _ => Some((field_id, true)),
+            }),
+            "{title}"
+            match sort() {
+                Some((current, true)) if current == field_id => rsx! { ArrowUp { class: "size-3" } },
+                Some((current, false)) if current == field_id => rsx! { ArrowDown { class: "size-3" } },
+                _ => rsx! { ArrowUpDown { class: "size-3" } },
+            }
+        }
+    }
+}
+
+fn runtime_table_cell(
+    cell: DataTableCellContext<RuntimeRecordView>,
+    model: &CompiledModel,
+    offset: usize,
+    row_actions: MenuRowActions,
+    mut dialog: Signal<Option<RecordDialog>>,
+) -> Element {
+    if cell.column.key == "index" {
+        return rsx! { "{offset + cell.row_index + 1}" };
+    }
+    if cell.column.key == "actions" {
+        let detail_record = cell.row.clone();
+        let edit_record = cell.row.clone();
+        let delete_record = cell.row;
+        return rsx! {
+            div { class: "aio-runtime-row-actions",
+                if !matches!(row_actions.detail, MenuActionAccess::Hidden) {
+                    Button {
+                        title: "详情",
+                        aria_label: "详情",
+                        onclick: move |_| dialog.set(Some(RecordDialog::Detail(detail_record.clone()))),
+                        Eye { class: "size-4" }
+                    }
+                }
+                if !matches!(row_actions.edit, MenuActionAccess::Hidden) {
+                    Button {
+                        title: "编辑",
+                        aria_label: "编辑",
+                        onclick: move |_| dialog.set(Some(RecordDialog::Edit(edit_record.clone()))),
+                        Pencil { class: "size-4" }
+                    }
+                }
+                if !matches!(row_actions.delete, MenuActionAccess::Hidden) {
+                    Button {
+                        class: "is-destructive",
+                        title: "删除",
+                        aria_label: "删除",
+                        onclick: move |_| dialog.set(Some(RecordDialog::Delete(delete_record.clone()))),
+                        Trash2 { class: "size-4" }
+                    }
+                }
+            }
+        };
+    }
+    let value = cell
+        .column
+        .key
+        .strip_prefix("field:")
+        .and_then(|value| SymbolId::parse(value).ok())
+        .and_then(|field_id| record_field(&cell.row, model, field_id))
+        .map(value_to_text)
+        .unwrap_or_else(|| "—".to_owned());
+    rsx! { "{value}" }
 }
 
 fn filter_fields(model: &CompiledModel) -> Vec<SymbolId> {

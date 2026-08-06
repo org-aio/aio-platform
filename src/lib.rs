@@ -4,6 +4,9 @@
 mod compiler;
 #[cfg(not(target_arch = "wasm32"))]
 mod convention_file;
+#[cfg(any(target_arch = "wasm32", test))]
+#[path = "components/data_table/layout.rs"]
+mod data_table_layout;
 mod definition;
 #[cfg(not(target_arch = "wasm32"))]
 mod form_state;
