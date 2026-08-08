@@ -1,19 +1,24 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use anyhow::{Context, Result, bail, ensure};
 use dioxus::prelude::*;
 use icons::{
-    ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Eye, Pencil, Plus, Search,
-    Sparkles, Trash2, X,
+    ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Eye, Pencil, Play, Plus, RefreshCw,
+    Search, Sparkles, Trash2, X,
 };
 use rudi::Context as RudiContext;
 use serde_json::{Map, Value};
 
 use crate::{
     CompiledModel, CompiledPage, CompiledPageEndpoint, CompiledPageRenderer, CompiledTable,
-    CompiledTree, CrudTablePageProvider, EndpointInputLocation, FormStateExtractionRequest,
-    FormStateExtractionResponse, MenuActionAccess, MenuRowActions, PageEndpointSource,
-    ProgramImage, RestFormPageProvider, RestMethod, RuntimeRecordInput, RuntimeRecordPage,
+    CompiledTree, CrudTablePageProvider, EndpointInputLocation, FieldRelation,
+    FormStateExtractionRequest, FormStateExtractionResponse, MenuActionAccess, MenuRowActions,
+    PageEndpointSource, ProgramImage, ProgramMenuTreePageProvider, RestFormPageProvider,
+    RestMethod, RuntimeRecordCriteria, RuntimeRecordFilter, RuntimeRecordFilterOperator,
+    RuntimeRecordInput, RuntimeRecordPage, RuntimeRecordSort, RuntimeRecordSortDirection,
     RuntimeRecordView, SymbolId, TreeTablePageProvider, ValueType,
     browser_http::{api_url, delete_api, get_api, patch_api, post_api},
     components::{
@@ -23,13 +28,19 @@ use crate::{
             DataTable, DataTableAlign, DataTableCellContext, DataTableColumn, DataTableFixed,
             DataTableHeaderContext,
         },
+        dialog::{Dialog, DialogDescription, DialogTitle},
         input::Input,
         textarea::Textarea,
+    },
+    runtime_record_form::{
+        record_payload_from_state, relation_form_state_value, relation_record_label,
+        relation_search_fields, selected_relation_ids,
     },
 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConventionPageContext {
+    pub api_base_url: String,
     pub route: String,
     pub page: CompiledPage,
 }
@@ -183,6 +194,21 @@ impl BuiltInPageProvider for TreeTablePageProvider {
     }
 }
 
+impl BuiltInPageProvider for ProgramMenuTreePageProvider {
+    fn key(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
+
+    fn render(&self, context: BuiltInPageContext) -> Element {
+        rsx! {
+            crate::ui::ProgramMenuTreePage {
+                api_base_url: context.api_base_url,
+                title: context.page.title,
+            }
+        }
+    }
+}
+
 #[rudi::Singleton(name = std::any::type_name::<CrudTablePageProvider>())]
 fn crud_table_page_provider() -> DynBuiltInPageProvider {
     Arc::new(CrudTablePageProvider)
@@ -191,6 +217,11 @@ fn crud_table_page_provider() -> DynBuiltInPageProvider {
 #[rudi::Singleton(name = std::any::type_name::<TreeTablePageProvider>())]
 fn tree_table_page_provider() -> DynBuiltInPageProvider {
     Arc::new(TreeTablePageProvider)
+}
+
+#[rudi::Singleton(name = std::any::type_name::<ProgramMenuTreePageProvider>())]
+fn program_menu_tree_page_provider() -> DynBuiltInPageProvider {
+    Arc::new(ProgramMenuTreePageProvider)
 }
 
 fn render_built_in_page(context: BuiltInPageContext) -> Element {
@@ -218,6 +249,107 @@ pub trait ConventionPageProvider: Send + Sync + std::fmt::Debug {
 }
 
 pub type DynConventionPageProvider = Arc<dyn ConventionPageProvider>;
+
+#[component]
+pub fn EndpointWorkbench(context: ConventionPageContext) -> Element {
+    let mut generation = use_signal(|| 0_u64);
+    let mut endpoint_dialog = use_signal(|| None::<CompiledPageEndpoint>);
+    let page = context.page;
+    let api_base_url = context.api_base_url;
+    let query_endpoints = page
+        .endpoints
+        .iter()
+        .filter(|endpoint| endpoint.method == RestMethod::Get && endpoint.inputs.is_empty())
+        .cloned()
+        .collect::<Vec<_>>();
+    let action_endpoints = page
+        .endpoints
+        .iter()
+        .filter(|endpoint| endpoint.method != RestMethod::Get || !endpoint.inputs.is_empty())
+        .cloned()
+        .collect::<Vec<_>>();
+
+    rsx! {
+        section { class: "aio-runtime-table-page aio-runtime-endpoint-workbench",
+            header { class: "aio-runtime-table-page__header",
+                div {
+                    h2 { "{page.title}" }
+                    p { "{query_endpoints.len()} 项数据 · {action_endpoints.len()} 项操作" }
+                }
+                div { class: "aio-runtime-table-page__actions",
+                    for endpoint in action_endpoints {
+                        {endpoint_action_button(endpoint, endpoint_dialog)}
+                    }
+                    Button {
+                        size: ButtonSize::IconSm,
+                        variant: ButtonVariant::Outline,
+                        title: "刷新数据",
+                        aria_label: "刷新数据",
+                        onclick: move |_| generation += 1,
+                        RefreshCw { class: "size-4" }
+                    }
+                }
+            }
+            div { class: "aio-runtime-endpoint-workbench__content",
+                if query_endpoints.is_empty() {
+                    div { class: "aio-runtime-table-state", "暂无可读取的数据接口" }
+                } else {
+                    for endpoint in query_endpoints {
+                        EndpointResultPanel {
+                            key: "{endpoint.id}",
+                            api_base_url: api_base_url.clone(),
+                            endpoint,
+                            generation,
+                        }
+                    }
+                }
+            }
+            if let Some(endpoint) = endpoint_dialog() {
+                RuntimeEndpointDialog {
+                    key: "{endpoint.id}",
+                    api_base_url: api_base_url.clone(),
+                    endpoint,
+                    on_close: move |_| endpoint_dialog.set(None),
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn EndpointResultPanel(
+    api_base_url: String,
+    endpoint: CompiledPageEndpoint,
+    generation: Signal<u64>,
+) -> Element {
+    let request_api = api_base_url;
+    let request_endpoint = endpoint.clone();
+    let response = use_resource(move || {
+        let api_base_url = request_api.clone();
+        let endpoint = request_endpoint.clone();
+        let _generation = generation();
+        async move { send_rest_endpoint_request(&api_base_url, &endpoint, &BTreeMap::new()).await }
+    });
+    let result = response.read().as_ref().cloned();
+
+    rsx! {
+        article { class: "aio-runtime-endpoint-panel",
+            header {
+                div {
+                    strong { "{endpoint.title}" }
+                    code { "{endpoint.method.as_str()} {endpoint.path}" }
+                }
+            }
+            match result {
+                None => rsx! { div { class: "aio-runtime-endpoint-panel__state", "正在加载" } },
+                Some(Ok(payload)) => rsx! { pre { "{payload}" } },
+                Some(Err(error)) => rsx! {
+                    div { class: "aio-runtime-endpoint-panel__state is-error", role: "alert", "{error}" }
+                },
+            }
+        }
+    }
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct ConventionPageIndex {
@@ -264,6 +396,8 @@ enum RecordDialog {
     Delete(RuntimeRecordView),
 }
 
+type RelationLabelIndex = BTreeMap<SymbolId, BTreeMap<String, String>>;
+
 #[component]
 pub fn BuiltInPage(
     api_base_url: String,
@@ -276,6 +410,9 @@ pub fn BuiltInPage(
         CompiledPageRenderer::CrudTable { table, .. } => (table.clone(), None),
         CompiledPageRenderer::ConventionFile { .. } => {
             return render_runtime_error("内置页面收到了约定文件渲染计划");
+        }
+        CompiledPageRenderer::MenuTree { .. } => {
+            return render_runtime_error("通用表格收到了菜单树渲染计划");
         }
     };
     let Some(model) = image.models.get(&table.model_id).cloned() else {
@@ -327,10 +464,10 @@ fn MetadataTablePage(
     mut notice: Signal<Option<String>>,
 ) -> Element {
     let mut endpoint_dialog = use_signal(|| None::<CompiledPageEndpoint>);
-    let endpoint_forms = use_hook(load_page_endpoint_index);
     let page_size = table.page_size as usize;
     let records_api = api_base_url.clone();
     let records_model = table.model_id;
+    let records_model_metadata = model.clone();
     let relation_field_name = tree.as_ref().and_then(|tree| {
         compiled_field(&model, tree.table_relation_field_id).map(|(name, _, _)| name.to_owned())
     });
@@ -342,20 +479,21 @@ fn MetadataTablePage(
         let api_base_url = records_api.clone();
         let current_offset = offset();
         let selected_tree = selected_tree();
+        let current_filters = filters();
+        let current_sort = sort();
         let relation_field_name = relation_field_name.clone();
+        let model = records_model_metadata.clone();
         let _generation = generation();
         async move {
-            let filter_query = match (relation_field_name.as_deref(), selected_tree.as_deref()) {
-                (Some(field), Some(value)) => format!("&field={field}&value={value}"),
-                _ => String::new(),
-            };
-            get_api::<RuntimeRecordPage>(
-                &api_base_url,
-                &format!(
-                    "/api/runtime/models/{records_model}/records?o={current_offset}&s={page_size}{filter_query}"
-                ),
-            )
-            .await
+            let criteria = runtime_table_criteria(
+                &model,
+                &current_filters,
+                current_sort,
+                relation_field_name.as_deref(),
+                selected_tree.as_deref(),
+            )?;
+            let path = runtime_records_path(records_model, current_offset, page_size, &criteria)?;
+            get_api::<RuntimeRecordPage>(&api_base_url, &path).await
         }
     });
     let tree_records_api = api_base_url.clone();
@@ -374,36 +512,44 @@ fn MetadataTablePage(
             .map(Some)
         }
     });
+    let relation_records_api = api_base_url.clone();
+    let relation_image = image.clone();
+    let relation_model = model.clone();
+    let relation_source = records;
+    let relation_labels = use_resource(move || {
+        let api_base_url = relation_records_api.clone();
+        let image = relation_image.clone();
+        let model = relation_model.clone();
+        let record_page = relation_source.read().as_ref().cloned();
+        async move {
+            let Some(Ok(page)) = record_page else {
+                return Ok(RelationLabelIndex::new());
+            };
+            let references = relation_reference_ids(&model, &page);
+            load_relation_label_index(&api_base_url, &image, &references).await
+        }
+    });
     let record_page = records.read().as_ref().cloned();
     let tree_page = tree_records.read().as_ref().cloned();
+    let relation_label_result = relation_labels.read().as_ref().cloned();
+    let relation_label_index = relation_label_result
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .cloned()
+        .map_or_else(RelationLabelIndex::new, |index| index);
+    let relation_label_error = relation_label_result
+        .as_ref()
+        .and_then(|result| result.as_ref().err())
+        .cloned();
     let field_columns = table_columns(&model);
     let data_table_columns = runtime_table_columns(&model, &field_columns);
     let filter_fields = filter_fields(&model);
     let can_create = !matches!(row_actions.edit, MenuActionAccess::Hidden);
-    let current_filters = filters();
-    let mut rows = record_page
+    let rows = record_page
         .as_ref()
         .and_then(|result| result.as_ref().ok())
-        .map(|page| {
-            page.d
-                .iter()
-                .filter(|record| record_matches(record, &model, &current_filters))
-                .cloned()
-                .collect::<Vec<_>>()
-        })
+        .map(|page| page.d.clone())
         .unwrap_or_default();
-    if let Some((field_id, ascending)) = sort() {
-        rows.sort_by(|left, right| {
-            let ordering = record_field(left, &model, field_id)
-                .map(value_to_text)
-                .cmp(&record_field(right, &model, field_id).map(value_to_text));
-            if ascending {
-                ordering
-            } else {
-                ordering.reverse()
-            }
-        });
-    }
     let total = record_page
         .as_ref()
         .and_then(|result| result.as_ref().ok())
@@ -416,10 +562,10 @@ fn MetadataTablePage(
         None => "正在加载".to_owned(),
         Some(Ok(_)) => "暂无数据".to_owned(),
     };
-    let custom_endpoints = page
+    let external_endpoints = page
         .endpoints
         .iter()
-        .filter(|endpoint| endpoint.source == PageEndpointSource::Custom)
+        .filter(|endpoint| endpoint.source != PageEndpointSource::BuiltIn)
         .cloned()
         .collect::<Vec<_>>();
     rsx! {
@@ -430,7 +576,7 @@ fn MetadataTablePage(
                     p { "{model.title}" }
                 }
                 div { class: "aio-runtime-table-page__actions",
-                    for endpoint in custom_endpoints {
+                    for endpoint in external_endpoints {
                         {endpoint_action_button(endpoint, endpoint_dialog)}
                     }
                     if can_create {
@@ -499,6 +645,11 @@ fn MetadataTablePage(
                             }
                         }
                     }
+                    if let Some(error) = relation_label_error {
+                        div { class: "aio-runtime-table-state is-error", role: "alert",
+                            "关联记录标签加载失败：{error}"
+                        }
+                    }
                     DataTable::<RuntimeRecordView> {
                         class: "aio-runtime-data-table",
                         aria_label: format!("{}数据表", model.title),
@@ -510,15 +661,17 @@ fn MetadataTablePage(
                         render_header: {
                             let model = model.clone();
                             move |header: DataTableHeaderContext| {
-                                runtime_table_header(header, &model, sort)
+                                runtime_table_header(header, &model, sort, offset)
                             }
                         },
                         render_cell: {
                             let model = model.clone();
+                            let relation_label_index = relation_label_index.clone();
                             move |cell: DataTableCellContext<RuntimeRecordView>| {
                                 runtime_table_cell(
                                     cell,
                                     &model,
+                                    &relation_label_index,
                                     offset(),
                                     row_actions.clone(),
                                     dialog,
@@ -553,6 +706,7 @@ fn MetadataTablePage(
                     key: "{table.model_id}:{dialog_key(&dialog_value)}",
                     value: dialog_value,
                     model,
+                    image: image.clone(),
                     api_base_url: api_base_url.clone(),
                     model_id: table.model_id,
                     generation,
@@ -561,34 +715,11 @@ fn MetadataTablePage(
                 }
             }
             if let Some(endpoint) = endpoint_dialog() {
-                div { class: "aio-runtime-dialog-backdrop", onclick: move |_| endpoint_dialog.set(None) }
-                section { class: "aio-runtime-dialog aio-runtime-dialog--endpoint",
-                    header {
-                        div {
-                            strong { "{endpoint.title}" }
-                            code { "{endpoint.method.as_str()} {endpoint.path}" }
-                        }
-                        Button {
-                            size: ButtonSize::IconSm,
-                            variant: ButtonVariant::Ghost,
-                            title: "关闭",
-                            aria_label: "关闭",
-                            onclick: move |_| endpoint_dialog.set(None),
-                            X { class: "size-4" }
-                        }
-                    }
-                    match &endpoint_forms {
-                        Ok(index) => index
-                            .render(
-                                &endpoint.route_instruction.provider_key,
-                                PageEndpointFormContext {
-                                    api_base_url: api_base_url.clone(),
-                                    endpoint: endpoint.clone(),
-                                },
-                            )
-                            .unwrap_or_else(|| render_runtime_error("页面接口 Provider 未注册")),
-                        Err(error) => render_runtime_error(error),
-                    }
+                RuntimeEndpointDialog {
+                    key: "{endpoint.id}",
+                    api_base_url: api_base_url.clone(),
+                    endpoint,
+                    on_close: move |_| endpoint_dialog.set(None),
                 }
             }
         }
@@ -604,7 +735,56 @@ fn endpoint_action_button(
         Button {
             variant: ButtonVariant::Outline,
             onclick: move |_| endpoint_dialog.set(Some(endpoint.clone())),
+            Play { class: "size-4" }
             "{title}"
+        }
+    }
+}
+
+#[component]
+fn RuntimeEndpointDialog(
+    api_base_url: String,
+    endpoint: CompiledPageEndpoint,
+    on_close: EventHandler<()>,
+) -> Element {
+    let endpoint_forms = use_hook(load_page_endpoint_index);
+    rsx! {
+        Dialog {
+            class: "aio-runtime-dialog aio-runtime-dialog--endpoint",
+            open: true,
+            on_open_change: move |open: bool| {
+                if !open {
+                    on_close.call(());
+                }
+            },
+            header {
+                div {
+                    DialogTitle { "{endpoint.title}" }
+                    DialogDescription {
+                        code { "{endpoint.method.as_str()} {endpoint.path}" }
+                    }
+                }
+                Button {
+                    size: ButtonSize::IconSm,
+                    variant: ButtonVariant::Ghost,
+                    title: "关闭接口调用",
+                    aria_label: "关闭接口调用",
+                    onclick: move |_| on_close.call(()),
+                    X { class: "size-4" }
+                }
+            }
+            match &endpoint_forms {
+                Ok(index) => index
+                    .render(
+                        &endpoint.route_instruction.provider_key,
+                        PageEndpointFormContext {
+                            api_base_url,
+                            endpoint: endpoint.clone(),
+                        },
+                    )
+                    .unwrap_or_else(|| render_runtime_error("页面接口 Provider 未注册")),
+                Err(error) => render_runtime_error(error),
+            }
         }
     }
 }
@@ -878,6 +1058,7 @@ fn tree_depth(
 fn RuntimeRecordDialog(
     value: RecordDialog,
     model: CompiledModel,
+    image: ProgramImage,
     api_base_url: String,
     model_id: SymbolId,
     generation: Signal<u64>,
@@ -898,9 +1079,18 @@ fn RuntimeRecordDialog(
     };
     let readonly = matches!(value, RecordDialog::Detail(_));
     let deleting = matches!(value, RecordDialog::Delete(_));
+    let dialog_class = if deleting {
+        "aio-runtime-dialog aio-runtime-dialog--confirm"
+    } else {
+        "aio-runtime-dialog aio-runtime-dialog--record"
+    };
+    let description = record.as_ref().map_or_else(
+        || format!("为“{}”填写记录字段", model.title),
+        |record| format!("{} · {}", model.title, record.id),
+    );
     let submit_value = value.clone();
     let initial_form_state = initial_form_state(&model, record.as_ref());
-    let mut form_state = use_signal(move || initial_form_state);
+    let form_state = use_signal(move || initial_form_state);
     let mut ai_prompt = use_signal(String::new);
     let ai_loading = use_signal(|| false);
     let can_ai_fill = !readonly
@@ -910,26 +1100,52 @@ fn RuntimeRecordDialog(
             .any(|options| options.form_visible && options.form_editable && options.ai_extract);
     let submit_model = model.clone();
     rsx! {
-        div { class: "aio-runtime-dialog-backdrop", onclick: move |_| dialog.set(None) }
-        section { class: "aio-runtime-dialog", role: "dialog", aria_label: "{title}",
-            header {
-                h3 { "{title}" }
-                Button { size: ButtonSize::IconSm, variant: ButtonVariant::Ghost, aria_label: "关闭", onclick: move |_| dialog.set(None),
+        Dialog {
+            class: dialog_class,
+            open: true,
+            on_open_change: move |open: bool| {
+                if !open {
+                    dialog.set(None);
+                }
+            },
+            header { class: "aio-runtime-dialog__header",
+                div { class: "aio-runtime-dialog__heading",
+                    DialogTitle { "{title}" }
+                    DialogDescription { "{description}" }
+                }
+                Button {
+                    r#type: "button",
+                    size: ButtonSize::IconSm,
+                    variant: ButtonVariant::Ghost,
+                    title: "关闭记录对话框",
+                    aria_label: "关闭记录对话框",
+                    onclick: move |_| dialog.set(None),
                     X { class: "size-4" }
                 }
             }
             if deleting {
-                p { "删除后不可恢复，确认删除这条记录？" }
-                footer {
-                    Button { variant: ButtonVariant::Outline, onclick: move |_| dialog.set(None), "取消" }
-                    Button { onclick: move |_| {
-                        if let Some(record) = record.clone() {
-                            delete_runtime_record(
-                                api_base_url.clone(), model_id,
-                                record.id, generation, dialog, notice,
-                            );
-                        }
-                    }, "删除" }
+                p { class: "aio-runtime-dialog__confirm-message", "删除后不可恢复，确认删除这条记录？" }
+                footer { class: "aio-runtime-dialog__actions",
+                    Button {
+                        r#type: "button",
+                        variant: ButtonVariant::Ghost,
+                        onclick: move |_| dialog.set(None),
+                        "取消"
+                    }
+                    Button {
+                        r#type: "button",
+                        variant: ButtonVariant::Destructive,
+                        onclick: move |_| {
+                            if let Some(record) = record.clone() {
+                                delete_runtime_record(
+                                    api_base_url.clone(), model_id,
+                                    record.id, generation, dialog, notice,
+                                );
+                            }
+                        },
+                        Trash2 { class: "size-4" }
+                        "删除记录"
+                    }
                 }
             } else {
                 form { class: "aio-runtime-record-form", onsubmit: move |event| {
@@ -938,110 +1154,413 @@ fn RuntimeRecordDialog(
                         dialog.set(None);
                         return;
                     }
-                    let payload = record_payload_from_state(&submit_model, &form_state());
-                    save_runtime_record(
-                        api_base_url.clone(), model_id,
-                        submit_value.clone(), payload, generation, dialog, notice,
-                    );
+                    match record_payload_from_state(&submit_model, &form_state()) {
+                        Ok(payload) => save_runtime_record(
+                            api_base_url.clone(), model_id,
+                            submit_value.clone(), payload, generation, dialog, notice,
+                        ),
+                        Err(error) => notice.set(Some(error)),
+                    }
                 },
-                    if can_ai_fill {
-                        div { class: "aio-runtime-ai-fill",
-                            Textarea {
-                                class: "aio-input",
-                                aria_label: "AI 表单输入",
-                                placeholder: "描述要填写的数据",
-                                value: ai_prompt(),
-                                oninput: move |event: FormEvent| ai_prompt.set(event.value()),
+                    div { class: "aio-runtime-record-form__body",
+                        if can_ai_fill {
+                            div { class: "aio-runtime-ai-fill",
+                                Textarea {
+                                    class: "aio-input",
+                                    aria_label: "AI 表单输入",
+                                    placeholder: "描述要填写的数据",
+                                    value: ai_prompt(),
+                                    oninput: move |event: FormEvent| ai_prompt.set(event.value()),
+                                }
+                                Button {
+                                    r#type: "button",
+                                    variant: ButtonVariant::Outline,
+                                    disabled: ai_loading(),
+                                    onclick: {
+                                        let api_base_url = api_base_url.clone();
+                                        let model = model.clone();
+                                        move |_| {
+                                            let prompt = ai_prompt().trim().to_owned();
+                                            if prompt.is_empty() {
+                                                notice.set(Some("AI 表单输入不能为空".to_owned()));
+                                                return;
+                                            }
+                                            extract_runtime_form_state(
+                                                api_base_url.clone(),
+                                                model_id,
+                                                model.clone(),
+                                                prompt,
+                                                form_state,
+                                                ai_loading,
+                                                notice,
+                                            );
+                                        }
+                                    },
+                                    Sparkles { class: "size-4" }
+                                    if ai_loading() { "生成中" } else { "AI 填写" }
+                                }
                             }
+                        }
+                        for slot in 0..model.field_names.len() as u32 {
+                            RuntimeRecordField {
+                                key: "{model.id}:{slot}",
+                                slot,
+                                model: model.clone(),
+                                image: image.clone(),
+                                api_base_url: api_base_url.clone(),
+                                readonly,
+                                form_state,
+                            }
+                        }
+                    }
+                    footer { class: "aio-runtime-dialog__actions",
+                        if !readonly {
                             Button {
                                 r#type: "button",
-                                variant: ButtonVariant::Outline,
-                                disabled: ai_loading(),
-                                onclick: {
-                                    let api_base_url = api_base_url.clone();
-                                    let model = model.clone();
-                                    move |_| {
-                                        let prompt = ai_prompt().trim().to_owned();
-                                        if prompt.is_empty() {
-                                            notice.set(Some("AI 表单输入不能为空".to_owned()));
-                                            return;
-                                        }
-                                        extract_runtime_form_state(
-                                            api_base_url.clone(),
-                                            model_id,
-                                            model.clone(),
-                                            prompt,
-                                            form_state,
-                                            ai_loading,
-                                            notice,
-                                        );
-                                    }
-                                },
-                                Sparkles { class: "size-4" }
-                                if ai_loading() { "生成中" } else { "AI 填写" }
+                                variant: ButtonVariant::Ghost,
+                                onclick: move |_| dialog.set(None),
+                                "取消"
                             }
                         }
-                    }
-                    for slot in 0..model.field_names.len() as u32 {
-                        if let (Some(name), Some(title), Some(value_type)) = (
-                            model.field_names.get(&slot),
-                            model.field_titles.get(&slot),
-                            model.field_types.get(&slot),
-                        ) {
-                            if model.field_options.get(&slot).is_some_and(|options| {
-                                if readonly { options.detail_visible } else { options.form_visible }
-                            }) {
-                                label { "{title}" }
-                                if matches!(value_type, ValueType::Boolean) {
-                                    Checkbox {
-                                        name: "{name}",
-                                        disabled: readonly || model.field_options.get(&slot)
-                                            .is_some_and(|options| !options.form_editable),
-                                        checked: Some(checkbox_state(form_state().get(name)
-                                            .is_some_and(|value| matches!(value.as_str(), "true" | "on" | "1")))),
-                                        on_checked_change: {
-                                            let name = name.clone();
-                                            move |checked| form_state.with_mut(|state| {
-                                                state.insert(name.clone(), checkbox_is_checked(checked).to_string());
-                                            })
-                                        },
-                                    }
-                                } else {
-                                    Input {
-                                        class: "aio-input",
-                                        name: "{name}",
-                                        r#type: field_input_type(value_type),
-                                        required: model.required_fields.contains(&slot),
-                                        readonly: readonly || model.field_options.get(&slot)
-                                            .is_some_and(|options| !options.form_editable),
-                                        placeholder: model.field_options.get(&slot)
-                                            .and_then(|options| options.placeholder.as_deref())
-                                            .unwrap_or_default(),
-                                        value: form_state().get(name).cloned().unwrap_or_default(),
-                                        oninput: {
-                                            let name = name.clone();
-                                            move |event: FormEvent| form_state.with_mut(|state| {
-                                                state.insert(name.clone(), event.value());
-                                            })
-                                        },
-                                    }
-                                }
-                                if let Some(help_text) = model.field_options.get(&slot)
-                                    .and_then(|options| options.help_text.as_deref())
-                                {
-                                    small { "{help_text}" }
-                                }
-                            }
-                        }
-                    }
-                    footer {
-                        Button { r#type: "button", variant: ButtonVariant::Ghost, onclick: move |_| dialog.set(None), "取消" }
-                        Button { r#type: "submit", if readonly { "关闭" } else { "保存" } }
+                        Button { r#type: "submit", if readonly { "关闭" } else { "保存记录" } }
                     }
                 }
             }
         }
     }
+}
+
+#[component]
+fn RuntimeRecordField(
+    slot: u32,
+    model: CompiledModel,
+    image: ProgramImage,
+    api_base_url: String,
+    readonly: bool,
+    form_state: Signal<BTreeMap<String, String>>,
+) -> Element {
+    let (Some(name), Some(title), Some(value_type), Some(options)) = (
+        model.field_names.get(&slot),
+        model.field_titles.get(&slot),
+        model.field_types.get(&slot),
+        model.field_options.get(&slot),
+    ) else {
+        return rsx! {};
+    };
+    let visible = if readonly {
+        options.detail_visible
+    } else {
+        options.form_visible
+    };
+    if !visible {
+        return rsx! {};
+    }
+    let input_id = format!("runtime-record-{}-{slot}", model.id);
+    let disabled = readonly || !options.form_editable;
+    let required = model.required_fields.contains(&slot);
+    let value = form_state()
+        .get(name)
+        .cloned()
+        .map_or_else(String::new, |value| value);
+    rsx! {
+        label { r#for: "{input_id}", "{title}" }
+        if let Some(relation) = model.field_relations.get(&slot) {
+            if let Some(target_model) = image.models.get(&relation.target_model_id) {
+                RuntimeRelationField {
+                    api_base_url,
+                    relation: relation.clone(),
+                    target_model: target_model.clone(),
+                    input_id: input_id.clone(),
+                    field_name: name.clone(),
+                    field_title: title.clone(),
+                    required,
+                    disabled,
+                    form_state,
+                }
+            } else {
+                div { class: "aio-runtime-relation-state is-error", role: "alert",
+                    "关联模型未进入运行时 Image"
+                }
+            }
+        } else if matches!(value_type, ValueType::Boolean) {
+            Checkbox {
+                id: input_id.clone(),
+                name: "{name}",
+                disabled,
+                checked: Some(checkbox_state(matches!(value.as_str(), "true" | "on" | "1"))),
+                on_checked_change: {
+                    let name = name.clone();
+                    move |checked| form_state.with_mut(|state| {
+                        state.insert(name.clone(), checkbox_is_checked(checked).to_string());
+                    })
+                },
+            }
+        } else {
+            Input {
+                id: input_id.clone(),
+                class: "aio-input",
+                name: "{name}",
+                r#type: field_input_type(value_type),
+                required,
+                readonly: disabled,
+                placeholder: options.placeholder.as_deref().map_or("", |value| value),
+                value,
+                oninput: {
+                    let name = name.clone();
+                    move |event: FormEvent| form_state.with_mut(|state| {
+                        state.insert(name.clone(), event.value());
+                    })
+                },
+            }
+        }
+        if let Some(help_text) = options.help_text.as_deref() {
+            small { "{help_text}" }
+        }
+    }
+}
+
+#[component]
+fn RuntimeRelationField(
+    api_base_url: String,
+    relation: FieldRelation,
+    target_model: CompiledModel,
+    input_id: String,
+    field_name: String,
+    field_title: String,
+    required: bool,
+    disabled: bool,
+    mut form_state: Signal<BTreeMap<String, String>>,
+) -> Element {
+    let mut search_draft = use_signal(String::new);
+    let mut search_term = use_signal(String::new);
+    let mut page_offset = use_signal(|| 0_usize);
+    let page_size = 20_usize;
+    let search_fields = relation_search_fields(&target_model);
+    let records_api = api_base_url.clone();
+    let target_model_id = relation.target_model_id;
+    let records_search_fields = search_fields.clone();
+    let records = use_resource(move || {
+        let api_base_url = records_api.clone();
+        let term = search_term();
+        let offset = page_offset();
+        let search_fields = records_search_fields.clone();
+        async move {
+            let criteria = RuntimeRecordCriteria {
+                all: Vec::new(),
+                any: if term.is_empty() {
+                    Vec::new()
+                } else {
+                    search_fields
+                        .iter()
+                        .map(|field| RuntimeRecordFilter {
+                            field: field.clone(),
+                            operator: RuntimeRecordFilterOperator::Contains,
+                            value: term.clone(),
+                        })
+                        .collect()
+                },
+                sort: search_fields.first().map(|field| RuntimeRecordSort {
+                    field: field.clone(),
+                    direction: RuntimeRecordSortDirection::Ascending,
+                }),
+            };
+            let path = runtime_records_path(target_model_id, offset, page_size, &criteria)?;
+            get_api::<RuntimeRecordPage>(&api_base_url, &path).await
+        }
+    });
+    let selected_field_name = field_name.clone();
+    let selected_value = use_memo(move || {
+        form_state()
+            .get(&selected_field_name)
+            .cloned()
+            .map_or_else(String::new, |value| value)
+    });
+    let selected_api = api_base_url;
+    let selected_relation = relation.clone();
+    let selected_title = field_title.clone();
+    let selected_records = use_resource(move || {
+        let api_base_url = selected_api.clone();
+        let current = selected_value();
+        let relation = selected_relation.clone();
+        let title = selected_title.clone();
+        async move {
+            let ids = selected_relation_ids(&relation, &current, &title)?;
+            let mut records = Vec::new();
+            for id in ids {
+                let path = format!("/api/runtime/models/{target_model_id}/records/{id}");
+                records.push(get_api::<RuntimeRecordView>(&api_base_url, &path).await?);
+            }
+            Ok::<_, String>(records)
+        }
+    });
+    let current = selected_value();
+    let (selected_ids, selection_error) =
+        match selected_relation_ids(&relation, &current, &field_title) {
+            Ok(ids) => (ids, None),
+            Err(error) => (Vec::new(), Some(error)),
+        };
+    let record_page = records.read().as_ref().cloned();
+    let (mut rows, total, loading, load_error) = match record_page {
+        Some(Ok(page)) => (page.d, page.t, false, None),
+        Some(Err(error)) => (Vec::new(), 0, false, Some(error)),
+        None => (Vec::new(), 0, true, None),
+    };
+    let selected_record_result = selected_records.read().as_ref().cloned();
+    let selected_load_error = selected_record_result
+        .as_ref()
+        .and_then(|result| result.as_ref().err())
+        .cloned();
+    if let Some(Ok(selected)) = selected_record_result {
+        for record in selected.into_iter().rev() {
+            if !rows.iter().any(|candidate| candidate.id == record.id) {
+                rows.insert(0, record);
+            }
+        }
+    }
+    let select_disabled = disabled || loading || load_error.is_some() || rows.is_empty();
+    let has_previous = page_offset() > 0;
+    let has_next = page_offset().saturating_add(page_size) < total as usize;
+    rsx! {
+        div { class: "aio-runtime-relation-picker",
+            if !disabled && !search_fields.is_empty() {
+                div { class: "aio-runtime-relation-search",
+                    Input {
+                        class: "aio-input",
+                        aria_label: "搜索{target_model.title}",
+                        placeholder: "搜索{target_model.title}",
+                        value: search_draft(),
+                        oninput: move |event: FormEvent| search_draft.set(event.value()),
+                    }
+                    Button {
+                        r#type: "button",
+                        size: ButtonSize::IconSm,
+                        variant: ButtonVariant::Outline,
+                        title: "搜索{target_model.title}",
+                        aria_label: "搜索{target_model.title}",
+                        onclick: move |_| {
+                            search_term.set(search_draft().trim().to_owned());
+                            page_offset.set(0);
+                        },
+                        Search { class: "size-4" }
+                    }
+                    if !search_term().is_empty() {
+                        Button {
+                            r#type: "button",
+                            size: ButtonSize::IconSm,
+                            variant: ButtonVariant::Ghost,
+                            title: "清除{target_model.title}搜索",
+                            aria_label: "清除{target_model.title}搜索",
+                            onclick: move |_| {
+                                search_draft.set(String::new());
+                                search_term.set(String::new());
+                                page_offset.set(0);
+                            },
+                            X { class: "size-4" }
+                        }
+                    }
+                }
+            }
+            if let Some(error) = selection_error {
+                div { class: "aio-runtime-relation-state is-error", role: "alert", "{error}" }
+            }
+            if let Some(error) = selected_load_error {
+                div { class: "aio-runtime-relation-state is-error", role: "alert", "{error}" }
+            }
+            if loading {
+                div { class: "aio-runtime-relation-state", "正在加载{target_model.title}" }
+            } else if let Some(error) = load_error {
+                div { class: "aio-runtime-relation-state is-error", role: "alert", "{error}" }
+            } else if rows.is_empty() {
+                div { class: "aio-runtime-relation-state", "暂无{target_model.title}，请先创建关联记录" }
+            }
+            if relation.kind.is_collection() {
+                select {
+                    id: input_id,
+                    class: "aio-input aio-runtime-relation-select is-multiple",
+                    name: field_name.clone(),
+                    aria_label: field_title,
+                    multiple: true,
+                    required,
+                    disabled: select_disabled,
+                    onchange: move |event: FormEvent| {
+                        let ids = relation_event_values(&event);
+                        let value = relation_form_state_value(relation.kind, ids);
+                        form_state.with_mut(|state| {
+                            state.insert(field_name.clone(), value);
+                        });
+                    },
+                    for record in &rows {
+                        option {
+                            value: record.id.clone(),
+                            selected: selected_ids.contains(&record.id),
+                            "{relation_record_label(&target_model, record)}"
+                        }
+                    }
+                }
+            } else {
+                select {
+                    id: input_id,
+                    class: "aio-input aio-runtime-relation-select",
+                    name: field_name.clone(),
+                    aria_label: field_title,
+                    required,
+                    disabled: select_disabled,
+                    onchange: move |event: FormEvent| {
+                        let ids = relation_event_values(&event);
+                        let value = relation_form_state_value(relation.kind, ids);
+                        form_state.with_mut(|state| {
+                            state.insert(field_name.clone(), value);
+                        });
+                    },
+                    option { value: "", selected: selected_ids.is_empty(), "请选择{target_model.title}" }
+                    for record in &rows {
+                        option {
+                            value: record.id.clone(),
+                            selected: selected_ids.contains(&record.id),
+                            "{relation_record_label(&target_model, record)}"
+                        }
+                    }
+                }
+            }
+            if !disabled && total > 0 {
+                footer { class: "aio-runtime-relation-pagination",
+                    span { "共 {total} 条" }
+                    Button {
+                        r#type: "button",
+                        size: ButtonSize::IconSm,
+                        variant: ButtonVariant::Ghost,
+                        disabled: !has_previous,
+                        title: "上一页{target_model.title}",
+                        aria_label: "上一页{target_model.title}",
+                        onclick: move |_| page_offset.set(page_offset().saturating_sub(page_size)),
+                        ChevronLeft { class: "size-4" }
+                    }
+                    span { "第 {page_offset() / page_size + 1} 页" }
+                    Button {
+                        r#type: "button",
+                        size: ButtonSize::IconSm,
+                        variant: ButtonVariant::Ghost,
+                        disabled: !has_next,
+                        title: "下一页{target_model.title}",
+                        aria_label: "下一页{target_model.title}",
+                        onclick: move |_| page_offset.set(page_offset().saturating_add(page_size)),
+                        ChevronRight { class: "size-4" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn relation_event_values(event: &FormEvent) -> Vec<String> {
+    event
+        .values()
+        .into_iter()
+        .filter_map(|(_, value)| match value {
+            dioxus::html::FormValue::Text(value) if !value.trim().is_empty() => Some(value),
+            _ => None,
+        })
+        .collect()
 }
 
 fn dialog_key(value: &RecordDialog) -> String {
@@ -1085,11 +1604,18 @@ fn extract_runtime_form_state(
     mut ai_loading: Signal<bool>,
     mut notice: Signal<Option<String>>,
 ) {
+    let current_form_state = match record_payload_from_state(&model, &form_state()) {
+        Ok(value) => value,
+        Err(error) => {
+            notice.set(Some(error));
+            return;
+        }
+    };
     ai_loading.set(true);
     spawn(async move {
         let input = FormStateExtractionRequest {
             prompt,
-            current_form_state: record_payload_from_state(&model, &form_state()),
+            current_form_state,
             model: None,
         };
         let path = format!("/api/runtime/models/{model_id}/form-state/extract");
@@ -1170,54 +1696,6 @@ fn delete_runtime_record(
     });
 }
 
-fn record_payload_from_state(
-    model: &CompiledModel,
-    form_state: &BTreeMap<String, String>,
-) -> Value {
-    let payload = model
-        .field_names
-        .iter()
-        .filter(|(slot, _)| {
-            model
-                .field_options
-                .get(slot)
-                .is_some_and(|options| options.form_visible)
-        })
-        .map(|(slot, name)| {
-            let raw = form_state.get(name).cloned().unwrap_or_default();
-            let value = model
-                .field_types
-                .get(slot)
-                .map(|value_type| parse_field_value(value_type, &raw))
-                .unwrap_or(Value::String(raw));
-            (name.clone(), value)
-        })
-        .collect::<Map<_, _>>();
-    Value::Object(payload)
-}
-
-fn parse_field_value(value_type: &ValueType, raw: &str) -> Value {
-    match value_type {
-        ValueType::Boolean => Value::Bool(matches!(raw, "true" | "on" | "1")),
-        ValueType::Integer | ValueType::TimestampMs => {
-            raw.parse::<i64>().map(Value::from).unwrap_or(Value::Null)
-        }
-        ValueType::Decimal => raw
-            .parse::<f64>()
-            .ok()
-            .and_then(serde_json::Number::from_f64)
-            .map(Value::Number)
-            .unwrap_or(Value::Null),
-        ValueType::Null => Value::Null,
-        ValueType::Optional { value } if raw.trim().is_empty() => Value::Null,
-        ValueType::Optional { value } => parse_field_value(value, raw),
-        ValueType::Any | ValueType::Object { .. } | ValueType::List { .. } => {
-            serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.to_owned()))
-        }
-        ValueType::Text | ValueType::File => Value::String(raw.to_owned()),
-    }
-}
-
 fn field_input_type(value_type: &ValueType) -> &'static str {
     match value_type {
         ValueType::Boolean => "checkbox",
@@ -1286,6 +1764,7 @@ fn runtime_table_header(
     header: DataTableHeaderContext,
     model: &CompiledModel,
     mut sort: Signal<Option<(SymbolId, bool)>>,
+    mut offset: Signal<usize>,
 ) -> Element {
     let Some(field_id) = header
         .column
@@ -1308,12 +1787,15 @@ fn runtime_table_header(
         Button {
             class: "aio-runtime-sort",
             title: "按 {title} 排序",
-            onclick: move |_| sort.set(match sort() {
-                Some((current, ascending)) if current == field_id => {
-                    Some((field_id, !ascending))
-                }
-                _ => Some((field_id, true)),
-            }),
+            onclick: move |_| {
+                sort.set(match sort() {
+                    Some((current, ascending)) if current == field_id => {
+                        Some((field_id, !ascending))
+                    }
+                    _ => Some((field_id, true)),
+                });
+                offset.set(0);
+            },
             "{title}"
             match sort() {
                 Some((current, true)) if current == field_id => rsx! { ArrowUp { class: "size-3" } },
@@ -1327,6 +1809,7 @@ fn runtime_table_header(
 fn runtime_table_cell(
     cell: DataTableCellContext<RuntimeRecordView>,
     model: &CompiledModel,
+    relation_labels: &RelationLabelIndex,
     offset: usize,
     row_actions: MenuRowActions,
     mut dialog: Signal<Option<RecordDialog>>,
@@ -1368,15 +1851,105 @@ fn runtime_table_cell(
             }
         };
     }
-    let value = cell
+    let field_id = cell
         .column
         .key
         .strip_prefix("field:")
-        .and_then(|value| SymbolId::parse(value).ok())
-        .and_then(|field_id| record_field(&cell.row, model, field_id))
-        .map(value_to_text)
+        .and_then(|value| SymbolId::parse(value).ok());
+    let value = field_id
+        .and_then(|field_id| {
+            record_field(&cell.row, model, field_id)
+                .map(|value| runtime_field_value_to_text(model, field_id, value, relation_labels))
+        })
         .unwrap_or_else(|| "—".to_owned());
     rsx! { "{value}" }
+}
+
+async fn load_relation_label_index(
+    api_base_url: &str,
+    image: &ProgramImage,
+    references: &BTreeMap<SymbolId, BTreeSet<String>>,
+) -> std::result::Result<RelationLabelIndex, String> {
+    let mut index = BTreeMap::new();
+    for (model_id, record_ids) in references {
+        let target_model = image
+            .models
+            .get(model_id)
+            .ok_or_else(|| format!("关联模型未进入运行时 Image: {model_id}"))?;
+        let mut labels = BTreeMap::new();
+        for record_id in record_ids {
+            let path = format!("/api/runtime/models/{model_id}/records/{record_id}");
+            let record = get_api::<RuntimeRecordView>(api_base_url, &path).await?;
+            labels.insert(
+                record.id.clone(),
+                relation_record_label(target_model, &record),
+            );
+        }
+        index.insert(*model_id, labels);
+    }
+    Ok(index)
+}
+
+fn relation_reference_ids(
+    model: &CompiledModel,
+    page: &RuntimeRecordPage,
+) -> BTreeMap<SymbolId, BTreeSet<String>> {
+    let mut references = BTreeMap::<SymbolId, BTreeSet<String>>::new();
+    for (slot, relation) in &model.field_relations {
+        if !model
+            .field_options
+            .get(slot)
+            .is_some_and(|options| options.list_visible)
+        {
+            continue;
+        }
+        let Some(field) = model.field_names.get(slot) else {
+            continue;
+        };
+        let record_ids = references.entry(relation.target_model_id).or_default();
+        for value in page.d.iter().filter_map(|record| record.payload.get(field)) {
+            if relation.kind.is_collection() {
+                if let Value::Array(ids) = value {
+                    record_ids.extend(ids.iter().filter_map(Value::as_str).map(str::to_owned));
+                }
+            } else if let Some(id) = value.as_str() {
+                record_ids.insert(id.to_owned());
+            }
+        }
+    }
+    references
+}
+
+fn runtime_field_value_to_text(
+    model: &CompiledModel,
+    field_id: SymbolId,
+    value: &Value,
+    relation_labels: &RelationLabelIndex,
+) -> String {
+    let Some(slot) = model.field_slots.get(&field_id) else {
+        return value_to_text(value);
+    };
+    let Some(relation) = model.field_relations.get(slot) else {
+        return value_to_text(value);
+    };
+    let Some(labels) = relation_labels.get(&relation.target_model_id) else {
+        return value_to_text(value);
+    };
+    if relation.kind.is_collection() {
+        let Value::Array(ids) = value else {
+            return value_to_text(value);
+        };
+        return ids
+            .iter()
+            .filter_map(Value::as_str)
+            .map(|id| labels.get(id).map_or(id, String::as_str))
+            .collect::<Vec<_>>()
+            .join("、");
+    }
+    value
+        .as_str()
+        .map(|id| labels.get(id).map_or(id, String::as_str).to_owned())
+        .unwrap_or_else(|| value_to_text(value))
 }
 
 fn filter_fields(model: &CompiledModel) -> Vec<SymbolId> {
@@ -1391,6 +1964,69 @@ fn filter_fields(model: &CompiledModel) -> Vec<SymbolId> {
                 .then_some(*field_id)
         })
         .collect()
+}
+
+fn runtime_table_criteria(
+    model: &CompiledModel,
+    filters: &BTreeMap<SymbolId, String>,
+    sort: Option<(SymbolId, bool)>,
+    relation_field_name: Option<&str>,
+    selected_tree: Option<&str>,
+) -> std::result::Result<RuntimeRecordCriteria, String> {
+    let mut all = Vec::new();
+    for (field_id, value) in filters {
+        let (field, _, _) = compiled_field(model, *field_id)
+            .ok_or_else(|| format!("筛选字段未进入编译模型: {field_id}"))?;
+        all.push(RuntimeRecordFilter {
+            field: field.to_owned(),
+            operator: RuntimeRecordFilterOperator::Contains,
+            value: value.clone(),
+        });
+    }
+    if let (Some(field), Some(value)) = (relation_field_name, selected_tree) {
+        all.push(RuntimeRecordFilter {
+            field: field.to_owned(),
+            operator: RuntimeRecordFilterOperator::Equals,
+            value: value.to_owned(),
+        });
+    }
+    let sort = match sort {
+        Some((field_id, ascending)) => {
+            let (field, _, _) = compiled_field(model, field_id)
+                .ok_or_else(|| format!("排序字段未进入编译模型: {field_id}"))?;
+            Some(RuntimeRecordSort {
+                field: field.to_owned(),
+                direction: if ascending {
+                    RuntimeRecordSortDirection::Ascending
+                } else {
+                    RuntimeRecordSortDirection::Descending
+                },
+            })
+        }
+        None => None,
+    };
+    Ok(RuntimeRecordCriteria {
+        all,
+        any: Vec::new(),
+        sort,
+    })
+}
+
+fn runtime_records_path(
+    model_id: SymbolId,
+    offset: usize,
+    page_size: usize,
+    criteria: &RuntimeRecordCriteria,
+) -> std::result::Result<String, String> {
+    let mut path = format!("/api/runtime/models/{model_id}/records?o={offset}&s={page_size}");
+    if criteria.is_empty() {
+        return Ok(path);
+    }
+    let criteria = serde_json::to_string(criteria)
+        .map_err(|error| format!("序列化记录查询条件失败: {error}"))?;
+    path.push_str("&criteria=");
+    path.push_str(&urlencoding::encode(&criteria));
+    Ok(path)
 }
 
 fn compiled_field(model: &CompiledModel, field_id: SymbolId) -> Option<(&str, &str, &ValueType)> {
@@ -1409,20 +2045,6 @@ fn record_field<'a>(
 ) -> Option<&'a Value> {
     let (name, _, _) = compiled_field(model, field_id)?;
     record.payload.get(name)
-}
-
-fn record_matches(
-    record: &RuntimeRecordView,
-    model: &CompiledModel,
-    filters: &BTreeMap<SymbolId, String>,
-) -> bool {
-    filters.iter().all(|(field_id, expected)| {
-        record_field(record, model, *field_id).is_some_and(|value| {
-            value_to_text(value)
-                .to_lowercase()
-                .contains(&expected.to_lowercase())
-        })
-    })
 }
 
 fn value_to_text(value: &Value) -> String {

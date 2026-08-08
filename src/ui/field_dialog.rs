@@ -1,0 +1,333 @@
+use super::*;
+
+#[component]
+pub(super) fn FieldEditorDialog(
+    model_id: SymbolId,
+    field_count: usize,
+    field: Option<FieldDefinition>,
+    api_base_url: String,
+    program_id: String,
+    version: i64,
+    generation: Signal<u64>,
+    mut status: Signal<Option<String>>,
+    mut editor: Signal<Option<ModelEditorTarget>>,
+) -> Element {
+    let editing = field.is_some();
+    let initial_field = field.unwrap_or_else(|| FieldDefinition {
+        id: SymbolId::new(),
+        name: String::new(),
+        title: String::new(),
+        value_type: ValueType::Text,
+        state: DefinitionState::Known,
+        required: false,
+        options: crate::FieldOptions::default(),
+        relation: None,
+    });
+    let initial_default_value = initial_field
+        .options
+        .default_value
+        .as_ref()
+        .map(Value::to_string)
+        .unwrap_or_default();
+    let mut draft = use_signal(move || initial_field);
+    let mut default_value = use_signal(move || initial_default_value);
+    let has_relation = draft().relation.is_some();
+    rsx! {
+        Dialog {
+            class: "aio-definition-dialog aio-field-dialog",
+            open: true,
+            on_open_change: move |open: bool| {
+                if !open {
+                    editor.set(None);
+                }
+            },
+            header { class: "aio-definition-dialog__header",
+                div {
+                    DialogTitle { if editing { "编辑字段" } else { "新建字段" } }
+                    DialogDescription {
+                        if has_relation {
+                            "关联字段的类型由关系基数自动维护"
+                        } else {
+                            "定义字段结构、页面行为与校验约束"
+                        }
+                    }
+                }
+                Button {
+                    r#type: "button",
+                    size: ButtonSize::IconSm,
+                    variant: ButtonVariant::Ghost,
+                    title: "关闭字段编辑",
+                    aria_label: "关闭字段编辑",
+                    onclick: move |_| editor.set(None),
+                    icons::X { class: "size-4" }
+                }
+            }
+            form {
+                class: "aio-definition-dialog__form aio-field-dialog__form",
+                onsubmit: move |event| {
+                    event.prevent_default();
+                    let mut next = draft();
+                    next.name = next.name.trim().to_owned();
+                    next.title = next.title.trim().to_owned();
+                    if next.name.is_empty() || next.title.is_empty() {
+                        status.set(Some("字段标识和标题不能为空".to_owned()));
+                        return;
+                    }
+                    next.options.default_value = editable_default_value(&default_value());
+                    let patches = if editing {
+                        vec![
+                            GraphPatch::Rename {
+                                target_id: next.id,
+                                name: next.name.clone(),
+                                title: Some(next.title.clone()),
+                            },
+                            GraphPatch::SetProperty {
+                                target_id: next.id,
+                                property: crate::EditableProperty::FieldValueType,
+                                value: serde_json::json!(next.value_type),
+                            },
+                            GraphPatch::SetProperty {
+                                target_id: next.id,
+                                property: crate::EditableProperty::FieldRequired,
+                                value: serde_json::json!(next.required),
+                            },
+                            GraphPatch::SetProperty {
+                                target_id: next.id,
+                                property: crate::EditableProperty::FieldOptions,
+                                value: serde_json::json!(next.options),
+                            },
+                        ]
+                    } else {
+                        vec![GraphPatch::Insert {
+                            parent_id: model_id,
+                            collection: ChildCollection::Fields,
+                            index: field_count,
+                            entity: GraphEntity::Field(next),
+                        }]
+                    };
+                    submit_patches(
+                        api_base_url.clone(),
+                        program_id.clone(),
+                        version,
+                        patches,
+                        generation,
+                        status,
+                    );
+                    editor.set(None);
+                },
+                section { class: "aio-definition-dialog__section",
+                    h3 { "基础定义" }
+                    div { class: "aio-definition-dialog__grid",
+                        label {
+                            span { "字段标识" }
+                            Input {
+                                class: "aio-input",
+                                aria_label: "字段标识",
+                                placeholder: "例如 status",
+                                value: draft().name.clone(),
+                                oninput: move |event: FormEvent| {
+                                    draft.with_mut(|field| field.name = event.value());
+                                },
+                            }
+                        }
+                        label {
+                            span { "显示标题" }
+                            Input {
+                                class: "aio-input",
+                                aria_label: "字段显示标题",
+                                placeholder: "例如 状态",
+                                value: draft().title.clone(),
+                                oninput: move |event: FormEvent| {
+                                    draft.with_mut(|field| field.title = event.value());
+                                },
+                            }
+                        }
+                        label {
+                            span { "字段类型" }
+                            select {
+                                class: "aio-input",
+                                aria_label: "字段类型",
+                                disabled: has_relation,
+                                value: editable_value_type_key(&draft().value_type),
+                                onchange: move |event: FormEvent| {
+                                    draft.with_mut(|field| {
+                                        field.value_type = editable_value_type_from_key(
+                                            &event.value(),
+                                            &field.value_type,
+                                        );
+                                    });
+                                },
+                                {editable_value_type_options(
+                                    &draft().value_type,
+                                    editable_value_type_key(&draft().value_type).to_owned(),
+                                )}
+                            }
+                        }
+                        label { class: "aio-definition-dialog__checkbox-field",
+                            Checkbox {
+                                aria_label: "字段必填",
+                                checked: Some(checkbox_state(draft().required)),
+                                on_checked_change: move |checked| {
+                                    draft.with_mut(|field| {
+                                        field.required = checkbox_is_checked(checked);
+                                    });
+                                },
+                            }
+                            span { "必填字段" }
+                        }
+                    }
+                }
+                section { class: "aio-definition-dialog__section",
+                    h3 { "页面与数据能力" }
+                    div { class: "aio-field-dialog__toggles",
+                        label { Checkbox {
+                            aria_label: "列表显示",
+                            checked: Some(checkbox_state(draft().options.list_visible)),
+                            on_checked_change: move |checked| draft.with_mut(|field| field.options.list_visible = checkbox_is_checked(checked)),
+                        } span { "列表显示" } }
+                        label { Checkbox {
+                            aria_label: "详情显示",
+                            checked: Some(checkbox_state(draft().options.detail_visible)),
+                            on_checked_change: move |checked| draft.with_mut(|field| field.options.detail_visible = checkbox_is_checked(checked)),
+                        } span { "详情显示" } }
+                        label { Checkbox {
+                            aria_label: "表单显示",
+                            checked: Some(checkbox_state(draft().options.form_visible)),
+                            on_checked_change: move |checked| draft.with_mut(|field| field.options.form_visible = checkbox_is_checked(checked)),
+                        } span { "表单显示" } }
+                        label { Checkbox {
+                            aria_label: "表单可编辑",
+                            checked: Some(checkbox_state(draft().options.form_editable)),
+                            on_checked_change: move |checked| draft.with_mut(|field| field.options.form_editable = checkbox_is_checked(checked)),
+                        } span { "表单可编辑" } }
+                        label { Checkbox {
+                            aria_label: "允许查询",
+                            checked: Some(checkbox_state(draft().options.filterable)),
+                            on_checked_change: move |checked| draft.with_mut(|field| field.options.filterable = checkbox_is_checked(checked)),
+                        } span { "允许查询" } }
+                        label { Checkbox {
+                            aria_label: "允许排序",
+                            checked: Some(checkbox_state(draft().options.sortable)),
+                            on_checked_change: move |checked| draft.with_mut(|field| field.options.sortable = checkbox_is_checked(checked)),
+                        } span { "允许排序" } }
+                        label { Checkbox {
+                            aria_label: "唯一约束",
+                            checked: Some(checkbox_state(draft().options.unique)),
+                            on_checked_change: move |checked| draft.with_mut(|field| field.options.unique = checkbox_is_checked(checked)),
+                        } span { "唯一约束" } }
+                        label { Checkbox {
+                            aria_label: "Excel 导入",
+                            checked: Some(checkbox_state(draft().options.excel_import)),
+                            on_checked_change: move |checked| draft.with_mut(|field| field.options.excel_import = checkbox_is_checked(checked)),
+                        } span { "Excel 导入" } }
+                        label { Checkbox {
+                            aria_label: "Excel 导出",
+                            checked: Some(checkbox_state(draft().options.excel_export)),
+                            on_checked_change: move |checked| draft.with_mut(|field| field.options.excel_export = checkbox_is_checked(checked)),
+                        } span { "Excel 导出" } }
+                        label { Checkbox {
+                            aria_label: "AI 结构化提取",
+                            checked: Some(checkbox_state(draft().options.ai_extract)),
+                            on_checked_change: move |checked| draft.with_mut(|field| field.options.ai_extract = checkbox_is_checked(checked)),
+                        } span { "AI 结构化提取" } }
+                    }
+                }
+                section { class: "aio-definition-dialog__section",
+                    h3 { "默认值与提示" }
+                    div { class: "aio-definition-dialog__grid",
+                        label {
+                            span { "默认值" }
+                            Input {
+                                class: "aio-input",
+                                aria_label: "字段默认值",
+                                placeholder: "JSON 或文本",
+                                value: default_value(),
+                                oninput: move |event: FormEvent| default_value.set(event.value()),
+                            }
+                        }
+                        label {
+                            span { "占位提示" }
+                            Input {
+                                class: "aio-input",
+                                aria_label: "字段占位提示",
+                                value: draft().options.placeholder.clone().unwrap_or_default(),
+                                oninput: move |event: FormEvent| draft.with_mut(|field| field.options.placeholder = non_empty_text(&event.value())),
+                            }
+                        }
+                        label { class: "aio-definition-dialog__wide-field",
+                            span { "帮助文本" }
+                            Textarea {
+                                class: "aio-input",
+                                aria_label: "字段帮助文本",
+                                rows: "2",
+                                value: draft().options.help_text.clone().unwrap_or_default(),
+                                oninput: move |event: FormEvent| draft.with_mut(|field| field.options.help_text = non_empty_text(&event.value())),
+                            }
+                        }
+                    }
+                }
+                section { class: "aio-definition-dialog__section",
+                    h3 { "单字段校验" }
+                    div { class: "aio-field-dialog__validation-grid",
+                        label { span { "最小长度" } Input {
+                            r#type: "number", min: "0", class: "aio-input", aria_label: "最小文本长度",
+                            value: optional_u32(draft().options.validation.min_length),
+                            oninput: move |event: FormEvent| draft.with_mut(|field| field.options.validation.min_length = parse_optional_u32(&event.value())),
+                        } }
+                        label { span { "最大长度" } Input {
+                            r#type: "number", min: "0", class: "aio-input", aria_label: "最大文本长度",
+                            value: optional_u32(draft().options.validation.max_length),
+                            oninput: move |event: FormEvent| draft.with_mut(|field| field.options.validation.max_length = parse_optional_u32(&event.value())),
+                        } }
+                        label { span { "最小数值" } Input {
+                            class: "aio-input", aria_label: "最小数值",
+                            value: optional_f64(draft().options.validation.minimum),
+                            oninput: move |event: FormEvent| draft.with_mut(|field| field.options.validation.minimum = parse_optional_f64(&event.value())),
+                        } }
+                        label { span { "最大数值" } Input {
+                            class: "aio-input", aria_label: "最大数值",
+                            value: optional_f64(draft().options.validation.maximum),
+                            oninput: move |event: FormEvent| draft.with_mut(|field| field.options.validation.maximum = parse_optional_f64(&event.value())),
+                        } }
+                        label { span { "最少项数" } Input {
+                            r#type: "number", min: "0", class: "aio-input", aria_label: "列表最少项数",
+                            value: optional_u32(draft().options.validation.min_items),
+                            oninput: move |event: FormEvent| draft.with_mut(|field| field.options.validation.min_items = parse_optional_u32(&event.value())),
+                        } }
+                        label { span { "最多项数" } Input {
+                            r#type: "number", min: "0", class: "aio-input", aria_label: "列表最多项数",
+                            value: optional_u32(draft().options.validation.max_items),
+                            oninput: move |event: FormEvent| draft.with_mut(|field| field.options.validation.max_items = parse_optional_u32(&event.value())),
+                        } }
+                        label { class: "aio-definition-dialog__wide-field", span { "正则表达式" } Input {
+                            class: "aio-input", aria_label: "字段正则表达式",
+                            value: draft().options.validation.pattern.clone().unwrap_or_default(),
+                            oninput: move |event: FormEvent| draft.with_mut(|field| field.options.validation.pattern = non_empty_text(&event.value())),
+                        } }
+                        label { class: "aio-definition-dialog__checkbox-field aio-definition-dialog__wide-field",
+                            Checkbox {
+                                aria_label: "列表元素唯一",
+                                checked: Some(checkbox_state(draft().options.validation.unique_items)),
+                                on_checked_change: move |checked| draft.with_mut(|field| field.options.validation.unique_items = checkbox_is_checked(checked)),
+                            }
+                            span { "列表元素不能重复" }
+                        }
+                    }
+                }
+                footer { class: "aio-definition-dialog__actions",
+                    Button {
+                        r#type: "button",
+                        variant: ButtonVariant::Ghost,
+                        onclick: move |_| editor.set(None),
+                        "取消"
+                    }
+                    Button {
+                        r#type: "submit",
+                        icons::Save { class: "size-4" }
+                        if editing { "保存字段" } else { "创建字段" }
+                    }
+                }
+            }
+        }
+    }
+}

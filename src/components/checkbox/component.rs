@@ -5,6 +5,10 @@ use dioxus_primitives::checkbox::{self, CheckboxProps};
 #[css_module("/src/components/checkbox/style.css")]
 struct Styles;
 
+pub(crate) fn load_stylesheet() {
+    drop(Styles::dx_checkbox.to_string());
+}
+
 #[component]
 pub fn Checkbox(props: CheckboxProps) -> Element {
     rsx! {

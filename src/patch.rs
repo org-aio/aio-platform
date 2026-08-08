@@ -2,10 +2,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    FieldDefinition, FunctionDefinition, FunctionNode, GraphEdge, MenuDefinition,
-    ModelAuditDefinition, ModelDefinition, ModelIndexDefinition, ModelQueryDefinition,
-    ModelValidationDefinition, PageDefinition, PageEndpointDefinition, PermissionDefinition,
-    PortDefinition, ProgramDefinition, RouteDefinition, SymbolId,
+    EndpointImplementationDefinition, FieldDefinition, FunctionDefinition, FunctionNode, GraphEdge,
+    MenuDefinition, ModelAuditDefinition, ModelDefinition, ModelIndexDefinition,
+    ModelQueryDefinition, ModelValidationDefinition, PageDefinition, PageEndpointDefinition,
+    PermissionDefinition, PortDefinition, ProgramDefinition, RouteDefinition, SymbolId,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -131,12 +131,14 @@ impl GraphEntity {
 pub enum EditableProperty {
     Title,
     RoutePath,
+    RoutePermissions,
     Icon,
     MenuPage,
     MenuEnabled,
     MenuPermissions,
     MenuRowActions,
     PermissionEffects,
+    FunctionPermissions,
     PageRenderer,
     PageEndpoint,
     DefinitionState,
@@ -149,6 +151,8 @@ pub enum EditableProperty {
     ModelQuery,
     ModelValidation,
     ModelAudit,
+    FunctionPort,
+    FunctionNode,
     FunctionNodePosition,
 }
 
@@ -201,14 +205,21 @@ impl ProgramDefinition {
                 collection,
                 index,
                 entity,
-            } => self.insert_entity(*parent_id, *collection, *index, entity.clone()),
-            GraphPatch::Delete { target_id } => self.delete_entity(*target_id),
+            } => {
+                ensure_studio_insertable(entity)?;
+                self.insert_entity(*parent_id, *collection, *index, entity.clone())
+            }
+            GraphPatch::Delete { target_id } => {
+                self.ensure_studio_owned_target(*target_id)?;
+                self.delete_entity(*target_id)
+            }
             GraphPatch::Move {
                 target_id,
                 parent_id,
                 collection,
                 index,
             } => {
+                self.ensure_studio_owned_target(*target_id)?;
                 let entity = self.take_entity(*target_id)?;
                 self.insert_entity(*parent_id, *collection, *index, entity)
             }
@@ -221,18 +232,49 @@ impl ProgramDefinition {
                 target_id,
                 name,
                 title,
-            } => self.rename(*target_id, name, title.as_deref()),
+            } => {
+                self.ensure_studio_mutable_target(*target_id)?;
+                if self.pages.iter().any(|page| {
+                    page.id == *target_id
+                        && page.name != *name
+                        && page.endpoints.iter().any(endpoint_is_native)
+                }) {
+                    return Err(native_contract_patch_error());
+                }
+                self.rename(*target_id, name, title.as_deref())
+            }
             GraphPatch::SetProperty {
                 target_id,
                 property,
                 value,
-            } => self.set_property(*target_id, property, value),
+            } => {
+                self.ensure_studio_mutable_target(*target_id)?;
+                self.set_property(*target_id, property, value)
+            }
             GraphPatch::Connect { function_id, edge } => {
                 let function = self
                     .functions
                     .iter_mut()
                     .find(|value| value.id == *function_id)
                     .ok_or(PatchError::TargetNotFound(*function_id))?;
+                let from = function
+                    .graph
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == edge.from_node)
+                    .ok_or(PatchError::TargetNotFound(edge.from_node))?;
+                let to = function
+                    .graph
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == edge.to_node)
+                    .ok_or(PatchError::TargetNotFound(edge.to_node))?;
+                if !crate::function_nodes_can_connect(&from.kind, &to.kind) {
+                    return Err(PatchError::InvalidValue(format!(
+                        "节点 {} 不能连接到 {}",
+                        from.name, to.name
+                    )));
+                }
                 if function.graph.edges.iter().any(|value| value.id == edge.id) {
                     return Err(PatchError::DuplicateSymbol(edge.id));
                 }
@@ -251,6 +293,33 @@ impl ProgramDefinition {
                 remove_by_id(&mut function.graph.edges, *edge_id, |value| value.id).map(|_| ())
             }
         }
+    }
+
+    fn ensure_studio_owned_target(&self, target_id: SymbolId) -> Result<(), PatchError> {
+        for page in &self.pages {
+            if page.id == target_id && page.endpoints.iter().any(endpoint_is_native) {
+                return Err(native_contract_patch_error());
+            }
+            if page
+                .endpoints
+                .iter()
+                .any(|endpoint| endpoint.id == target_id && endpoint_is_native(endpoint))
+            {
+                return Err(native_contract_patch_error());
+            }
+        }
+        Ok(())
+    }
+
+    fn ensure_studio_mutable_target(&self, target_id: SymbolId) -> Result<(), PatchError> {
+        if self.pages.iter().any(|page| {
+            page.endpoints
+                .iter()
+                .any(|endpoint| endpoint.id == target_id && endpoint_is_native(endpoint))
+        }) {
+            return Err(native_contract_patch_error());
+        }
+        Ok(())
     }
 
     fn insert_entity(
@@ -555,6 +624,16 @@ impl ProgramDefinition {
                 route.path = json_string(value)?;
                 Ok(())
             }
+            EditableProperty::RoutePermissions => {
+                let route = self
+                    .routes
+                    .iter_mut()
+                    .find(|item| item.id == target_id)
+                    .ok_or(PatchError::TargetNotFound(target_id))?;
+                route.required_permissions = serde_json::from_value(value.clone())
+                    .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
+                Ok(())
+            }
             EditableProperty::Icon => {
                 let menu = find_menu_mut(&mut self.menus, target_id)
                     .ok_or(PatchError::TargetNotFound(target_id))?;
@@ -610,6 +689,16 @@ impl ProgramDefinition {
                     .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
                 Ok(())
             }
+            EditableProperty::FunctionPermissions => {
+                let function = self
+                    .functions
+                    .iter_mut()
+                    .find(|function| function.id == target_id)
+                    .ok_or(PatchError::TargetNotFound(target_id))?;
+                function.required_permissions = serde_json::from_value(value.clone())
+                    .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
+                Ok(())
+            }
             EditableProperty::PageRenderer => {
                 let page = self
                     .pages
@@ -627,12 +716,18 @@ impl ProgramDefinition {
                     .flat_map(|page| &mut page.endpoints)
                     .find(|endpoint| endpoint.id == target_id)
                     .ok_or(PatchError::TargetNotFound(target_id))?;
+                if endpoint_is_native(endpoint) {
+                    return Err(native_contract_patch_error());
+                }
                 let replacement = serde_json::from_value::<PageEndpointDefinition>(value.clone())
                     .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
                 if replacement.id != target_id {
                     return Err(PatchError::InvalidValue(
                         "页面接口更新不能改变 SymbolId".to_owned(),
                     ));
+                }
+                if endpoint_is_native(&replacement) {
+                    return Err(native_contract_patch_error());
                 }
                 *endpoint = replacement;
                 Ok(())
@@ -753,6 +848,40 @@ impl ProgramDefinition {
                     .ok_or(PatchError::TargetNotFound(target_id))?;
                 model.audit = serde_json::from_value::<ModelAuditDefinition>(value.clone())
                     .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
+                Ok(())
+            }
+            EditableProperty::FunctionPort => {
+                let port = self
+                    .functions
+                    .iter_mut()
+                    .flat_map(|function| function.inputs.iter_mut().chain(&mut function.outputs))
+                    .find(|port| port.id == target_id)
+                    .ok_or(PatchError::TargetNotFound(target_id))?;
+                let replacement = serde_json::from_value::<PortDefinition>(value.clone())
+                    .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
+                if replacement.id != target_id {
+                    return Err(PatchError::InvalidValue(
+                        "函数端口更新不能改变 SymbolId".to_owned(),
+                    ));
+                }
+                *port = replacement;
+                Ok(())
+            }
+            EditableProperty::FunctionNode => {
+                let node = self
+                    .functions
+                    .iter_mut()
+                    .flat_map(|function| &mut function.graph.nodes)
+                    .find(|node| node.id == target_id)
+                    .ok_or(PatchError::TargetNotFound(target_id))?;
+                let replacement = serde_json::from_value::<FunctionNode>(value.clone())
+                    .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
+                if replacement.id != target_id {
+                    return Err(PatchError::InvalidValue(
+                        "函数节点更新不能改变 SymbolId".to_owned(),
+                    ));
+                }
+                *node = replacement;
                 Ok(())
             }
             EditableProperty::FunctionNodePosition => {
@@ -944,6 +1073,29 @@ impl ProgramDefinition {
     }
 }
 
+fn ensure_studio_insertable(entity: &GraphEntity) -> Result<(), PatchError> {
+    let contains_native_contract = match entity {
+        GraphEntity::Page(page) => page.endpoints.iter().any(endpoint_is_native),
+        GraphEntity::PageEndpoint(endpoint) => endpoint_is_native(endpoint),
+        _ => false,
+    };
+    if contains_native_contract {
+        return Err(native_contract_patch_error());
+    }
+    Ok(())
+}
+
+fn endpoint_is_native(endpoint: &PageEndpointDefinition) -> bool {
+    matches!(
+        endpoint.implementation,
+        EndpointImplementationDefinition::Native { .. }
+    )
+}
+
+fn native_contract_patch_error() -> PatchError {
+    PatchError::InvalidValue("原生接口元数据由插件声明维护，只能编辑约定契约".to_owned())
+}
+
 fn json_string(value: &Value) -> Result<String, PatchError> {
     value
         .as_str()
@@ -1042,7 +1194,7 @@ fn take_menu_from(values: &mut Vec<MenuDefinition>, target: SymbolId) -> Option<
 mod tests {
     use super::*;
     use crate::{
-        EffectKind, MenuActionAccess, MenuRowActions, PageEndpointDefinition,
+        EffectKind, FunctionGraph, MenuActionAccess, MenuRowActions, PageEndpointDefinition,
         PageRendererDefinition, PermissionDefinition, RestMethod, TableDefinition,
     };
 
@@ -1128,6 +1280,262 @@ mod tests {
     }
 
     #[test]
+    fn route_permissions_use_property_patch() -> anyhow::Result<()> {
+        let mut program = ProgramDefinition::empty("inventory", "资产");
+        let page_id = SymbolId::new();
+        let route_id = SymbolId::new();
+        let permission_id = SymbolId::new();
+        program.pages.push(PageDefinition {
+            id: page_id,
+            name: "assets".to_owned(),
+            title: "资产".to_owned(),
+            state: crate::DefinitionState::Known,
+            renderer: PageRendererDefinition::ConventionFile,
+            endpoints: Vec::new(),
+        });
+        program.routes.push(RouteDefinition {
+            id: route_id,
+            name: "assets".to_owned(),
+            path: "/assets".to_owned(),
+            page_id,
+            state: crate::DefinitionState::Known,
+            required_permissions: Vec::new(),
+        });
+
+        program.apply_patch(&GraphPatch::SetProperty {
+            target_id: route_id,
+            property: EditableProperty::RoutePermissions,
+            value: serde_json::json!([permission_id]),
+        })?;
+
+        assert_eq!(program.routes[0].required_permissions, vec![permission_id]);
+        Ok(())
+    }
+
+    #[test]
+    fn function_permissions_use_property_patch() -> anyhow::Result<()> {
+        let mut program = ProgramDefinition::empty("inventory", "资产");
+        let function_id = SymbolId::new();
+        let permission_id = SymbolId::new();
+        program.functions.push(FunctionDefinition {
+            id: function_id,
+            name: "load_asset".to_owned(),
+            title: "读取资产".to_owned(),
+            state: crate::DefinitionState::Known,
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            graph: FunctionGraph::default(),
+            required_permissions: Vec::new(),
+        });
+
+        program.apply_patch(&GraphPatch::SetProperty {
+            target_id: function_id,
+            property: EditableProperty::FunctionPermissions,
+            value: serde_json::json!([permission_id]),
+        })?;
+
+        assert_eq!(
+            program.functions[0].required_permissions,
+            vec![permission_id]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn function_ports_and_nodes_use_replacement_properties() -> anyhow::Result<()> {
+        let mut program = ProgramDefinition::empty("inventory", "资产");
+        let function_id = SymbolId::new();
+        let port_id = SymbolId::new();
+        let node_id = SymbolId::new();
+        program.functions.push(FunctionDefinition {
+            id: function_id,
+            name: "load_asset".to_owned(),
+            title: "读取资产".to_owned(),
+            state: crate::DefinitionState::Known,
+            inputs: vec![PortDefinition {
+                id: port_id,
+                name: "asset_id".to_owned(),
+                value_type: crate::ValueType::Text,
+            }],
+            outputs: Vec::new(),
+            graph: FunctionGraph {
+                nodes: vec![FunctionNode {
+                    id: node_id,
+                    name: "asset_id".to_owned(),
+                    state: crate::DefinitionState::Known,
+                    editor: crate::FunctionNodeEditor::default(),
+                    kind: crate::FunctionNodeKind::Input { port_id },
+                }],
+                edges: Vec::new(),
+            },
+            required_permissions: Vec::new(),
+        });
+        let updated_port = PortDefinition {
+            id: port_id,
+            name: "id".to_owned(),
+            value_type: crate::ValueType::Integer,
+        };
+        let updated_node = FunctionNode {
+            id: node_id,
+            name: "return".to_owned(),
+            state: crate::DefinitionState::Known,
+            editor: crate::FunctionNodeEditor { x: 120, y: 80 },
+            kind: crate::FunctionNodeKind::Return,
+        };
+
+        program.apply_patch_batch(&GraphPatchBatch {
+            base_version: 0,
+            origin: PatchOrigin::Studio,
+            patches: vec![
+                GraphPatch::SetProperty {
+                    target_id: port_id,
+                    property: EditableProperty::FunctionPort,
+                    value: serde_json::to_value(updated_port.clone())?,
+                },
+                GraphPatch::SetProperty {
+                    target_id: node_id,
+                    property: EditableProperty::FunctionNode,
+                    value: serde_json::to_value(updated_node.clone())?,
+                },
+            ],
+        })?;
+
+        assert_eq!(program.functions[0].inputs, vec![updated_port]);
+        assert_eq!(program.functions[0].graph.nodes, vec![updated_node]);
+        Ok(())
+    }
+
+    #[test]
+    fn function_graph_position_and_edges_use_graph_patches() -> anyhow::Result<()> {
+        let mut program = ProgramDefinition::empty("inventory", "资产");
+        let function_id = SymbolId::new();
+        let source_node_id = SymbolId::new();
+        let target_node_id = SymbolId::new();
+        let edge_id = SymbolId::new();
+        let node = |id, name: &str, kind| FunctionNode {
+            id,
+            name: name.to_owned(),
+            state: crate::DefinitionState::Known,
+            editor: crate::FunctionNodeEditor::default(),
+            kind,
+        };
+        program.functions.push(FunctionDefinition {
+            id: function_id,
+            name: "load_asset".to_owned(),
+            title: "读取资产".to_owned(),
+            state: crate::DefinitionState::Known,
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            graph: FunctionGraph {
+                nodes: vec![
+                    node(
+                        source_node_id,
+                        "source",
+                        crate::FunctionNodeKind::Constant {
+                            value: serde_json::json!("asset"),
+                            value_type: crate::ValueType::Text,
+                        },
+                    ),
+                    node(target_node_id, "target", crate::FunctionNodeKind::Return),
+                ],
+                edges: Vec::new(),
+            },
+            required_permissions: Vec::new(),
+        });
+        let position = crate::FunctionNodeEditor { x: 320, y: 180 };
+        let edge = GraphEdge {
+            id: edge_id,
+            from_node: source_node_id,
+            from_port: "out".to_owned(),
+            to_node: target_node_id,
+            to_port: "in".to_owned(),
+        };
+
+        program.apply_patch_batch(&GraphPatchBatch {
+            base_version: 0,
+            origin: PatchOrigin::Studio,
+            patches: vec![
+                GraphPatch::SetProperty {
+                    target_id: source_node_id,
+                    property: EditableProperty::FunctionNodePosition,
+                    value: serde_json::to_value(position)?,
+                },
+                GraphPatch::Connect {
+                    function_id,
+                    edge: edge.clone(),
+                },
+            ],
+        })?;
+
+        assert_eq!(program.functions[0].graph.nodes[0].editor, position);
+        assert_eq!(program.functions[0].graph.edges, vec![edge]);
+
+        program.apply_patch(&GraphPatch::Disconnect {
+            function_id,
+            edge_id,
+        })?;
+        assert!(program.functions[0].graph.edges.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn function_graph_rejects_edges_into_constant_nodes() {
+        let mut program = ProgramDefinition::empty("inventory", "资产");
+        let function_id = SymbolId::new();
+        let boolean_id = SymbolId::new();
+        let constant_id = SymbolId::new();
+        program.functions.push(FunctionDefinition {
+            id: function_id,
+            name: "check_asset".to_owned(),
+            title: "检查资产".to_owned(),
+            state: crate::DefinitionState::Known,
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            graph: FunctionGraph {
+                nodes: vec![
+                    FunctionNode {
+                        id: boolean_id,
+                        name: "boolean".to_owned(),
+                        state: crate::DefinitionState::Known,
+                        editor: crate::FunctionNodeEditor::default(),
+                        kind: crate::FunctionNodeKind::Boolean {
+                            operator: crate::BooleanOperator::And,
+                        },
+                    },
+                    FunctionNode {
+                        id: constant_id,
+                        name: "constant".to_owned(),
+                        state: crate::DefinitionState::Known,
+                        editor: crate::FunctionNodeEditor::default(),
+                        kind: crate::FunctionNodeKind::Constant {
+                            value: serde_json::json!("value"),
+                            value_type: crate::ValueType::Text,
+                        },
+                    },
+                ],
+                edges: Vec::new(),
+            },
+            required_permissions: Vec::new(),
+        });
+
+        let error = program
+            .apply_patch(&GraphPatch::Connect {
+                function_id,
+                edge: GraphEdge {
+                    id: SymbolId::new(),
+                    from_node: boolean_id,
+                    from_port: "out".to_owned(),
+                    to_node: constant_id,
+                    to_port: "in".to_owned(),
+                },
+            })
+            .err();
+
+        assert!(error.is_some_and(|error| error.to_string().contains("不能连接")));
+        assert!(program.functions[0].graph.edges.is_empty());
+    }
+
+    #[test]
     fn patch_batch_is_atomic_on_invalid_target() {
         let mut program = ProgramDefinition::empty("inventory", "资产");
         let original = program.clone();
@@ -1160,7 +1568,9 @@ mod tests {
         let endpoint = PageEndpointDefinition {
             id: endpoint_id,
             title: "归档资产".to_owned(),
+            description: "归档指定资产".to_owned(),
             state: crate::DefinitionState::Known,
+            implementation: crate::EndpointImplementationDefinition::Convention,
             method: RestMethod::Post,
             path: "/api/assets/archive".to_owned(),
             inputs: Vec::new(),
@@ -1182,6 +1592,64 @@ mod tests {
             value: serde_json::to_value(updated.clone())?,
         })?;
         assert_eq!(program.pages[0].endpoints, vec![updated]);
+        Ok(())
+    }
+
+    #[test]
+    fn native_endpoint_and_owning_page_are_read_only_for_graph_patch() -> anyhow::Result<()> {
+        let mut program = ProgramDefinition::empty("inventory", "资产");
+        let page_id = SymbolId::new();
+        let endpoint_id = SymbolId::new();
+        let endpoint = PageEndpointDefinition {
+            id: endpoint_id,
+            title: "资产列表".to_owned(),
+            description: "由资产插件提供".to_owned(),
+            state: crate::DefinitionState::Known,
+            implementation: crate::EndpointImplementationDefinition::Native {
+                plugin_id: "asset-hub".to_owned(),
+            },
+            method: RestMethod::Get,
+            path: "/api/asset-hub/assets".to_owned(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+        };
+        program.pages.push(PageDefinition {
+            id: page_id,
+            name: "assets".to_owned(),
+            title: "资产".to_owned(),
+            state: crate::DefinitionState::Known,
+            renderer: PageRendererDefinition::ConventionFile,
+            endpoints: vec![endpoint.clone()],
+        });
+        let original = program.clone();
+
+        let endpoint_error = program
+            .apply_patch(&GraphPatch::Delete {
+                target_id: endpoint_id,
+            })
+            .err()
+            .ok_or_else(|| anyhow::anyhow!("删除原生接口必须失败"))?;
+        assert!(endpoint_error.to_string().contains("插件声明维护"));
+        assert_eq!(program, original);
+
+        let page_error = program
+            .apply_patch(&GraphPatch::Delete { target_id: page_id })
+            .err()
+            .ok_or_else(|| anyhow::anyhow!("删除原生接口页面必须失败"))?;
+        assert!(page_error.to_string().contains("插件声明维护"));
+        assert_eq!(program, original);
+
+        let insert_error = program
+            .apply_patch(&GraphPatch::Insert {
+                parent_id: page_id,
+                collection: ChildCollection::PageEndpoints,
+                index: 1,
+                entity: GraphEntity::PageEndpoint(endpoint),
+            })
+            .err()
+            .ok_or_else(|| anyhow::anyhow!("GraphPatch 不能伪造原生接口"))?;
+        assert!(insert_error.to_string().contains("只能编辑约定契约"));
+        assert_eq!(program, original);
         Ok(())
     }
 
@@ -1293,6 +1761,131 @@ mod tests {
             program.models[0].audit.fields[0].kind,
             crate::AuditFieldKind::Version
         );
+        Ok(())
+    }
+
+    #[test]
+    fn model_designer_updates_structured_query_validation_and_relation() -> anyhow::Result<()> {
+        let mut program = ProgramDefinition::empty("inventory", "资产");
+        let model_id = SymbolId::new();
+        let source_field_id = SymbolId::new();
+        let target_field_id = SymbolId::new();
+        let query_id = SymbolId::new();
+        let validation_id = SymbolId::new();
+        program.models.push(ModelDefinition {
+            id: model_id,
+            name: "asset".to_owned(),
+            title: "资产".to_owned(),
+            state: crate::DefinitionState::Known,
+            fields: vec![
+                FieldDefinition {
+                    id: source_field_id,
+                    name: "owner".to_owned(),
+                    title: "负责人".to_owned(),
+                    value_type: crate::ValueType::Text,
+                    state: crate::DefinitionState::Known,
+                    required: false,
+                    options: crate::FieldOptions::default(),
+                    relation: None,
+                },
+                FieldDefinition {
+                    id: target_field_id,
+                    name: "owner_name".to_owned(),
+                    title: "负责人名称".to_owned(),
+                    value_type: crate::ValueType::Text,
+                    state: crate::DefinitionState::Known,
+                    required: false,
+                    options: crate::FieldOptions::default(),
+                    relation: None,
+                },
+            ],
+            indexes: Vec::new(),
+            queries: vec![crate::ModelQueryDefinition {
+                id: query_id,
+                name: "by_owner".to_owned(),
+                title: "按负责人".to_owned(),
+                conjunction: crate::QueryConjunction::All,
+                conditions: Vec::new(),
+            }],
+            validations: vec![crate::ModelValidationDefinition {
+                id: validation_id,
+                message: "负责人不能为空".to_owned(),
+                rule: crate::ModelValidationRule::RequiredWhenPresent {
+                    field_id: source_field_id,
+                    when_field_id: target_field_id,
+                },
+            }],
+            audit: crate::ModelAuditDefinition::default(),
+        });
+
+        let relation = crate::FieldRelation {
+            kind: crate::RelationKind::ManyToOne,
+            target_model_id: model_id,
+            target_field_id,
+        };
+        let updated_query = crate::ModelQueryDefinition {
+            id: query_id,
+            name: "by_owner_name".to_owned(),
+            title: "按负责人名称".to_owned(),
+            conjunction: crate::QueryConjunction::Any,
+            conditions: vec![crate::QueryCondition::Field {
+                field_id: target_field_id,
+                operator: crate::QueryOperator::Contains,
+                parameter: "owner_name".to_owned(),
+            }],
+        };
+        let updated_validation = crate::ModelValidationDefinition {
+            id: validation_id,
+            message: "负责人字段必须一起填写".to_owned(),
+            rule: crate::ModelValidationRule::FieldsRequiredTogether {
+                field_ids: vec![source_field_id, target_field_id],
+            },
+        };
+        program.apply_patch_batch(&GraphPatchBatch {
+            base_version: 0,
+            origin: PatchOrigin::Studio,
+            patches: vec![
+                GraphPatch::SetProperty {
+                    target_id: source_field_id,
+                    property: EditableProperty::FieldRelation,
+                    value: serde_json::to_value(relation.clone())?,
+                },
+                GraphPatch::SetProperty {
+                    target_id: source_field_id,
+                    property: EditableProperty::FieldValueType,
+                    value: serde_json::to_value(crate::ValueType::Object { model_id })?,
+                },
+                GraphPatch::SetProperty {
+                    target_id: query_id,
+                    property: EditableProperty::ModelQuery,
+                    value: serde_json::to_value(updated_query.clone())?,
+                },
+                GraphPatch::SetProperty {
+                    target_id: validation_id,
+                    property: EditableProperty::ModelValidation,
+                    value: serde_json::to_value(updated_validation.clone())?,
+                },
+            ],
+        })?;
+
+        assert_eq!(program.models[0].fields[0].relation, Some(relation));
+        assert_eq!(program.models[0].queries, vec![updated_query]);
+        assert_eq!(program.models[0].validations, vec![updated_validation]);
+
+        program.apply_patch_batch(&GraphPatchBatch {
+            base_version: 0,
+            origin: PatchOrigin::Studio,
+            patches: vec![
+                GraphPatch::Delete {
+                    target_id: query_id,
+                },
+                GraphPatch::Delete {
+                    target_id: validation_id,
+                },
+            ],
+        })?;
+        assert!(program.models[0].queries.is_empty());
+        assert!(program.models[0].validations.is_empty());
         Ok(())
     }
 }

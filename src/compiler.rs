@@ -11,8 +11,10 @@ use crate::{
     CrudTablePageProvider, DefinitionState, EffectKind, EndpointInputLocation, FieldDefinition,
     FunctionDefinition, FunctionNode, FunctionNodeKind, GraphEdge, ImageTarget, Instruction,
     ModelDefinition, PROGRAM_SCHEMA_VERSION, PageDefinition, PageEndpointSource,
-    PageRendererDefinition, ProgramDefinition, ProgramImage, RestFormPageProvider, RestMethod,
-    RudiRouteInstruction, SymbolId, TableDefinition, TreeTablePageProvider, page_provider_key,
+    PageRendererDefinition, ProgramDefinition, ProgramImage, ProgramMenuTreePageProvider,
+    RestFormPageProvider, RestMethod, RudiRouteInstruction, SymbolId, TableDefinition,
+    TreeTablePageProvider, data_identifier_is_valid, endpoint_identifier_is_valid,
+    function_nodes_can_connect, page_identifier_is_valid, page_provider_key,
     permission_identifier_is_valid, validate_route_path,
 };
 
@@ -62,7 +64,18 @@ impl std::fmt::Display for CompileFailure {
             formatter,
             "程序编译失败，共 {} 条诊断",
             self.diagnostics.len()
-        )
+        )?;
+        for diagnostic in &self.diagnostics {
+            write!(
+                formatter,
+                "\n[{}][{:?}][{:?}] {}",
+                diagnostic.code, diagnostic.stage, diagnostic.severity, diagnostic.message
+            )?;
+            if let Some(symbol_id) = diagnostic.symbol_id {
+                write!(formatter, " ({symbol_id})")?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -224,7 +237,7 @@ impl<'a> ProgramCompiler<'a> {
         }
         let mut model_names = BTreeSet::new();
         for model in &definition.models {
-            if !is_data_identifier(&model.name) {
+            if !data_identifier_is_valid(&model.name) {
                 diagnostics.push(diagnostic(
                     "MODEL_IDENTIFIER_INVALID",
                     CompilerStage::Schema,
@@ -242,7 +255,7 @@ impl<'a> ProgramCompiler<'a> {
             }
             let mut field_names = BTreeSet::new();
             for field in &model.fields {
-                if !is_data_identifier(&field.name) {
+                if !data_identifier_is_valid(&field.name) {
                     diagnostics.push(diagnostic(
                         "FIELD_IDENTIFIER_INVALID",
                         CompilerStage::Schema,
@@ -266,9 +279,78 @@ impl<'a> ProgramCompiler<'a> {
             validate_model_audit(model, diagnostics);
         }
         validate_model_relations(definition, diagnostics);
+        let mut function_names = BTreeSet::new();
+        for function in &definition.functions {
+            if !data_identifier_is_valid(&function.name) {
+                diagnostics.push(diagnostic(
+                    "FUNCTION_IDENTIFIER_INVALID",
+                    CompilerStage::Schema,
+                    format!("函数标识必须是 snake_case: {}", function.name),
+                    Some(function.id),
+                ));
+            }
+            if function.title.trim().is_empty() {
+                diagnostics.push(diagnostic(
+                    "FUNCTION_TITLE_EMPTY",
+                    CompilerStage::Schema,
+                    "函数标题不能为空",
+                    Some(function.id),
+                ));
+            }
+            if !function_names.insert(function.name.as_str()) {
+                diagnostics.push(diagnostic(
+                    "FUNCTION_IDENTIFIER_DUPLICATE",
+                    CompilerStage::Schema,
+                    format!("函数标识重复: {}", function.name),
+                    Some(function.id),
+                ));
+            }
+        }
+        let routed_page_ids = definition
+            .routes
+            .iter()
+            .map(|route| route.page_id)
+            .collect::<BTreeSet<_>>();
+        let mut page_names = BTreeSet::new();
         for page in &definition.pages {
+            if !page_identifier_is_valid(&page.name) {
+                diagnostics.push(diagnostic(
+                    "PAGE_IDENTIFIER_INVALID",
+                    CompilerStage::Schema,
+                    format!(
+                        "页面标识必须使用小写字母、数字、下划线或连字符: {}",
+                        page.name
+                    ),
+                    Some(page.id),
+                ));
+            }
+            if page.title.trim().is_empty() {
+                diagnostics.push(diagnostic(
+                    "PAGE_TITLE_EMPTY",
+                    CompilerStage::Schema,
+                    "页面标题不能为空",
+                    Some(page.id),
+                ));
+            }
+            if !page_names.insert(page.name.as_str()) {
+                diagnostics.push(diagnostic(
+                    "PAGE_IDENTIFIER_DUPLICATE",
+                    CompilerStage::Schema,
+                    format!("页面标识重复: {}", page.name),
+                    Some(page.id),
+                ));
+            }
+            if !routed_page_ids.contains(&page.id) {
+                diagnostics.push(diagnostic(
+                    "PAGE_ROUTE_MISSING",
+                    CompilerStage::Schema,
+                    format!("页面缺少可访问路由: {}", page.name),
+                    Some(page.id),
+                ));
+            }
             validate_page_endpoints(page, diagnostics);
         }
+        validate_global_endpoint_routes(definition, diagnostics);
     }
 
     fn resolve_symbols(
@@ -334,6 +416,11 @@ impl<'a> ProgramCompiler<'a> {
             insert_symbol(&mut symbols, permission.id, diagnostics);
         }
 
+        for model in &definition.models {
+            for field in &model.fields {
+                validate_value_type_references(&field.value_type, &symbols, diagnostics, field.id);
+            }
+        }
         for menu in &definition.menus {
             validate_menu_references(menu, &symbols, diagnostics);
         }
@@ -342,6 +429,9 @@ impl<'a> ProgramCompiler<'a> {
         }
         for route in &definition.routes {
             check_reference(route.page_id, &symbols, diagnostics, route.id);
+            for permission_id in &route.required_permissions {
+                check_reference(*permission_id, &symbols, diagnostics, route.id);
+            }
         }
         for function in &definition.functions {
             validate_function_references(function, &symbols, diagnostics);
@@ -364,7 +454,7 @@ impl<'a> ProgramCompiler<'a> {
                 let Some(to) = nodes.get(&edge.to_node) else {
                     continue;
                 };
-                if !ports_are_compatible(from, to) {
+                if !function_nodes_can_connect(&from.kind, &to.kind) {
                     diagnostics.push(diagnostic(
                         "GRAPH_TYPE_MISMATCH",
                         CompilerStage::Types,
@@ -582,6 +672,15 @@ impl<'a> ProgramCompiler<'a> {
                             .map(|slot| (*slot, field.options.clone()))
                     })
                     .collect::<BTreeMap<_, _>>();
+                let field_relations = model
+                    .fields
+                    .iter()
+                    .filter_map(|field| {
+                        field.relation.clone().and_then(|relation| {
+                            field_slots.get(&field.id).map(|slot| (*slot, relation))
+                        })
+                    })
+                    .collect::<BTreeMap<_, _>>();
                 let required_fields = model
                     .fields
                     .iter()
@@ -621,6 +720,7 @@ impl<'a> ProgramCompiler<'a> {
                         field_names,
                         field_titles,
                         field_options,
+                        field_relations,
                         required_fields,
                         expression_indexes,
                         audit: model.audit.clone(),
@@ -932,7 +1032,7 @@ fn validate_model_queries(
 ) {
     let mut names = BTreeSet::new();
     for query in &model.queries {
-        if !is_data_identifier(&query.name) || !names.insert(query.name.as_str()) {
+        if !data_identifier_is_valid(&query.name) || !names.insert(query.name.as_str()) {
             diagnostics.push(diagnostic(
                 "MODEL_QUERY_IDENTIFIER_INVALID",
                 CompilerStage::Schema,
@@ -1007,7 +1107,7 @@ fn validate_query_condition(
             Some(query_id),
         ));
     }
-    if !is_data_identifier(parameter) {
+    if !data_identifier_is_valid(parameter) {
         diagnostics.push(diagnostic(
             "MODEL_QUERY_PARAMETER_INVALID",
             CompilerStage::Schema,
@@ -1111,7 +1211,9 @@ fn validate_page_endpoints(page: &PageDefinition, diagnostics: &mut Vec<Diagnost
         }
         let mut input_names = BTreeSet::new();
         for input in &endpoint.inputs {
-            if !is_data_identifier(&input.name) || !input_names.insert(input.name.as_str()) {
+            if !endpoint_identifier_is_valid(&input.name)
+                || !input_names.insert(input.name.as_str())
+            {
                 diagnostics.push(diagnostic(
                     "PAGE_ENDPOINT_INPUT_INVALID",
                     CompilerStage::Schema,
@@ -1137,7 +1239,9 @@ fn validate_page_endpoints(page: &PageDefinition, diagnostics: &mut Vec<Diagnost
         }
         let mut output_names = BTreeSet::new();
         for output in &endpoint.outputs {
-            if !is_data_identifier(&output.name) || !output_names.insert(output.name.as_str()) {
+            if !endpoint_identifier_is_valid(&output.name)
+                || !output_names.insert(output.name.as_str())
+            {
                 diagnostics.push(diagnostic(
                     "PAGE_ENDPOINT_OUTPUT_INVALID",
                     CompilerStage::Schema,
@@ -1154,12 +1258,56 @@ fn validate_page_endpoints(page: &PageDefinition, diagnostics: &mut Vec<Diagnost
     }
 }
 
+fn validate_global_endpoint_routes(
+    definition: &ProgramDefinition,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut routes = BTreeMap::new();
+    for page in &definition.pages {
+        for endpoint in compile_page_endpoints(definition, page) {
+            let route_key = (endpoint.method, endpoint.path.clone());
+            let symbol_id = page
+                .endpoints
+                .iter()
+                .find(|definition| definition.id.to_string() == endpoint.id)
+                .map_or(page.id, |definition| definition.id);
+            if let Some((existing_page, existing_endpoint, existing_source)) = routes.insert(
+                route_key,
+                (page.title.clone(), endpoint.title.clone(), endpoint.source),
+            ) {
+                if existing_source == PageEndpointSource::BuiltIn
+                    && endpoint.source == PageEndpointSource::BuiltIn
+                {
+                    continue;
+                }
+                diagnostics.push(diagnostic(
+                    "PAGE_ENDPOINT_ROUTE_DUPLICATE_GLOBAL",
+                    CompilerStage::Schema,
+                    format!(
+                        "全局接口路由重复: {} {}（{} / {} 与 {} / {}）",
+                        endpoint.method.as_str(),
+                        endpoint.path,
+                        existing_page,
+                        existing_endpoint,
+                        page.title,
+                        endpoint.title
+                    ),
+                    Some(symbol_id),
+                ));
+            }
+        }
+    }
+}
+
 #[must_use]
 pub fn compile_page(definition: &ProgramDefinition, page: &PageDefinition) -> CompiledPage {
     let renderer = match &page.renderer {
         PageRendererDefinition::ConventionFile => CompiledPageRenderer::ConventionFile {
             module_name: convention_page_module_name(&definition.name, &page.name),
             expected_path: convention_page_path(&definition.name, &page.name),
+        },
+        PageRendererDefinition::MenuTree => CompiledPageRenderer::MenuTree {
+            provider_key: page_provider_key::<ProgramMenuTreePageProvider>(),
         },
         PageRendererDefinition::TreeTable { tree, table } => CompiledPageRenderer::TreeTable {
             provider_key: page_provider_key::<TreeTablePageProvider>(),
@@ -1199,6 +1347,7 @@ fn compile_page_endpoints(
             .map(|endpoint| CompiledPageEndpoint {
                 id: endpoint.id.to_string(),
                 title: endpoint.display_title(),
+                description: endpoint.description.clone(),
                 method: endpoint.method,
                 path: endpoint.path.clone(),
                 inputs: endpoint
@@ -1221,7 +1370,14 @@ fn compile_page_endpoints(
                         value_type: output.value_type.clone(),
                     })
                     .collect(),
-                source: PageEndpointSource::Custom,
+                source: match endpoint.implementation {
+                    crate::EndpointImplementationDefinition::Native { .. } => {
+                        PageEndpointSource::Native
+                    }
+                    crate::EndpointImplementationDefinition::Convention => {
+                        PageEndpointSource::Convention
+                    }
+                },
                 route_instruction: RudiRouteInstruction {
                     provider_key: provider_key.clone(),
                 },
@@ -1241,7 +1397,9 @@ fn built_in_page_endpoints(
         PageRendererDefinition::TreeTable { table, .. } => {
             (table, page_provider_key::<TreeTablePageProvider>())
         }
-        PageRendererDefinition::ConventionFile => return Vec::new(),
+        PageRendererDefinition::ConventionFile | PageRendererDefinition::MenuTree => {
+            return Vec::new();
+        }
     };
     let Some(model_id) = table.model_id else {
         return Vec::new();
@@ -1302,6 +1460,7 @@ fn built_in_page_endpoints(
                  inputs: Vec<CompiledEndpointInput>,
                  outputs: Vec<CompiledEndpointOutput>| CompiledPageEndpoint {
         id: format!("builtin:{}:{name}", page.id),
+        description: format!("由 {} 模型元数据推导", model.title),
         title,
         method,
         path,
@@ -1546,7 +1705,7 @@ fn validate_page_references(
 ) {
     let mut references = Vec::new();
     match &page.renderer {
-        PageRendererDefinition::ConventionFile => {}
+        PageRendererDefinition::ConventionFile | PageRendererDefinition::MenuTree => {}
         PageRendererDefinition::CrudTable { table } => {
             collect_table_references(table, &mut references)
         }
@@ -1595,6 +1754,19 @@ fn collect_value_type_references(value_type: &crate::ValueType, references: &mut
     }
 }
 
+fn validate_value_type_references(
+    value_type: &crate::ValueType,
+    symbols: &BTreeSet<SymbolId>,
+    diagnostics: &mut Vec<Diagnostic>,
+    owner: SymbolId,
+) {
+    let mut references = Vec::new();
+    collect_value_type_references(value_type, &mut references);
+    for reference in references {
+        check_reference(reference, symbols, diagnostics, owner);
+    }
+}
+
 fn collect_table_references(table: &TableDefinition, references: &mut Vec<SymbolId>) {
     references.extend(table.model_id);
 }
@@ -1605,7 +1777,7 @@ fn validate_page_renderer(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match &page.renderer {
-        PageRendererDefinition::ConventionFile => {}
+        PageRendererDefinition::ConventionFile | PageRendererDefinition::MenuTree => {}
         PageRendererDefinition::CrudTable { table } => {
             validate_table(definition, page.id, table, diagnostics);
         }
@@ -1708,7 +1880,7 @@ fn validate_model_fields(
 fn page_model_dependencies(page: &PageDefinition) -> Vec<SymbolId> {
     let mut values = BTreeSet::new();
     match &page.renderer {
-        PageRendererDefinition::ConventionFile => {}
+        PageRendererDefinition::ConventionFile | PageRendererDefinition::MenuTree => {}
         PageRendererDefinition::CrudTable { table } => {
             values.extend(table.model_id);
         }
@@ -1728,45 +1900,62 @@ fn validate_function_references(
     for permission in &function.required_permissions {
         check_reference(*permission, symbols, diagnostics, function.id);
     }
+    for port in function.inputs.iter().chain(&function.outputs) {
+        validate_value_type_references(&port.value_type, symbols, diagnostics, port.id);
+    }
     for edge in &function.graph.edges {
         check_reference(edge.from_node, symbols, diagnostics, edge.id);
         check_reference(edge.to_node, symbols, diagnostics, edge.id);
     }
     for node in &function.graph.nodes {
-        match node.kind {
+        match &node.kind {
+            FunctionNodeKind::Constant { value_type, .. } => {
+                validate_value_type_references(value_type, symbols, diagnostics, node.id)
+            }
+            FunctionNodeKind::Input { port_id } | FunctionNodeKind::Output { port_id } => {
+                check_reference(*port_id, symbols, diagnostics, node.id)
+            }
+            FunctionNodeKind::Object { fields } => {
+                for (field_id, value_node_id) in fields {
+                    check_reference(*field_id, symbols, diagnostics, node.id);
+                    check_reference(*value_node_id, symbols, diagnostics, node.id);
+                }
+            }
+            FunctionNodeKind::List { items } => {
+                for item_node_id in items {
+                    check_reference(*item_node_id, symbols, diagnostics, node.id);
+                }
+            }
+            FunctionNodeKind::FieldAccess { object, field_id } => {
+                check_reference(*object, symbols, diagnostics, node.id);
+                check_reference(*field_id, symbols, diagnostics, node.id);
+            }
+            FunctionNodeKind::Format { values, .. } => {
+                for value_node_id in values {
+                    check_reference(*value_node_id, symbols, diagnostics, node.id);
+                }
+            }
+            FunctionNodeKind::ValidateForm { rules } => {
+                for rule in rules {
+                    check_reference(rule.field_id, symbols, diagnostics, node.id);
+                }
+            }
             FunctionNodeKind::ForEach {
                 body_function_id, ..
-            } => check_reference(body_function_id, symbols, diagnostics, node.id),
+            } => check_reference(*body_function_id, symbols, diagnostics, node.id),
             FunctionNodeKind::Navigate { route_id } => {
-                check_reference(route_id, symbols, diagnostics, node.id)
+                check_reference(*route_id, symbols, diagnostics, node.id)
             }
             FunctionNodeKind::CreateRecord { model_id }
             | FunctionNodeKind::ReadRecord { model_id }
             | FunctionNodeKind::UpdateRecord { model_id }
             | FunctionNodeKind::DeleteRecord { model_id }
             | FunctionNodeKind::QueryRecords { model_id, .. } => {
-                check_reference(model_id, symbols, diagnostics, node.id)
+                check_reference(*model_id, symbols, diagnostics, node.id)
             }
             _ => {}
         }
     }
-}
-
-fn ports_are_compatible(from: &FunctionNode, to: &FunctionNode) -> bool {
-    !matches!(from.kind, FunctionNodeKind::Fail { .. })
-        && !matches!(
-            to.kind,
-            FunctionNodeKind::Constant { .. } | FunctionNodeKind::Input { .. }
-        )
-}
-
-fn is_data_identifier(value: &str) -> bool {
-    let mut bytes = value.bytes();
-    let Some(first) = bytes.next() else {
-        return false;
-    };
-    (first.is_ascii_lowercase() || first == b'_')
-        && bytes.all(|value| value.is_ascii_lowercase() || value.is_ascii_digit() || value == b'_')
 }
 
 fn function_effects(
@@ -2068,10 +2257,29 @@ mod tests {
     use super::*;
     use crate::{
         DefinitionState, EndpointInputDefinition, EndpointInputLocation, EndpointOutputDefinition,
-        FieldDefinition, MenuActionAccess, MenuDefinition, MenuRowActions, ModelDefinition,
-        PageEndpointDefinition, PageRendererDefinition, PermissionDefinition, RestMethod,
-        RouteDefinition, TableDefinition, TreeDefinition, ValueType,
+        FieldDefinition, FunctionGraph, FunctionNodeEditor, MenuActionAccess, MenuDefinition,
+        MenuRowActions, ModelDefinition, PageEndpointDefinition, PageRendererDefinition,
+        PermissionDefinition, PortDefinition, RestMethod, RouteDefinition, TableDefinition,
+        TreeDefinition, ValueType,
     };
+
+    #[test]
+    fn compile_failure_display_includes_actionable_diagnostics() {
+        let symbol_id = SymbolId::new();
+        let failure = CompileFailure {
+            diagnostics: vec![diagnostic(
+                "PAGE_ENDPOINT_INPUT_INVALID",
+                CompilerStage::Schema,
+                "接口入参标识无效",
+                Some(symbol_id),
+            )],
+        };
+
+        let message = failure.to_string();
+        assert!(message.contains("PAGE_ENDPOINT_INPUT_INVALID"));
+        assert!(message.contains("接口入参标识无效"));
+        assert!(message.contains(&symbol_id.to_string()));
+    }
 
     fn model(name: &str, title: &str) -> ModelDefinition {
         ModelDefinition {
@@ -2188,6 +2396,43 @@ mod tests {
     }
 
     #[test]
+    fn compiles_program_menu_tree_without_record_endpoints() -> anyhow::Result<()> {
+        let mut program = ProgramDefinition::empty("admin", "管理后台");
+        let page_id = SymbolId::new();
+        program.pages.push(PageDefinition {
+            id: page_id,
+            name: "menus".to_owned(),
+            title: "菜单挂载".to_owned(),
+            state: DefinitionState::Known,
+            renderer: PageRendererDefinition::MenuTree,
+            endpoints: Vec::new(),
+        });
+        program.routes.push(RouteDefinition {
+            id: SymbolId::new(),
+            name: "menus".to_owned(),
+            path: "/menus".to_owned(),
+            page_id,
+            state: DefinitionState::Known,
+            required_permissions: Vec::new(),
+        });
+
+        let image = ProgramCompiler::new("test", &CapabilityCatalog::default()).compile(
+            &program,
+            "revision-menu",
+            ImageTarget::Universal,
+        )?;
+        let page = &image.pages[&page_id];
+
+        assert!(matches!(
+            &page.renderer,
+            CompiledPageRenderer::MenuTree { provider_key }
+                if provider_key == &page_provider_key::<ProgramMenuTreePageProvider>()
+        ));
+        assert!(page.endpoints.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn rejects_invalid_or_duplicate_permission_identifiers() -> anyhow::Result<()> {
         let mut program = crud_program();
         program.permissions = vec![
@@ -2220,6 +2465,233 @@ mod tests {
                 .iter()
                 .any(|diagnostic| diagnostic.code == "PERMISSION_IDENTIFIER_DUPLICATE")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_invalid_or_duplicate_page_identifiers() -> anyhow::Result<()> {
+        let mut program = crud_program();
+        let mut duplicate = program.pages[0].clone();
+        duplicate.id = SymbolId::new();
+        let mut invalid = program.pages[0].clone();
+        invalid.id = SymbolId::new();
+        invalid.name = "Asset Page".to_owned();
+        invalid.title.clear();
+        program.pages.extend([duplicate, invalid]);
+
+        let failure = ProgramCompiler::new("test", &CapabilityCatalog::default())
+            .compile(&program, "revision-1", ImageTarget::Universal)
+            .err()
+            .ok_or_else(|| anyhow::anyhow!("无效页面定义不应通过编译"))?;
+        assert!(
+            failure
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "PAGE_IDENTIFIER_INVALID")
+        );
+        assert!(
+            failure
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "PAGE_IDENTIFIER_DUPLICATE")
+        );
+        assert!(
+            failure
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "PAGE_TITLE_EMPTY")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_page_without_route() -> anyhow::Result<()> {
+        let mut program = crud_program();
+        program.routes.clear();
+
+        let failure = ProgramCompiler::new("test", &CapabilityCatalog::default())
+            .compile(&program, "revision-1", ImageTarget::Universal)
+            .err()
+            .ok_or_else(|| anyhow::anyhow!("无路由页面不应通过编译"))?;
+        assert!(
+            failure
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "PAGE_ROUTE_MISSING")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_invalid_duplicate_or_untitled_functions() -> anyhow::Result<()> {
+        let mut program = crud_program();
+        program.functions = vec![
+            FunctionDefinition {
+                id: SymbolId::new(),
+                name: "Load Asset".to_owned(),
+                title: String::new(),
+                state: DefinitionState::Known,
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                graph: FunctionGraph::default(),
+                required_permissions: Vec::new(),
+            },
+            FunctionDefinition {
+                id: SymbolId::new(),
+                name: "Load Asset".to_owned(),
+                title: "重复函数".to_owned(),
+                state: DefinitionState::Known,
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                graph: FunctionGraph::default(),
+                required_permissions: Vec::new(),
+            },
+        ];
+
+        let failure = ProgramCompiler::new("test", &CapabilityCatalog::default())
+            .compile(&program, "revision-1", ImageTarget::Universal)
+            .err()
+            .ok_or_else(|| anyhow::anyhow!("无效函数定义不应通过编译"))?;
+
+        assert!(
+            failure
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "FUNCTION_IDENTIFIER_INVALID")
+        );
+        assert!(
+            failure
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "FUNCTION_TITLE_EMPTY")
+        );
+        assert!(
+            failure
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "FUNCTION_IDENTIFIER_DUPLICATE")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_missing_model_and_field_references_in_structured_types() -> anyhow::Result<()> {
+        let mut program = crud_program();
+        let missing_model_id = SymbolId::new();
+        let missing_field_id = SymbolId::new();
+        let field_owner_id = program.models[0].fields[0].id;
+        program.models[0].fields[0].value_type = ValueType::Optional {
+            value: Box::new(ValueType::Object {
+                model_id: missing_model_id,
+            }),
+        };
+        let port_id = SymbolId::new();
+        let node_id = SymbolId::new();
+        let input_node_id = SymbolId::new();
+        let object_node_id = SymbolId::new();
+        let list_node_id = SymbolId::new();
+        let format_node_id = SymbolId::new();
+        let validation_node_id = SymbolId::new();
+        program.functions.push(FunctionDefinition {
+            id: SymbolId::new(),
+            name: "load_asset".to_owned(),
+            title: "读取资产".to_owned(),
+            state: DefinitionState::Known,
+            inputs: vec![PortDefinition {
+                id: port_id,
+                name: "asset".to_owned(),
+                value_type: ValueType::Object {
+                    model_id: missing_model_id,
+                },
+            }],
+            outputs: Vec::new(),
+            graph: FunctionGraph {
+                nodes: vec![
+                    FunctionNode {
+                        id: node_id,
+                        name: "read_missing_field".to_owned(),
+                        state: DefinitionState::Known,
+                        editor: FunctionNodeEditor::default(),
+                        kind: FunctionNodeKind::FieldAccess {
+                            object: SymbolId::new(),
+                            field_id: missing_field_id,
+                        },
+                    },
+                    FunctionNode {
+                        id: input_node_id,
+                        name: "missing_input".to_owned(),
+                        state: DefinitionState::Known,
+                        editor: FunctionNodeEditor::default(),
+                        kind: FunctionNodeKind::Input {
+                            port_id: SymbolId::new(),
+                        },
+                    },
+                    FunctionNode {
+                        id: object_node_id,
+                        name: "object_with_missing_references".to_owned(),
+                        state: DefinitionState::Known,
+                        editor: FunctionNodeEditor::default(),
+                        kind: FunctionNodeKind::Object {
+                            fields: BTreeMap::from([(missing_field_id, SymbolId::new())]),
+                        },
+                    },
+                    FunctionNode {
+                        id: list_node_id,
+                        name: "list_with_missing_item".to_owned(),
+                        state: DefinitionState::Known,
+                        editor: FunctionNodeEditor::default(),
+                        kind: FunctionNodeKind::List {
+                            items: vec![SymbolId::new()],
+                        },
+                    },
+                    FunctionNode {
+                        id: format_node_id,
+                        name: "format_with_missing_value".to_owned(),
+                        state: DefinitionState::Known,
+                        editor: FunctionNodeEditor::default(),
+                        kind: FunctionNodeKind::Format {
+                            template: "{0}".to_owned(),
+                            values: vec![SymbolId::new()],
+                        },
+                    },
+                    FunctionNode {
+                        id: validation_node_id,
+                        name: "validation_with_missing_field".to_owned(),
+                        state: DefinitionState::Known,
+                        editor: FunctionNodeEditor::default(),
+                        kind: FunctionNodeKind::ValidateForm {
+                            rules: vec![crate::ValidationRule {
+                                field_id: missing_field_id,
+                                rule: crate::ValidationRuleKind::Required,
+                                message: "不能为空".to_owned(),
+                            }],
+                        },
+                    },
+                ],
+                edges: Vec::new(),
+            },
+            required_permissions: Vec::new(),
+        });
+
+        let failure = ProgramCompiler::new("test", &CapabilityCatalog::default())
+            .compile(&program, "revision-1", ImageTarget::Universal)
+            .err()
+            .ok_or_else(|| anyhow::anyhow!("悬空模型与字段引用不应通过编译"))?;
+        let unresolved_owners = failure
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "SYMBOL_UNRESOLVED")
+            .filter_map(|diagnostic| diagnostic.symbol_id)
+            .collect::<BTreeSet<_>>();
+
+        assert!(unresolved_owners.contains(&field_owner_id));
+        assert!(unresolved_owners.contains(&port_id));
+        assert!(unresolved_owners.contains(&node_id));
+        assert!(unresolved_owners.contains(&input_node_id));
+        assert!(unresolved_owners.contains(&object_node_id));
+        assert!(unresolved_owners.contains(&list_node_id));
+        assert!(unresolved_owners.contains(&format_node_id));
+        assert!(unresolved_owners.contains(&validation_node_id));
         Ok(())
     }
 
@@ -2430,6 +2902,16 @@ mod tests {
             ImageTarget::Universal,
         )?;
         assert_eq!(image.models.len(), 2);
+        let user_model = &image.models[&user_id];
+        let department_slot = user_model.field_slots[&user_department_id];
+        assert_eq!(
+            user_model.field_relations[&department_slot].kind,
+            crate::RelationKind::ManyToOne
+        );
+        assert_eq!(
+            user_model.field_relations[&department_slot].target_model_id,
+            department_id
+        );
         Ok(())
     }
 
@@ -2440,12 +2922,14 @@ mod tests {
         program.pages[0].endpoints.push(PageEndpointDefinition {
             id: endpoint_id,
             title: "批量停用资产".to_owned(),
+            description: "批量停用指定分类中的资产".to_owned(),
             state: DefinitionState::Known,
+            implementation: crate::EndpointImplementationDefinition::Convention,
             method: RestMethod::Post,
-            path: "/api/assets/{category_id}/batch-disable".to_owned(),
+            path: "/api/assets/{categoryId}/batch-disable".to_owned(),
             inputs: vec![EndpointInputDefinition {
                 id: SymbolId::new(),
-                name: "category_id".to_owned(),
+                name: "categoryId".to_owned(),
                 title: "分类 ID".to_owned(),
                 location: EndpointInputLocation::Path,
                 value_type: ValueType::Text,
@@ -2453,7 +2937,7 @@ mod tests {
             }],
             outputs: vec![EndpointOutputDefinition {
                 id: SymbolId::new(),
-                name: "updated".to_owned(),
+                name: "updatedCount".to_owned(),
                 title: "停用数量".to_owned(),
                 value_type: ValueType::Integer,
             }],
@@ -2471,11 +2955,64 @@ mod tests {
             .ok_or_else(|| anyhow::anyhow!("自定义接口未进入编译产物"))?;
         assert_eq!(endpoint.method, RestMethod::Post);
         assert_eq!(endpoint.title, "批量停用资产");
-        assert_eq!(endpoint.source, PageEndpointSource::Custom);
+        assert_eq!(endpoint.source, PageEndpointSource::Convention);
         assert_eq!(
             endpoint.route_instruction.provider_key,
             page_provider_key::<RestFormPageProvider>()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_declared_route_that_conflicts_with_builtin_endpoint() {
+        let mut program = crud_program();
+        let model_id = program.models[0].id;
+        program.pages[0].endpoints.push(PageEndpointDefinition {
+            id: SymbolId::new(),
+            title: "重复查询".to_owned(),
+            description: "错误覆盖内置查询".to_owned(),
+            state: DefinitionState::Known,
+            implementation: crate::EndpointImplementationDefinition::Convention,
+            method: RestMethod::Get,
+            path: format!("/api/runtime/models/{model_id}/records"),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+        });
+
+        let failure = ProgramCompiler::new("test", &CapabilityCatalog::default())
+            .compile(&program, "revision-1", ImageTarget::Universal)
+            .err();
+
+        assert!(failure.is_some_and(|failure| {
+            failure
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "PAGE_ENDPOINT_ROUTE_DUPLICATE_GLOBAL")
+        }));
+    }
+
+    #[test]
+    fn allows_multiple_pages_to_consume_the_same_builtin_model_routes() -> anyhow::Result<()> {
+        let mut program = crud_program();
+        let mut second_page = program.pages[0].clone();
+        second_page.id = SymbolId::new();
+        second_page.name = "asset_overview".to_owned();
+        second_page.title = "资产概览".to_owned();
+        program.routes.push(RouteDefinition {
+            id: SymbolId::new(),
+            name: second_page.name.clone(),
+            path: "/asset-overview".to_owned(),
+            page_id: second_page.id,
+            state: DefinitionState::Known,
+            required_permissions: Vec::new(),
+        });
+        program.pages.push(second_page);
+
+        ProgramCompiler::new("test", &CapabilityCatalog::default()).compile(
+            &program,
+            "revision-1",
+            ImageTarget::Universal,
+        )?;
         Ok(())
     }
 

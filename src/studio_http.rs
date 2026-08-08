@@ -3,9 +3,9 @@
 use std::{convert::Infallible, sync::Arc};
 
 use crate::{
-    ConventionFileGenerator, ConventionFileResult, DraftSnapshot, FormStateExtractionRequest,
-    FormStateExtractionResponse, FormStateExtractor, GraphPatchBatch, PatchOrigin,
-    ProgramPatchAgent, RevisionSnapshot, RuntimeRecordFilter, RuntimeRecordInput,
+    ConventionContractManager, ConventionFileGenerator, ConventionFileResult, DraftSnapshot,
+    FormStateExtractionRequest, FormStateExtractionResponse, FormStateExtractor, GraphPatchBatch,
+    PatchOrigin, ProgramPatchAgent, RevisionSnapshot, RuntimeRecordCriteria, RuntimeRecordInput,
     RuntimeRecordPage, RuntimeRecordView, StudioPage, StudioPageParams, VibeMessageInput,
     VibeRunAccepted, VibeRunRequest,
     program_runtime::{ProgramActivationEvent, ProgramRuntime},
@@ -42,6 +42,7 @@ pub struct StudioState {
     runtime: Option<Arc<ProgramRuntime>>,
     patch_agent: Arc<ProgramPatchAgent>,
     form_state_extractor: Arc<FormStateExtractor>,
+    convention_contracts: ConventionContractManager,
 }
 
 impl StudioState {
@@ -50,11 +51,13 @@ impl StudioState {
         runtime: Option<ProgramRuntime>,
         patch_agent: ProgramPatchAgent,
         form_state_extractor: FormStateExtractor,
+        convention_contracts: ConventionContractManager,
     ) -> Self {
         Self {
             runtime: runtime.map(Arc::new),
             patch_agent: Arc::new(patch_agent),
             form_state_extractor: Arc::new(form_state_extractor),
+            convention_contracts,
         }
     }
 
@@ -85,7 +88,9 @@ pub fn router(state: StudioState) -> Router {
         )
         .route(
             RUNTIME_RECORD_PATH,
-            axum::routing::patch(update_runtime_record).delete(delete_runtime_record),
+            get(get_runtime_record)
+                .patch(update_runtime_record)
+                .delete(delete_runtime_record),
         )
         .with_state(state)
 }
@@ -149,8 +154,7 @@ struct PaginationQuery {
     o: usize,
     #[serde(default = "default_page_size")]
     s: usize,
-    field: Option<String>,
-    value: Option<String>,
+    criteria: Option<String>,
 }
 
 impl PaginationQuery {
@@ -164,17 +168,28 @@ impl PaginationQuery {
         })
     }
 
-    fn filter(&self) -> Result<Option<RuntimeRecordFilter>, ApiError> {
-        match (&self.field, &self.value) {
-            (None, None) => Ok(None),
-            (Some(field), Some(value)) if !field.trim().is_empty() => {
-                Ok(Some(RuntimeRecordFilter {
-                    field: field.trim().to_owned(),
-                    value: value.to_owned(),
-                }))
-            }
-            _ => Err(ApiError::bad_request("记录筛选必须同时提供 field 和 value")),
+    fn criteria(&self) -> Result<RuntimeRecordCriteria, ApiError> {
+        let Some(raw) = self.criteria.as_deref() else {
+            return Ok(RuntimeRecordCriteria::default());
+        };
+        let mut criteria = serde_json::from_str::<RuntimeRecordCriteria>(raw)
+            .map_err(|error| ApiError::bad_request(format!("记录查询条件无效: {error}")))?;
+        if criteria.all.len().saturating_add(criteria.any.len()) > 16 {
+            return Err(ApiError::bad_request("记录查询条件不能超过 16 个"));
         }
+        for filter in criteria.all.iter_mut().chain(&mut criteria.any) {
+            filter.field = filter.field.trim().to_owned();
+            if filter.field.is_empty() || filter.value.is_empty() {
+                return Err(ApiError::bad_request("记录筛选字段和值不能为空"));
+            }
+        }
+        if let Some(sort) = criteria.sort.as_mut() {
+            sort.field = sort.field.trim().to_owned();
+            if sort.field.is_empty() {
+                return Err(ApiError::bad_request("记录排序字段不能为空"));
+            }
+        }
+        Ok(criteria)
     }
 }
 
@@ -206,9 +221,13 @@ async fn patch_draft(
             if let Some(conflict) = error.downcast_ref::<DraftVersionConflict>() {
                 return Err(ApiError::new(StatusCode::CONFLICT, conflict.to_string()));
             }
-            return Err(ApiError::bad_request(error.to_string()));
+            return Err(ApiError::bad_request(format!("{error:#}")));
         }
     };
+    state
+        .convention_contracts
+        .reconcile(&draft.definition)
+        .map_err(ApiError::from)?;
     runtime.schedule_publish(origin).await;
     Ok(ok_json(draft))
 }
@@ -243,9 +262,21 @@ async fn list_runtime_records(
     ApiQuery(query): ApiQuery<PaginationQuery>,
 ) -> Result<Json<ApiResponse<RuntimeRecordPage>>, ApiError> {
     let runtime = state.runtime()?;
-    let filter = query.filter()?;
+    let criteria = query.criteria()?;
     runtime
-        .list_records(parse_symbol_id(&model_id)?, query.page()?, filter.as_ref())
+        .list_records(parse_symbol_id(&model_id)?, query.page()?, &criteria)
+        .await
+        .map(ok_json)
+        .map_err(ApiError::from)
+}
+
+async fn get_runtime_record(
+    State(state): State<StudioState>,
+    ApiPath((model_id, record_id)): ApiPath<(String, String)>,
+) -> Result<Json<ApiResponse<RuntimeRecordView>>, ApiError> {
+    let runtime = state.runtime()?;
+    runtime
+        .get_record(parse_symbol_id(&model_id)?, &record_id)
         .await
         .map(ok_json)
         .map_err(ApiError::from)
@@ -596,19 +627,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn record_filter_requires_field_and_value() {
+    fn record_criteria_is_structured_and_bounded() {
         let complete = PaginationQuery {
             o: 0,
             s: 20,
-            field: Some("department_id".to_owned()),
-            value: Some("department-1".to_owned()),
+            criteria: Some(
+                serde_json::json!({
+                    "all": [{
+                        "field": "department_id",
+                        "operator": "equals",
+                        "value": "department-1"
+                    }]
+                })
+                .to_string(),
+            ),
         };
+        assert!(complete.criteria().is_ok());
         let incomplete = PaginationQuery {
-            value: None,
-            ..complete.clone()
+            criteria: Some("{\"all\":[{}]}".to_owned()),
+            ..complete
         };
 
-        assert!(complete.filter().is_ok());
-        assert!(incomplete.filter().is_err());
+        assert!(incomplete.criteria().is_err());
     }
 }

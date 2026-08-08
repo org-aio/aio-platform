@@ -1,9 +1,10 @@
 use std::{collections::BTreeSet, fmt};
 
 use crate::{
-    DraftSnapshot, GraphPatchBatch, ImageTarget, ProgramDefinition, ProgramImage,
-    RevisionRunSnapshot, RevisionSnapshot, StudioPage, StudioPageParams, ValueType,
-    VibeMessageInput, VibeSessionSnapshot,
+    DraftSnapshot, GraphPatchBatch, ImageTarget, NativeContractCatalog,
+    NativeContractReconcileReport, ProgramDefinition, ProgramImage, RevisionRunSnapshot,
+    RevisionSnapshot, StudioPage, StudioPageParams, ValueType, VibeMessageInput,
+    VibeSessionSnapshot,
 };
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -76,18 +77,6 @@ impl ProgramStore {
         .fetch_optional(&self.pool)
         .await
         .context("查询活动 Program 失败")?;
-        row.as_ref().map(program_from_row).transpose()
-    }
-
-    pub async fn unactivated_program(&self) -> Result<Option<ProgramState>> {
-        let row = sqlx::query(
-            "SELECT id, name, title, active_revision_id, created_at_ms, updated_at_ms
-             FROM engine_programs
-             WHERE singleton AND active_revision_id IS NULL",
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .context("查询待首次发布的 Program 失败")?;
         row.as_ref().map(program_from_row).transpose()
     }
 
@@ -170,6 +159,56 @@ impl ProgramStore {
             .await
             .context("提交 Draft Patch 事务失败")?;
         Ok(draft)
+    }
+
+    pub async fn reconcile_native_contracts(
+        &self,
+        catalog: &NativeContractCatalog,
+    ) -> Result<NativeContractReconcileReport> {
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .context("开始原生接口元数据同步事务失败")?;
+        let row = sqlx::query(
+            "SELECT draft.program_id, draft.version, draft.definition, draft.updated_at_ms
+             FROM engine_program_drafts draft
+             INNER JOIN engine_programs program ON program.id = draft.program_id
+             WHERE program.singleton
+             FOR UPDATE",
+        )
+        .fetch_optional(&mut *transaction)
+        .await
+        .context("锁定原生接口 Program Draft 失败")?
+        .context("Program Draft 不存在")?;
+        let mut draft = draft_from_row(&row)?;
+        let report = catalog.reconcile(&mut draft.definition)?;
+        if !report.changed {
+            transaction
+                .rollback()
+                .await
+                .context("结束无变更原生接口同步事务失败")?;
+            return Ok(report);
+        }
+        draft.version += 1;
+        draft.updated_at_ms = timestamp_ms();
+        sqlx::query(
+            "UPDATE engine_program_drafts
+             SET version = $1, definition = $2, updated_at_ms = $3
+             WHERE program_id = $4",
+        )
+        .bind(draft.version)
+        .bind(Json(&draft.definition))
+        .bind(draft.updated_at_ms)
+        .bind(&draft.program_id)
+        .execute(&mut *transaction)
+        .await
+        .context("保存原生接口 Program Draft 失败")?;
+        transaction
+            .commit()
+            .await
+            .context("提交原生接口元数据同步事务失败")?;
+        Ok(report)
     }
 
     pub async fn create_revision_from_draft(
@@ -774,6 +813,45 @@ async fn reconcile_expression_indexes(
             .execute(&mut **transaction)
             .await
             .context("登记字段唯一索引失败")?;
+            desired.insert(index_name);
+        }
+        for (slot, options) in &model.field_options {
+            if !options.filterable && !model.field_relations.contains_key(slot) {
+                continue;
+            }
+            let Some(field) = model.field_names.get(slot) else {
+                continue;
+            };
+            let index_name = managed_index_name(
+                program_id,
+                &model.id.to_string(),
+                &model.name,
+                &["filter".to_owned(), field.clone()],
+            );
+            let statement = format!(
+                "CREATE INDEX IF NOT EXISTS {index_name} ON engine_data_records \
+                 ((payload ->> '{}')) WHERE model_name = '{}'",
+                quote_literal(field),
+                quote_literal(&model.name),
+            );
+            sqlx::query(&statement)
+                .execute(&mut **transaction)
+                .await
+                .with_context(|| format!("创建字段筛选索引失败: {index_name}"))?;
+            sqlx::query(
+                "INSERT INTO engine_program_expression_indexes
+                 (program_id, index_name, model_symbol_id, field_slots, created_at_ms)
+                 VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (program_id, index_name) DO NOTHING",
+            )
+            .bind(program_id)
+            .bind(&index_name)
+            .bind(model.id.to_string())
+            .bind(Json(vec![slot.to_string()]))
+            .bind(timestamp_ms())
+            .execute(&mut **transaction)
+            .await
+            .context("登记字段筛选索引失败")?;
             desired.insert(index_name);
         }
         for index in &model.expression_indexes {

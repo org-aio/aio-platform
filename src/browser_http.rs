@@ -36,6 +36,14 @@ where
     send_json(Request::patch, "PATCH", api_base_url, path, input).await
 }
 
+pub async fn put_api<I, O>(api_base_url: &str, path: &str, input: &I) -> Result<O, String>
+where
+    I: Serialize + ?Sized,
+    O: DeserializeOwned,
+{
+    send_json(Request::put, "PUT", api_base_url, path, input).await
+}
+
 pub async fn delete_api<O>(api_base_url: &str, path: &str) -> Result<O, String>
 where
     O: DeserializeOwned,
@@ -99,4 +107,43 @@ pub fn api_url(base: &str, path: &str) -> String {
     } else {
         format!("{base}{path}")
     }
+}
+
+pub async fn write_clipboard(text: &str) -> Result<(), String> {
+    let window = web_sys::window().ok_or_else(|| "无法访问浏览器剪贴板".to_string())?;
+    wasm_bindgen_futures::JsFuture::from(window.navigator().clipboard().write_text(text))
+        .await
+        .map(|_| ())
+        .map_err(|_| "复制失败，请检查浏览器剪贴板权限".to_string())
+}
+
+pub fn format_unix_timestamp(value: &str) -> String {
+    let value = value.trim();
+    if value.is_empty() {
+        return String::new();
+    }
+    let value = value.strip_prefix("unix:").unwrap_or(value);
+    let Ok(seconds) = value.parse::<f64>() else {
+        return value.to_string();
+    };
+    format_browser_date(seconds * 1_000.0)
+}
+
+pub fn format_millis_timestamp(value: i64) -> String {
+    if value <= 0 {
+        return String::new();
+    }
+    format_browser_date(value as f64)
+}
+
+fn format_browser_date(milliseconds: f64) -> String {
+    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(milliseconds));
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}",
+        date.get_full_year(),
+        date.get_month().saturating_add(1),
+        date.get_date(),
+        date.get_hours(),
+        date.get_minutes(),
+    )
 }

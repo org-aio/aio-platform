@@ -120,10 +120,48 @@ pub struct FormStateExtractionResponse {
     pub model: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeRecordFilterOperator {
+    Equals,
+    Contains,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeRecordFilter {
     pub field: String,
+    pub operator: RuntimeRecordFilterOperator,
     pub value: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeRecordSortDirection {
+    Ascending,
+    Descending,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeRecordSort {
+    pub field: String,
+    pub direction: RuntimeRecordSortDirection,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeRecordCriteria {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub all: Vec<RuntimeRecordFilter>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub any: Vec<RuntimeRecordFilter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort: Option<RuntimeRecordSort>,
+}
+
+impl RuntimeRecordCriteria {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.all.is_empty() && self.any.is_empty() && self.sort.is_none()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

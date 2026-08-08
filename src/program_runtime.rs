@@ -1,9 +1,10 @@
 use std::{sync::Arc, time::Duration};
 
 use crate::{
-    CompileFailure, GraphVm, GraphVmHost, ImageTarget, ProgramCompiler, ProgramDefinition,
-    ProgramImage, RevisionRunSnapshot, RuntimeRecordInput, RuntimeRecordPage, RuntimeRecordView,
-    SegmentInvocationRequest, SegmentInvocationResult, StudioPageParams, SymbolId, VmEffect,
+    CompileFailure, CompiledArtifactWriter, GraphVm, GraphVmHost, ImageTarget, ProgramCompiler,
+    ProgramDefinition, ProgramImage, RevisionRunSnapshot, RuntimeRecordInput, RuntimeRecordPage,
+    RuntimeRecordView, SegmentInvocationRequest, SegmentInvocationResult, StudioPageParams,
+    SymbolId, VmEffect,
 };
 use anyhow::{Context, Result, bail};
 use arc_swap::ArcSwapOption;
@@ -14,9 +15,12 @@ use sqlx::postgres::PgListener;
 use tokio::sync::{Mutex, broadcast};
 
 use crate::{capability::CapabilityCatalog, program_store::ProgramStore};
-use az_plugin_core::{PageParams, RecordStore};
+use az_plugin_core::{
+    PageParams, RecordCriteria, RecordFilter, RecordFilterOperator, RecordSort,
+    RecordSortDirection, RecordStore,
+};
 
-pub const PROGRAM_COMPILER_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), ":program-v7");
+pub const PROGRAM_COMPILER_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), ":program-v9");
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ProgramActivationEvent {
@@ -94,6 +98,7 @@ pub struct ProgramRuntime {
     data_store: RecordStore,
     capability_catalog: Arc<CapabilityCatalog>,
     capabilities: Arc<crate::CapabilityCatalog>,
+    compiled_artifacts: CompiledArtifactWriter,
     slot: ImageSlot,
     pending_generation: Arc<Mutex<u64>>,
     events: broadcast::Sender<ProgramActivationEvent>,
@@ -105,6 +110,7 @@ impl ProgramRuntime {
         store: ProgramStore,
         data_store: RecordStore,
         capability_catalog: CapabilityCatalog,
+        compiled_artifacts: CompiledArtifactWriter,
     ) -> Self {
         let (events, _) = broadcast::channel(128);
         let capabilities = capability_catalog.program_catalog();
@@ -113,6 +119,7 @@ impl ProgramRuntime {
             data_store,
             capability_catalog: Arc::new(capability_catalog),
             capabilities: Arc::new(capabilities),
+            compiled_artifacts,
             slot: Arc::new(ArcSwapOption::empty()),
             pending_generation: Arc::new(Mutex::new(0)),
             events,
@@ -187,7 +194,7 @@ impl ProgramRuntime {
         &self,
         model_id: SymbolId,
         page: StudioPageParams,
-        filter: Option<&crate::RuntimeRecordFilter>,
+        criteria: &crate::RuntimeRecordCriteria,
     ) -> Result<RuntimeRecordPage> {
         let model_name = self.model_name(model_id).await?;
         let page_params = PageParams {
@@ -195,19 +202,32 @@ impl ProgramRuntime {
             s: page.s,
         };
         let executor = self.data_store.executor();
-        let records = match filter {
-            Some(filter) => {
-                executor
-                    .list_records_by_field(&model_name, &filter.field, &filter.value, page_params)
-                    .await?
-            }
-            None => executor.list_records(&model_name, page_params).await?,
+        let records = if criteria.is_empty() {
+            executor.list_records(&model_name, page_params).await?
+        } else {
+            let criteria = engine_record_criteria(criteria);
+            executor
+                .list_records_with_criteria(&model_name, &criteria, page_params)
+                .await?
         };
         Ok(RuntimeRecordPage {
             d: records.d.into_iter().map(runtime_record_view).collect(),
             t: records.t,
             p: page,
         })
+    }
+
+    pub async fn get_record(
+        &self,
+        model_id: SymbolId,
+        record_id: &str,
+    ) -> Result<RuntimeRecordView> {
+        let model_name = self.model_name(model_id).await?;
+        self.data_store
+            .executor()
+            .get_record(&model_name, record_id)
+            .await
+            .map(runtime_record_view)
     }
 
     pub async fn create_record(
@@ -268,14 +288,23 @@ impl ProgramRuntime {
         Ok(())
     }
 
-    pub async fn publish_unactivated_program(&self) -> Result<()> {
-        let Some(program) = self.store.unactivated_program().await? else {
-            return Ok(());
-        };
-        self.publish_latest("migration")
+    pub async fn publish_draft_if_changed(&self, origin: &str) -> Result<bool> {
+        let draft = self.store.draft().await?;
+        let draft_hash =
+            crate::content_hash(&draft.definition).context("计算 Draft 内容哈希失败")?;
+        let program = self.store.program().await?;
+        if let Some(revision_id) = program.active_revision_id {
+            let revision = self.store.revision(&revision_id).await?;
+            let active_hash = crate::content_hash(&revision.definition)
+                .context("计算活动 Revision 内容哈希失败")?;
+            if active_hash == draft_hash {
+                return Ok(false);
+            }
+        }
+        self.publish_latest(origin)
             .await
-            .with_context(|| format!("首次发布 Program 失败: {}", program.id))?;
-        Ok(())
+            .with_context(|| format!("发布最新 Program Draft 失败: {}", program.id))?;
+        Ok(true)
     }
 
     /// 连续变更只保留 300ms 窗口内的最后一版。
@@ -373,6 +402,10 @@ impl ProgramRuntime {
             return Err(error.context("动态模型或表达式索引预热失败，活动版本保持不变"));
         }
 
+        self.compiled_artifacts
+            .write(&image)
+            .context("写入 Studio 编译产物失败")?;
+
         self.store.save_image(&image).await?;
         self.store
             .activate_revision(&program_id, &revision.id)
@@ -430,6 +463,9 @@ impl ProgramRuntime {
             .reconcile_program_models(&program.id, &revision.definition, &image)
             .await
             .context("恢复活动 Revision 的动态模型元数据失败")?;
+        self.compiled_artifacts
+            .write(&image)
+            .context("恢复活动 Revision 编译产物失败")?;
         self.store.save_image(&image).await?;
         let content_hash = image.content_hash.clone();
         let warmed = Arc::new(RuntimeProgramImage::build(image)?);
@@ -474,6 +510,9 @@ impl ProgramRuntime {
             .reconcile_program_models(&program_id, &revision.definition, &image)
             .await
             .context("回滚 Revision 的动态模型元数据失败")?;
+        self.compiled_artifacts
+            .write(&image)
+            .context("回滚 Revision 编译产物失败")?;
         self.store.save_image(&image).await?;
         let content_hash = image.content_hash.clone();
         let warmed = Arc::new(RuntimeProgramImage::build(image)?);
@@ -490,6 +529,32 @@ impl ProgramRuntime {
 
     /// 每个实例持有独立 LISTEN 连接，收到通知后从不可变 revision/cache 恢复。
     pub async fn spawn_postgres_listener(&self, database_url: &str) -> Result<()> {
+        let runtime = self.clone();
+        let database_url = database_url.to_owned();
+        tokio::spawn(async move {
+            let mut attempt = 1_u32;
+            loop {
+                let error = match runtime.listen_postgres_activations(&database_url).await {
+                    Ok(()) => {
+                        tracing::warn!("ProgramGraph LISTEN 任务意外结束，准备重连");
+                        anyhow::anyhow!("ProgramGraph LISTEN 任务意外结束")
+                    }
+                    Err(error) => error,
+                };
+                let delay = postgres_listener_retry_delay(attempt);
+                tracing::warn!(
+                    error = %format!("{error:#}"),
+                    retry_seconds = delay.as_secs(),
+                    "ProgramGraph LISTEN 连接中断，等待重连",
+                );
+                tokio::time::sleep(delay).await;
+                attempt = attempt.saturating_add(1);
+            }
+        });
+        Ok(())
+    }
+
+    async fn listen_postgres_activations(&self, database_url: &str) -> Result<()> {
         let mut listener = PgListener::connect(database_url)
             .await
             .context("连接 ProgramGraph LISTEN 通道失败")?;
@@ -497,41 +562,34 @@ impl ProgramRuntime {
             .listen("engine_program_activated")
             .await
             .context("订阅 ProgramGraph 激活通知失败")?;
-        let runtime = self.clone();
-        tokio::spawn(async move {
-            loop {
-                let notification = match listener.recv().await {
+        loop {
+            let notification = listener
+                .recv()
+                .await
+                .context("接收 ProgramGraph 激活通知失败")?;
+            let payload =
+                match serde_json::from_str::<ActivationNotification>(notification.payload()) {
                     Ok(value) => value,
                     Err(error) => {
-                        tracing::error!(error = %error, "接收 ProgramGraph 激活通知失败");
-                        break;
+                        tracing::error!(error = %error, "解析 ProgramGraph 激活通知失败");
+                        continue;
                     }
                 };
-                let payload =
-                    match serde_json::from_str::<ActivationNotification>(notification.payload()) {
-                        Ok(value) => value,
-                        Err(error) => {
-                            tracing::error!(error = %error, "解析 ProgramGraph 激活通知失败");
-                            continue;
-                        }
-                    };
-                let already_loaded = runtime
-                    .image()
-                    .await
-                    .is_some_and(|image| image.image().revision_id == payload.revision_id);
-                if already_loaded {
-                    continue;
-                }
-                if let Err(error) = runtime.load_revision(&payload.revision_id, true).await {
-                    tracing::error!(
-                        revision_id = payload.revision_id,
-                        error = %format!("{error:#}"),
-                        "加载其他实例发布的 ProgramGraph 失败",
-                    );
-                }
+            let already_loaded = self
+                .image()
+                .await
+                .is_some_and(|image| image.image().revision_id == payload.revision_id);
+            if already_loaded {
+                continue;
             }
-        });
-        Ok(())
+            if let Err(error) = self.load_revision(&payload.revision_id, true).await {
+                tracing::error!(
+                    revision_id = payload.revision_id,
+                    error = %format!("{error:#}"),
+                    "加载其他实例发布的 ProgramGraph 失败",
+                );
+            }
+        }
     }
 
     async fn swap_image(&self, image: Arc<RuntimeProgramImage>) {
@@ -558,9 +616,38 @@ impl ProgramRuntime {
     }
 }
 
+fn engine_record_criteria(value: &crate::RuntimeRecordCriteria) -> RecordCriteria {
+    RecordCriteria {
+        all: value.all.iter().map(engine_record_filter).collect(),
+        any: value.any.iter().map(engine_record_filter).collect(),
+        sort: value.sort.as_ref().map(|sort| RecordSort {
+            field: sort.field.clone(),
+            direction: match sort.direction {
+                crate::RuntimeRecordSortDirection::Ascending => RecordSortDirection::Ascending,
+                crate::RuntimeRecordSortDirection::Descending => RecordSortDirection::Descending,
+            },
+        }),
+    }
+}
+
+fn engine_record_filter(value: &crate::RuntimeRecordFilter) -> RecordFilter {
+    RecordFilter {
+        field: value.field.clone(),
+        operator: match value.operator {
+            crate::RuntimeRecordFilterOperator::Equals => RecordFilterOperator::Equals,
+            crate::RuntimeRecordFilterOperator::Contains => RecordFilterOperator::Contains,
+        },
+        value: value.value.clone(),
+    }
+}
+
 #[derive(Deserialize)]
 struct ActivationNotification {
     revision_id: String,
+}
+
+fn postgres_listener_retry_delay(attempt: u32) -> Duration {
+    Duration::from_secs(1_u64 << attempt.saturating_sub(1).min(5))
 }
 
 struct ServerVmHost<'a> {
@@ -735,5 +822,13 @@ mod tests {
         let active = slot.load_full().context("发布后应存在新 Image")?;
         assert_eq!(active.image().revision_id, "revision-new");
         Ok(())
+    }
+
+    #[test]
+    fn postgres_listener_retry_delay_is_bounded() {
+        assert_eq!(postgres_listener_retry_delay(1), Duration::from_secs(1));
+        assert_eq!(postgres_listener_retry_delay(2), Duration::from_secs(2));
+        assert_eq!(postgres_listener_retry_delay(6), Duration::from_secs(32));
+        assert_eq!(postgres_listener_retry_delay(20), Duration::from_secs(32));
     }
 }

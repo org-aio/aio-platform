@@ -86,6 +86,7 @@ pub fn App() -> Element {
 
 #[component]
 fn Workbench(route: AppRoute) -> Element {
+    crate::components::load_deferred_stylesheets();
     let mut bootstrap = use_signal(load_from_document);
     let route_path = route.path;
     let mut selected_scene = use_signal(|| None::<SymbolId>);
@@ -169,7 +170,7 @@ fn Workbench(route: AppRoute) -> Element {
         rsx! {
             StudioPage {
                 api_base_url: snapshot.api_base_url.clone(),
-                selected_scene,
+                published_scene: selected_scene(),
             }
         }
     } else {
@@ -179,7 +180,7 @@ fn Workbench(route: AppRoute) -> Element {
     rsx! {
         document::Stylesheet { href: "/assets/tailwind.css?v=4.1.5" }
         document::Stylesheet { href: "/assets/dx-components-theme.css?v=bf007c15" }
-        document::Stylesheet { href: "/assets/app.css?v=program-runtime-13" }
+        document::Stylesheet { href: "/assets/app.css?v=dictionary-workbench-19" }
         div {
             class: "aio-shell-frame bg-background text-foreground",
             "data-sidebar-collapsed": sidebar_collapsed().to_string(),
@@ -324,6 +325,7 @@ fn render_runtime_content(
                 .render(
                     &module_name,
                     ConventionPageContext {
+                        api_base_url,
                         route: route.to_owned(),
                         page,
                     },
@@ -336,7 +338,8 @@ fn render_runtime_content(
                 })
         }
         CompiledPageRenderer::TreeTable { provider_key, .. }
-        | CompiledPageRenderer::CrudTable { provider_key, .. } => {
+        | CompiledPageRenderer::CrudTable { provider_key, .. }
+        | CompiledPageRenderer::MenuTree { provider_key } => {
             let indexes = match runtime_pages {
                 Ok(indexes) => indexes,
                 Err(error) => return error_state("内置页面 Provider 初始化失败", error),
@@ -402,8 +405,8 @@ fn native_menu(
                                 "aio-sidebar-admin-action"
                             },
                             to: AppRoute::from_path("/studio"),
-                            title: "管理场景与菜单",
-                            aria_label: "管理场景与菜单",
+                            title: "打开 Studio",
+                            aria_label: "打开 Studio",
                             ListTree { class: "size-4" }
                         }
                     }
@@ -459,7 +462,7 @@ fn scene_link(
 ) -> Element {
     let scene_id = scene.id;
     let title = scene.title.clone();
-    let route = first_menu_route(scene, program);
+    let route = program.first_menu_route(scene);
     let class = if active {
         "aio-root-menu-item aio-root-menu-item--active"
     } else {
@@ -515,22 +518,6 @@ fn menu_contains_page(menu: &crate::MenuDefinition, page_id: SymbolId) -> bool {
             .children
             .iter()
             .any(|child| menu_contains_page(child, page_id))
-}
-
-fn first_menu_route(menu: &crate::MenuDefinition, program: &PublishedProgram) -> Option<String> {
-    menu.page_id
-        .and_then(|page_id| {
-            program
-                .routes
-                .iter()
-                .find(|route| route.page_id == page_id)
-                .map(|route| route.path.clone())
-        })
-        .or_else(|| {
-            menu.children
-                .iter()
-                .find_map(|child| first_menu_route(child, program))
-        })
 }
 
 fn program_menu(

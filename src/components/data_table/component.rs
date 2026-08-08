@@ -11,6 +11,10 @@ use crate::data_table_layout::{
 #[css_module("/src/components/data_table/style.css")]
 struct Styles;
 
+pub(crate) fn load_stylesheet() {
+    drop(Styles::data_table_root.to_string());
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum DataTableEditTrigger {
     Click,

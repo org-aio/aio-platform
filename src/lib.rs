@@ -1,7 +1,13 @@
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 
+#[cfg(not(target_arch = "wasm32"))]
+mod compiled_artifact;
 mod compiler;
+#[cfg(not(target_arch = "wasm32"))]
+mod convention_contract;
+#[cfg(not(target_arch = "wasm32"))]
+mod convention_endpoint;
 #[cfg(not(target_arch = "wasm32"))]
 mod convention_file;
 #[cfg(any(target_arch = "wasm32", test))]
@@ -11,10 +17,20 @@ mod definition;
 #[cfg(not(target_arch = "wasm32"))]
 mod form_state;
 mod image;
+#[cfg(not(target_arch = "wasm32"))]
+mod native_contract;
+#[cfg(any(target_arch = "wasm32", test))]
+mod page_endpoint_draft;
+#[cfg(any(target_arch = "wasm32", test))]
+mod page_renderer_draft;
 #[cfg(target_arch = "wasm32")]
 mod page_runtime;
 mod patch;
+#[cfg(any(target_arch = "wasm32", test))]
+mod runtime_record_form;
 mod studio_contract;
+#[cfg(any(target_arch = "wasm32", test))]
+mod studio_navigation;
 mod vm;
 
 pub mod bootstrap;
@@ -23,9 +39,9 @@ pub use bootstrap::*;
 #[cfg(target_arch = "wasm32")]
 mod browser_bootstrap;
 #[cfg(target_arch = "wasm32")]
-mod browser_http;
+pub mod browser_http;
 #[cfg(target_arch = "wasm32")]
-mod components;
+pub mod components;
 #[cfg(target_arch = "wasm32")]
 mod ui;
 #[cfg(target_arch = "wasm32")]
@@ -42,16 +58,24 @@ pub mod program_store;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod studio_http;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use compiled_artifact::*;
 pub use compiler::{
     CompileFailure, CompilerStage, Diagnostic, DiagnosticSeverity, ProgramCompiler, compile_page,
     content_hash, convention_page_module_name, convention_page_path,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use convention_contract::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub use convention_endpoint::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use convention_file::ConventionFileGenerator;
 pub use definition::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use form_state::FormStateExtractor;
 pub use image::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub use native_contract::*;
 #[cfg(target_arch = "wasm32")]
 pub use page_runtime::*;
 pub use patch::*;

@@ -5,6 +5,10 @@ use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 #[css_module("/src/components/dialog/style.css")]
 struct Styles;
 
+pub(crate) fn load_stylesheet() {
+    drop(Styles::dx_dialog.to_string());
+}
+
 #[component]
 pub fn Dialog(props: DialogRootProps) -> Element {
     let base = attributes!(div {

@@ -3,6 +3,10 @@ use dioxus::prelude::*;
 #[css_module("/src/components/textarea/style.css")]
 struct Styles;
 
+pub(crate) fn load_stylesheet() {
+    drop(Styles::dx_textarea.to_string());
+}
+
 #[derive(Copy, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub enum TextareaVariant {

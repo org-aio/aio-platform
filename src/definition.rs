@@ -6,7 +6,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 /// 当前数据库程序协议版本。
-pub const PROGRAM_SCHEMA_VERSION: u32 = 10;
+pub const PROGRAM_SCHEMA_VERSION: u32 = 11;
 
 /// 创建时分配且永不因改名、改路由而变化的符号身份。
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -23,6 +23,12 @@ impl SymbolId {
         Uuid::parse_str(value)
             .map(Self)
             .with_context(|| format!("无效的 SymbolId: {value}"))
+    }
+
+    #[must_use]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn from_stable_key(value: &str) -> Self {
+        Self(Uuid::from_bytes(md5::compute(value).0))
     }
 }
 
@@ -495,25 +501,35 @@ pub struct PageDefinition {
     #[serde(default)]
     pub state: DefinitionState,
     pub renderer: PageRendererDefinition,
-    /// 页面声明的自定义 REST 接口；内置布局接口由编译器推导。
+    /// 页面声明的原生或约定 REST 接口；内置布局接口由编译器推导。
     #[serde(default)]
     pub endpoints: Vec<PageEndpointDefinition>,
 }
 
-/// 页面作为前端消费者所需的自定义 REST 接口。
+/// Studio 可见的页面 REST 接口元数据。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PageEndpointDefinition {
     pub id: SymbolId,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub title: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
     #[serde(default)]
     pub state: DefinitionState,
+    pub implementation: EndpointImplementationDefinition,
     pub method: RestMethod,
     pub path: String,
     #[serde(default)]
     pub inputs: Vec<EndpointInputDefinition>,
     #[serde(default)]
     pub outputs: Vec<EndpointOutputDefinition>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum EndpointImplementationDefinition {
+    Native { plugin_id: String },
+    Convention,
 }
 
 impl PageEndpointDefinition {
@@ -591,6 +607,7 @@ pub struct EndpointOutputDefinition {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PageRendererDefinition {
     ConventionFile,
+    MenuTree,
     TreeTable {
         tree: TreeDefinition,
         table: TableDefinition,
@@ -791,6 +808,15 @@ pub enum FunctionNodeKind {
     },
 }
 
+#[must_use]
+pub fn function_nodes_can_connect(from: &FunctionNodeKind, to: &FunctionNodeKind) -> bool {
+    !matches!(from, FunctionNodeKind::Fail { .. })
+        && !matches!(
+            to,
+            FunctionNodeKind::Constant { .. } | FunctionNodeKind::Input { .. }
+        )
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompareOperator {
@@ -950,6 +976,35 @@ pub(crate) fn permission_identifier_is_valid(value: &str) -> bool {
     has_action
 }
 
+pub(crate) fn data_identifier_is_valid(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    (first.is_ascii_lowercase() || first == b'_')
+        && bytes.all(|value| value.is_ascii_lowercase() || value.is_ascii_digit() || value == b'_')
+}
+
+pub(crate) fn endpoint_identifier_is_valid(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    (first.is_ascii_lowercase() || first == b'_')
+        && bytes.all(|value| value.is_ascii_alphanumeric() || value == b'_')
+}
+
+pub(crate) fn page_identifier_is_valid(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    first.is_ascii_lowercase()
+        && bytes.all(|value| {
+            value.is_ascii_lowercase() || value.is_ascii_digit() || matches!(value, b'_' | b'-')
+        })
+}
+
 fn permission_identifier_segment_is_valid(value: &str) -> bool {
     let mut bytes = value.bytes();
     let Some(first) = bytes.next() else {
@@ -1000,12 +1055,12 @@ mod tests {
     use super::PageEndpointDefinition;
 
     #[test]
-    fn endpoint_identity_is_derived_from_rest_path() -> anyhow::Result<()> {
+    fn endpoint_display_title_is_derived_from_rest_path() -> anyhow::Result<()> {
         let endpoint: PageEndpointDefinition = serde_json::from_value(serde_json::json!({
             "id": "5cbf910c-05af-4537-94d3-673c3b4c444b",
-            "name": "legacy_endpoint",
             "title": "",
-            "intent": "旧的生成需求",
+            "description": "批量停用资产",
+            "implementation": {"kind": "convention"},
             "method": "POST",
             "path": "/api/assets/batch-disable",
             "inputs": [],
@@ -1014,16 +1069,7 @@ mod tests {
         let value = serde_json::to_value(&endpoint)?;
 
         assert_eq!(endpoint.display_title(), "batch disable");
-        assert!(
-            !value
-                .as_object()
-                .is_some_and(|object| object.contains_key("name"))
-        );
-        assert!(
-            !value
-                .as_object()
-                .is_some_and(|object| object.contains_key("intent"))
-        );
+        assert_eq!(value["implementation"]["kind"], "convention");
         Ok(())
     }
 }

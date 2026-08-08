@@ -65,6 +65,9 @@ pub enum CompiledPageRenderer {
         module_name: String,
         expected_path: String,
     },
+    MenuTree {
+        provider_key: String,
+    },
     TreeTable {
         provider_key: String,
         tree: CompiledTree,
@@ -80,6 +83,7 @@ pub enum CompiledPageRenderer {
 pub struct CompiledPageEndpoint {
     pub id: String,
     pub title: String,
+    pub description: String,
     pub method: RestMethod,
     pub path: String,
     pub inputs: Vec<CompiledEndpointInput>,
@@ -108,7 +112,8 @@ pub struct CompiledEndpointOutput {
 #[serde(rename_all = "snake_case")]
 pub enum PageEndpointSource {
     BuiltIn,
-    Custom,
+    Native,
+    Convention,
 }
 
 /// 编译产物通过 Rudi Provider key 绑定页面接口组件。
@@ -122,6 +127,9 @@ pub struct CrudTablePageProvider;
 
 #[derive(Clone, Debug, Default)]
 pub struct TreeTablePageProvider;
+
+#[derive(Clone, Debug, Default)]
+pub struct ProgramMenuTreePageProvider;
 
 #[derive(Clone, Debug, Default)]
 pub struct RestFormPageProvider;
@@ -174,6 +182,7 @@ pub struct CompiledModel {
     pub field_names: BTreeMap<u32, String>,
     pub field_titles: BTreeMap<u32, String>,
     pub field_options: BTreeMap<u32, crate::FieldOptions>,
+    pub field_relations: BTreeMap<u32, crate::FieldRelation>,
     pub required_fields: Vec<u32>,
     pub expression_indexes: Vec<CompiledExpressionIndex>,
     pub audit: crate::ModelAuditDefinition,
