@@ -4,8 +4,9 @@ use serde_json::Value;
 use crate::{
     EndpointImplementationDefinition, FieldDefinition, FunctionDefinition, FunctionNode, GraphEdge,
     MenuDefinition, ModelAuditDefinition, ModelDefinition, ModelIndexDefinition,
-    ModelQueryDefinition, ModelValidationDefinition, PageDefinition, PageEndpointDefinition,
-    PermissionDefinition, PortDefinition, ProgramDefinition, RouteDefinition, SymbolId,
+    ModelPrimaryKeyDefinition, ModelQueryDefinition, ModelValidationDefinition, PageDefinition,
+    PageEndpointDefinition, PermissionDefinition, PortDefinition, ProgramDefinition,
+    RouteDefinition, SymbolId,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -150,6 +151,7 @@ pub enum EditableProperty {
     ModelIndexUnique,
     ModelQuery,
     ModelValidation,
+    ModelPrimaryKey,
     ModelAudit,
     FunctionPort,
     FunctionNode,
@@ -598,6 +600,16 @@ impl ProgramDefinition {
             }
             return Ok(());
         }
+        if name == "id"
+            && self
+                .models
+                .iter()
+                .any(|model| model.fields.iter().any(|field| field.id == target_id))
+        {
+            return Err(PatchError::InvalidValue(
+                "id 是系统主键字段，不能作为普通字段标识".to_owned(),
+            ));
+        }
         if let Some((current_name, current_title)) = self.find_name_title_mut(target_id) {
             *current_name = name.to_owned();
             if let (Some(current_title), Some(title)) = (current_title, title) {
@@ -840,6 +852,17 @@ impl ProgramDefinition {
                 *validation = replacement;
                 Ok(())
             }
+            EditableProperty::ModelPrimaryKey => {
+                let model = self
+                    .models
+                    .iter_mut()
+                    .find(|model| model.id == target_id)
+                    .ok_or(PatchError::TargetNotFound(target_id))?;
+                model.primary_key =
+                    serde_json::from_value::<ModelPrimaryKeyDefinition>(value.clone())
+                        .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
+                Ok(())
+            }
             EditableProperty::ModelAudit => {
                 let model = self
                     .models
@@ -1074,6 +1097,16 @@ impl ProgramDefinition {
 }
 
 fn ensure_studio_insertable(entity: &GraphEntity) -> Result<(), PatchError> {
+    let contains_reserved_id = match entity {
+        GraphEntity::Model(model) => model.fields.iter().any(|field| field.name == "id"),
+        GraphEntity::Field(field) => field.name == "id",
+        _ => false,
+    };
+    if contains_reserved_id {
+        return Err(PatchError::InvalidValue(
+            "id 是系统主键字段，不能作为普通字段插入".to_owned(),
+        ));
+    }
     let contains_native_contract = match entity {
         GraphEntity::Page(page) => page.endpoints.iter().any(endpoint_is_native),
         GraphEntity::PageEndpoint(endpoint) => endpoint_is_native(endpoint),
@@ -1665,6 +1698,7 @@ mod tests {
             name: "asset".to_owned(),
             title: "资产".to_owned(),
             state: crate::DefinitionState::Known,
+            primary_key: crate::ModelPrimaryKeyDefinition::default(),
             fields: vec![
                 FieldDefinition {
                     id: first_field_id,
@@ -1731,6 +1765,13 @@ mod tests {
                 },
                 GraphPatch::SetProperty {
                     target_id: model_id,
+                    property: EditableProperty::ModelPrimaryKey,
+                    value: serde_json::json!(crate::ModelPrimaryKeyDefinition {
+                        generation: crate::PrimaryKeyGeneration::AutoIncrement,
+                    }),
+                },
+                GraphPatch::SetProperty {
+                    target_id: model_id,
                     property: EditableProperty::ModelAudit,
                     value: serde_json::json!(crate::ModelAuditDefinition {
                         fields: vec![crate::ModelAuditField {
@@ -1758,10 +1799,51 @@ mod tests {
         );
         assert_eq!(program.models[0].indexes[0].unique, true);
         assert_eq!(
+            program.models[0].primary_key.generation,
+            crate::PrimaryKeyGeneration::AutoIncrement
+        );
+        assert_eq!(
             program.models[0].audit.fields[0].kind,
             crate::AuditFieldKind::Version
         );
         Ok(())
+    }
+
+    #[test]
+    fn system_id_cannot_be_inserted_as_a_regular_field() {
+        let mut program = ProgramDefinition::empty("inventory", "资产");
+        let model_id = SymbolId::new();
+        program.models.push(ModelDefinition {
+            id: model_id,
+            name: "asset".to_owned(),
+            title: "资产".to_owned(),
+            state: crate::DefinitionState::Known,
+            primary_key: crate::ModelPrimaryKeyDefinition::default(),
+            fields: Vec::new(),
+            indexes: Vec::new(),
+            queries: Vec::new(),
+            validations: Vec::new(),
+            audit: crate::ModelAuditDefinition::default(),
+        });
+
+        let error = program
+            .apply_patch(&GraphPatch::Insert {
+                parent_id: model_id,
+                collection: ChildCollection::Fields,
+                index: 0,
+                entity: GraphEntity::Field(FieldDefinition {
+                    id: SymbolId::new(),
+                    name: "id".to_owned(),
+                    title: "ID".to_owned(),
+                    value_type: crate::ValueType::Text,
+                    state: crate::DefinitionState::Known,
+                    required: true,
+                    options: crate::FieldOptions::default(),
+                    relation: None,
+                }),
+            })
+            .expect_err("系统 id 不能作为普通字段插入");
+        assert!(error.to_string().contains("系统主键字段"));
     }
 
     #[test]
@@ -1777,6 +1859,7 @@ mod tests {
             name: "asset".to_owned(),
             title: "资产".to_owned(),
             state: crate::DefinitionState::Known,
+            primary_key: crate::ModelPrimaryKeyDefinition::default(),
             fields: vec![
                 FieldDefinition {
                     id: source_field_id,

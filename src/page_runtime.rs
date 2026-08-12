@@ -21,21 +21,22 @@ use crate::{
     RuntimeRecordInput, RuntimeRecordPage, RuntimeRecordSort, RuntimeRecordSortDirection,
     RuntimeRecordView, SymbolId, TreeTablePageProvider, ValueType,
     browser_http::{api_url, delete_api, get_api, patch_api, post_api},
-    components::{
-        button::{Button, ButtonSize, ButtonVariant},
-        checkbox::{Checkbox, checkbox_is_checked, checkbox_state},
-        data_table::{
-            DataTable, DataTableAlign, DataTableCellContext, DataTableColumn, DataTableFixed,
-            DataTableHeaderContext,
-        },
-        dialog::{Dialog, DialogDescription, DialogTitle},
-        input::Input,
-        textarea::Textarea,
-    },
     runtime_record_form::{
         record_payload_from_state, relation_form_state_value, relation_record_label,
         relation_search_fields, selected_relation_ids,
     },
+    runtime_tree::RuntimeTree,
+};
+use az_ui_components::{
+    button::{Button, ButtonSize, ButtonVariant},
+    checkbox::{Checkbox, checkbox_is_checked, checkbox_state},
+    data_table::{
+        DataTable, DataTableAlign, DataTableCellContext, DataTableColumn, DataTableFixed,
+        DataTableHeaderContext,
+    },
+    dialog::{Dialog, DialogDescription, DialogTitle},
+    input::Input,
+    textarea::Textarea,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -408,7 +409,7 @@ pub fn BuiltInPage(
     let (table, tree) = match &page.renderer {
         CompiledPageRenderer::TreeTable { tree, table, .. } => (table.clone(), Some(tree.clone())),
         CompiledPageRenderer::CrudTable { table, .. } => (table.clone(), None),
-        CompiledPageRenderer::ConventionFile { .. } => {
+        CompiledPageRenderer::ConventionFile { .. } | CompiledPageRenderer::Extension { .. } => {
             return render_runtime_error("内置页面收到了约定文件渲染计划");
         }
         CompiledPageRenderer::MenuTree { .. } => {
@@ -594,15 +595,13 @@ fn MetadataTablePage(
                 if let Some(tree) = tree.as_ref() {
                     aside { class: "aio-runtime-tree",
                         strong { "分类" }
-                        Button {
-                            class: if selected_tree().is_none() { "is-active" } else { "" },
-                            onclick: move |_| selected_tree.set(None),
-                            "全部"
-                        }
                         match tree_page.as_ref() {
                             Some(Ok(Some(tree_page))) => rsx! {
-                                for record in &tree_page.d {
-                                    {tree_record_button(record, tree, &image, tree_page, selected_tree)}
+                                RuntimeTree {
+                                    tree: tree.clone(),
+                                    image: image.clone(),
+                                    page: tree_page.clone(),
+                                    selected_record: selected_tree,
                                 }
                             },
                             Some(Err(error)) => rsx! {
@@ -1000,58 +999,6 @@ fn value_type_name(value_type: &ValueType) -> &'static str {
         ValueType::List { .. } => "列表",
         ValueType::Optional { .. } => "可选",
     }
-}
-
-fn tree_record_button(
-    record: &RuntimeRecordView,
-    tree: &CompiledTree,
-    image: &ProgramImage,
-    page: &RuntimeRecordPage,
-    mut selected_tree: Signal<Option<String>>,
-) -> Element {
-    let Some(model) = image.models.get(&tree.model_id) else {
-        return rsx! {};
-    };
-    let label = record_field(record, model, tree.label_field_id)
-        .map(value_to_text)
-        .unwrap_or_else(|| "未命名".to_owned());
-    let depth = tree_depth(record, tree, model, &page.d);
-    let indent = 0.75 + depth as f32;
-    let record_id = record.id.clone();
-    let active = selected_tree().as_deref() == Some(record.id.as_str());
-    rsx! {
-        Button {
-            class: if active { "is-active" } else { "" },
-            style: "padding-left: {indent}rem",
-            onclick: move |_| selected_tree.set(Some(record_id.clone())),
-            "{label}"
-        }
-    }
-}
-
-fn tree_depth(
-    record: &RuntimeRecordView,
-    tree: &CompiledTree,
-    model: &CompiledModel,
-    records: &[RuntimeRecordView],
-) -> usize {
-    let Some(parent_field_id) = tree.parent_field_id else {
-        return 0;
-    };
-    let mut current = record;
-    let mut depth = 0;
-    while depth < 8 {
-        let Some(parent_id) = record_field(current, model, parent_field_id).map(value_to_text)
-        else {
-            break;
-        };
-        let Some(parent) = records.iter().find(|candidate| candidate.id == parent_id) else {
-            break;
-        };
-        current = parent;
-        depth += 1;
-    }
-    depth
 }
 
 #[component]
@@ -1743,6 +1690,12 @@ fn runtime_table_columns(
             .width(72)
             .align(DataTableAlign::Center)
             .fixed(DataTableFixed::Left),
+        DataTableColumn::leaf("id", "ID")
+            .width(match model.primary_key.generation {
+                crate::PrimaryKeyGeneration::Uuid => 280,
+                crate::PrimaryKeyGeneration::AutoIncrement => 120,
+            })
+            .fixed(DataTableFixed::Left),
     ];
     if !fields.is_empty() {
         columns.push(DataTableColumn::group(
@@ -1816,6 +1769,9 @@ fn runtime_table_cell(
 ) -> Element {
     if cell.column.key == "index" {
         return rsx! { "{offset + cell.row_index + 1}" };
+    }
+    if cell.column.key == "id" {
+        return rsx! { code { "{cell.row.id}" } };
     }
     if cell.column.key == "actions" {
         let detail_record = cell.row.clone();
@@ -2038,7 +1994,7 @@ fn compiled_field(model: &CompiledModel, field_id: SymbolId) -> Option<(&str, &s
     ))
 }
 
-fn record_field<'a>(
+pub(crate) fn record_field<'a>(
     record: &'a RuntimeRecordView,
     model: &CompiledModel,
     field_id: SymbolId,
@@ -2047,7 +2003,7 @@ fn record_field<'a>(
     record.payload.get(name)
 }
 
-fn value_to_text(value: &Value) -> String {
+pub(crate) fn value_to_text(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
         Value::String(value) => value.clone(),

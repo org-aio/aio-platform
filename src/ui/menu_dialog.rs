@@ -88,7 +88,9 @@ pub(super) fn MenuEditorDialog(
     let delete_access = menu_action_value(&initial_menu.row_actions.delete);
     let initial_name = initial_menu.name.clone();
     let initial_title = initial_menu.title.clone();
-    let initial_icon = initial_menu.icon.clone().unwrap_or_default();
+    let initial_icon =
+        resolved_navigation_icon(initial_menu.icon.as_deref(), &initial_menu.name).to_owned();
+    let mut selected_icon = use_signal(move || initial_icon);
     let initial_enabled = initial_menu.enabled;
     let submit_current_page_id = current_page_id.clone();
     let submit_permissions = permissions.clone();
@@ -120,14 +122,18 @@ pub(super) fn MenuEditorDialog(
             }
             form { class: "aio-definition-dialog__form", onsubmit: move |event| {
                 event.prevent_default();
-                let name = form_text(&event, "name").trim().to_owned();
                 let title = form_text(&event, "title").trim().to_owned();
-                if !page_identifier_is_valid(&name) {
-                    status.set(Some("菜单标识必须以小写字母开头，只能包含小写字母、数字、下划线或连字符".to_owned()));
-                    return;
-                }
                 if title.is_empty() {
                     status.set(Some("菜单名称不能为空".to_owned()));
+                    return;
+                }
+                let name = if editing {
+                    initial_name.clone()
+                } else {
+                    identifier_from_title(&title)
+                };
+                if name.is_empty() {
+                    status.set(Some("菜单名称无法生成有效标识，请包含中文、字母或数字".to_owned()));
                     return;
                 }
                 if menu_name_exists(&root_menus, &name, editing.then_some(menu_id)) {
@@ -272,16 +278,6 @@ pub(super) fn MenuEditorDialog(
             },
                 div { class: "aio-definition-dialog__grid aio-definition-dialog__grid--three",
                     label {
-                        span { "菜单标识" }
-                        Input {
-                            class: "aio-input",
-                            name: "name",
-                            aria_label: "菜单标识",
-                            placeholder: "例如 order-list",
-                            value: initial_name,
-                        }
-                    }
-                    label {
                         span { "菜单名称" }
                         Input {
                             class: "aio-input",
@@ -291,14 +287,14 @@ pub(super) fn MenuEditorDialog(
                             value: initial_title,
                         }
                     }
-                    label {
+                    div {
+                        class: "aio-definition-dialog__wide-field",
                         span { "图标" }
-                        Input {
-                            class: "aio-input",
+                        NavigationIconPicker {
                             name: "icon",
                             aria_label: "菜单图标",
-                            placeholder: "例如 package",
-                            value: initial_icon,
+                            value: selected_icon,
+                            on_value_change: move |value| selected_icon.set(value),
                         }
                     }
                     label { class: "aio-definition-dialog__checkbox-field",

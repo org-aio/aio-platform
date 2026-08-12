@@ -32,6 +32,7 @@ pub fn StudioPage(api_base_url: String, published_scene: Option<SymbolId>) -> El
     });
 
     let draft_snapshot = draft.read().as_ref().cloned();
+    let models_panel_key = "studio-models";
 
     rsx! {
         section { class: "aio-studio-shell min-h-[calc(100vh-8rem)] border bg-background",
@@ -95,7 +96,7 @@ pub fn StudioPage(api_base_url: String, published_scene: Option<SymbolId>) -> El
                     Some(Ok(draft)) => match studio_tab() {
                         StudioTab::Models => rsx! {
                             ModelsPanel {
-                                key: "studio-models:{draft.version}",
+                                key: "{models_panel_key}",
                                 draft,
                                 api_base_url: api_base_url.clone(),
                                 generation: draft_generation,
@@ -348,7 +349,6 @@ pub(crate) fn AdminMenuCreator(
     };
     let page_count = draft.definition.pages.len();
     let child_count = menu_child_count(&draft.definition.menus, scene_id).unwrap_or_default();
-    let program_name = draft.definition.name.clone();
     let submit_api = api_base_url;
     let submit_program = draft.program_id.clone();
     rsx! {
@@ -370,11 +370,15 @@ pub(crate) fn AdminMenuCreator(
             }
             form { class: "aio-page-settings__form", onsubmit: move |event| {
                 event.prevent_default();
-                let name = form_text(&event, "name").trim().to_owned();
                 let title = form_text(&event, "title").trim().to_owned();
                 let path = form_text(&event, "path").trim().to_owned();
-                if name.is_empty() || title.is_empty() || !path.starts_with('/') {
-                    status.set(Some("页面标识、标题不能为空，路由必须以 / 开头".to_owned()));
+                if title.is_empty() || !path.starts_with('/') {
+                    status.set(Some("页面标题不能为空，路由必须以 / 开头".to_owned()));
+                    return;
+                }
+                let name = identifier_from_title(&title);
+                if name.is_empty() {
+                    status.set(Some("页面标题无法生成有效标识，请包含中文、字母或数字".to_owned()));
                     return;
                 }
                 let page_id = SymbolId::new();
@@ -435,13 +439,6 @@ pub(crate) fn AdminMenuCreator(
                 );
                 creator_open.set(false);
             },
-                label { r#for: "admin-page-name", "页面标识" }
-                Input {
-                    id: "admin-page-name",
-                    name: "name",
-                    class: "aio-input",
-                    placeholder: "例如 order-list"
-                }
                 label { r#for: "admin-page-title", "页面标题" }
                 Input {
                     id: "admin-page-title",
@@ -456,7 +453,6 @@ pub(crate) fn AdminMenuCreator(
                     class: "aio-input",
                     placeholder: "/orders"
                 }
-                p { class: "text-xs text-muted-foreground", "约定页面模块：{program_name} / 页面标识" }
                 if let Some(message) = status() {
                     p { class: "text-xs text-destructive", "{message}" }
                 }
@@ -518,10 +514,14 @@ pub(crate) fn AdminSceneCreator(
             }
             form { class: "aio-page-settings__form", onsubmit: move |event| {
                 event.prevent_default();
-                let name = form_text(&event, "name").trim().to_owned();
                 let title = form_text(&event, "title").trim().to_owned();
-                if name.is_empty() || title.is_empty() {
-                    status.set(Some("场景标识和标题不能为空".to_owned()));
+                if title.is_empty() {
+                    status.set(Some("场景标题不能为空".to_owned()));
+                    return;
+                }
+                let name = identifier_from_title(&title);
+                if name.is_empty() {
+                    status.set(Some("场景标题无法生成有效标识，请包含中文、字母或数字".to_owned()));
                     return;
                 }
                 let scene_id = SymbolId::new();
@@ -553,13 +553,6 @@ pub(crate) fn AdminSceneCreator(
                 pending_scene.set(Some(scene_id));
                 creator_open.set(false);
             },
-                label { r#for: "admin-scene-name", "场景标识" }
-                Input {
-                    id: "admin-scene-name",
-                    name: "name",
-                    class: "aio-input",
-                    placeholder: "例如 operations"
-                }
                 label { r#for: "admin-scene-title", "场景标题" }
                 Input {
                     id: "admin-scene-title",

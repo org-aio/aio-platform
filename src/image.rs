@@ -65,6 +65,11 @@ pub enum CompiledPageRenderer {
         module_name: String,
         expected_path: String,
     },
+    Extension {
+        extension_type: String,
+        schema_version: u32,
+        config: Value,
+    },
     MenuTree {
         provider_key: String,
     },
@@ -177,6 +182,7 @@ pub struct CompiledModel {
     pub id: SymbolId,
     pub name: String,
     pub title: String,
+    pub primary_key: crate::ModelPrimaryKeyDefinition,
     pub field_slots: BTreeMap<SymbolId, u32>,
     pub field_types: BTreeMap<u32, ValueType>,
     pub field_names: BTreeMap<u32, String>,

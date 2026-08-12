@@ -213,7 +213,9 @@ pub(crate) fn model_usage_summary(
         .pages
         .iter()
         .filter(|page| match &page.renderer {
-            PageRendererDefinition::ConventionFile | PageRendererDefinition::MenuTree => false,
+            PageRendererDefinition::ConventionFile
+            | PageRendererDefinition::Extension { .. }
+            | PageRendererDefinition::MenuTree => false,
             PageRendererDefinition::CrudTable { table } => table.model_id == Some(model_id),
             PageRendererDefinition::TreeTable { tree, table } => {
                 table.model_id == Some(model_id)
@@ -831,6 +833,7 @@ mod tests {
             name: name.to_owned(),
             title: name.to_owned(),
             state: DefinitionState::Known,
+            primary_key: crate::ModelPrimaryKeyDefinition::default(),
             fields,
             indexes: Vec::new(),
             queries: Vec::new(),

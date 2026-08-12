@@ -1,9 +1,12 @@
+use serde_json::Value;
+
 use crate::{ModelDefinition, PageRendererDefinition, SymbolId, TableDefinition, TreeDefinition};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) enum PageRendererKind {
     #[default]
     ConventionFile,
+    Extension,
     MenuTree,
     TreeTable,
     CrudTable,
@@ -13,6 +16,7 @@ impl PageRendererKind {
     pub(crate) const fn title(self) -> &'static str {
         match self {
             Self::ConventionFile => "约定文件",
+            Self::Extension => "扩展页面",
             Self::MenuTree => "程序菜单树",
             Self::TreeTable => "左树右表",
             Self::CrudTable => "增删改查表格",
@@ -21,6 +25,7 @@ impl PageRendererKind {
 
     pub(crate) fn from_key(value: &str) -> Self {
         match value {
+            "extension" => Self::Extension,
             "menu_tree" => Self::MenuTree,
             "tree_table" => Self::TreeTable,
             "crud_table" => Self::CrudTable,
@@ -32,6 +37,7 @@ impl PageRendererKind {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PageRendererDraft {
     pub(crate) kind: PageRendererKind,
+    pub(crate) extension: Option<(String, u32, Value)>,
     pub(crate) table_model_id: String,
     pub(crate) page_size: String,
     pub(crate) tree_model_id: String,
@@ -45,6 +51,11 @@ impl PageRendererDraft {
         let (kind, table, tree) = match renderer {
             PageRendererDefinition::ConventionFile => (
                 PageRendererKind::ConventionFile,
+                TableDefinition::default(),
+                TreeDefinition::default(),
+            ),
+            PageRendererDefinition::Extension { .. } => (
+                PageRendererKind::Extension,
                 TableDefinition::default(),
                 TreeDefinition::default(),
             ),
@@ -62,8 +73,17 @@ impl PageRendererDraft {
                 TreeDefinition::default(),
             ),
         };
+        let extension = match renderer {
+            PageRendererDefinition::Extension {
+                extension_type,
+                schema_version,
+                config,
+            } => Some((extension_type.clone(), *schema_version, config.clone())),
+            _ => None,
+        };
         Self {
             kind,
+            extension,
             table_model_id: optional_symbol_text(table.model_id),
             page_size: table.page_size.to_string(),
             tree_model_id: optional_symbol_text(tree.model_id),
@@ -79,6 +99,19 @@ impl PageRendererDraft {
     ) -> Result<PageRendererDefinition, Vec<String>> {
         if self.kind == PageRendererKind::ConventionFile {
             return Ok(PageRendererDefinition::ConventionFile);
+        }
+        if self.kind == PageRendererKind::Extension {
+            return self
+                .extension
+                .as_ref()
+                .map(
+                    |(extension_type, schema_version, config)| PageRendererDefinition::Extension {
+                        extension_type: extension_type.clone(),
+                        schema_version: *schema_version,
+                        config: config.clone(),
+                    },
+                )
+                .ok_or_else(|| vec!["扩展页面配置缺失".to_owned()]);
         }
         if self.kind == PageRendererKind::MenuTree {
             return Ok(PageRendererDefinition::MenuTree);
@@ -200,6 +233,7 @@ mod tests {
             name: name.to_owned(),
             title: title.to_owned(),
             state: DefinitionState::Known,
+            primary_key: crate::ModelPrimaryKeyDefinition::default(),
             fields: field_names
                 .iter()
                 .map(|name| FieldDefinition {
@@ -244,12 +278,26 @@ mod tests {
     }
 
     #[test]
+    fn extension_draft_preserves_opaque_consumer_config() {
+        let renderer = PageRendererDefinition::Extension {
+            extension_type: "aio::pages::AuditPage".to_owned(),
+            schema_version: 3,
+            config: serde_json::json!({"resource_id": "audit"}),
+        };
+        let draft = PageRendererDraft::from_definition(&renderer);
+
+        assert_eq!(draft.kind, PageRendererKind::Extension);
+        assert_eq!(draft.to_definition(&[]), Ok(renderer));
+    }
+
+    #[test]
     fn tree_table_requires_models_fields_and_valid_page_size() {
         let tree = model("department", "部门", &["name", "parent_id"]);
         let table = model("user", "用户", &["name", "department_id"]);
         let models = vec![tree.clone(), table.clone()];
         let mut draft = PageRendererDraft {
             kind: PageRendererKind::TreeTable,
+            extension: None,
             table_model_id: table.id.to_string(),
             page_size: "0".to_owned(),
             tree_model_id: tree.id.to_string(),

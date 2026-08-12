@@ -14,7 +14,6 @@ pub(super) enum ModelDesignerTab {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ModelEditorTarget {
     Model,
-    Audit,
     CreateField,
     EditField(SymbolId),
     Relation(SymbolId),
@@ -121,25 +120,26 @@ pub(super) fn ModelsPanel(
                             }
                         }
                     }
-                    div { class: "aio-model-workspace__directory-list",
-                        if visible_models.is_empty() {
-                            div { class: "aio-model-workspace__directory-empty", "没有匹配的模型" }
-                        }
-                        for model in visible_models {
-                            Button {
-                                r#type: "button",
-                                class: if Some(model.id) == current_model_id {
-                                    "aio-model-workspace__model aio-model-workspace__model--active"
-                                } else {
-                                    "aio-model-workspace__model"
-                                },
-                                onclick: {
-                                    let model_id = model.id;
-                                    move |_| selected_model.set(Some(model_id))
-                                },
-                                strong { "{model.title}" }
-                                code { "{model.name}" }
-                                span { "{model.fields.len()} 字段 · {model.indexes.len()} 索引" }
+                    CollectionTree::<ModelDefinition> {
+                        class: "aio-model-workspace__directory-list",
+                        aria_label: "模型目录",
+                        data: CollectionTreeData::Collection(
+                            visible_models.iter().map(|model| (*model).clone()).collect()
+                        ),
+                        selected_key: current_model_id.map(|model_id| model_id.to_string()),
+                        empty_text: "没有匹配的模型",
+                        item_key: |model: ModelDefinition| model.id.to_string(),
+                        on_select: move |model: ModelDefinition| {
+                            selected_model.set(Some(model.id));
+                        },
+                        render_item: |item: CollectionTreeItemContext<ModelDefinition>| {
+                            let model = item.item;
+                            rsx! {
+                                div { class: "aio-model-workspace__model-content",
+                                    strong { "{model.title}" }
+                                    code { "{model.name}" }
+                                    span { "{model.fields.len() + 1} 字段 · {model.indexes.len()} 索引" }
+                                }
                             }
                         }
                     }
@@ -197,6 +197,15 @@ pub(super) fn ModelsPanel(
                     }
                 }
             }
+            if let Some(model) = current_model {
+                ModelAgentChat {
+                    key: "model-agent:{model.id}",
+                    model,
+                    api_base_url: api_base_url.clone(),
+                    generation,
+                    status,
+                }
+            }
             if creating_model() {
                 ModelEditorDialog {
                     model: None,
@@ -246,7 +255,7 @@ pub(super) fn ModelEditorDialog(
 ) -> Element {
     let editing = model.is_some();
     let model_id = model.as_ref().map_or_else(SymbolId::new, |model| model.id);
-    let initial_name = model
+    let stable_name = model
         .as_ref()
         .map(|model| model.name.clone())
         .unwrap_or_default();
@@ -254,7 +263,6 @@ pub(super) fn ModelEditorDialog(
         .as_ref()
         .map(|model| model.title.clone())
         .unwrap_or_default();
-    let mut name = use_signal(move || initial_name);
     let mut title = use_signal(move || initial_title);
     rsx! {
         Dialog {
@@ -269,7 +277,7 @@ pub(super) fn ModelEditorDialog(
                 div {
                     DialogTitle { if editing { "编辑模型" } else { "新建模型" } }
                     DialogDescription {
-                        if editing { "修改稳定模型标识与显示标题" } else { "声明一个新的持久化领域模型" }
+                        if editing { "模型标识创建后保持稳定，仅修改显示标题" } else { "声明一个新的持久化领域模型" }
                     }
                 }
                 Button {
@@ -286,10 +294,18 @@ pub(super) fn ModelEditorDialog(
                 class: "aio-definition-dialog__form",
                 onsubmit: move |event| {
                     event.prevent_default();
-                    let next_name = name().trim().to_owned();
                     let next_title = title().trim().to_owned();
-                    if next_name.is_empty() || next_title.is_empty() {
-                        status.set(Some("模型标识和标题不能为空".to_owned()));
+                    if next_title.is_empty() {
+                        status.set(Some("模型标题不能为空".to_owned()));
+                        return;
+                    }
+                    let next_name = if editing {
+                        stable_name.clone()
+                    } else {
+                        identifier_from_title(&next_title)
+                    };
+                    if next_name.is_empty() {
+                        status.set(Some("模型标题无法生成有效标识，请包含中文、字母或数字".to_owned()));
                         return;
                     }
                     let patches = if editing {
@@ -304,6 +320,7 @@ pub(super) fn ModelEditorDialog(
                             name: next_name,
                             title: next_title,
                             state: DefinitionState::Known,
+                            primary_key: crate::ModelPrimaryKeyDefinition::default(),
                             fields: Vec::new(),
                             indexes: Vec::new(),
                             queries: Vec::new(),
@@ -327,16 +344,6 @@ pub(super) fn ModelEditorDialog(
                     );
                     on_saved.call(model_id);
                 },
-                label {
-                    span { "模型标识" }
-                    Input {
-                        class: "aio-input",
-                        aria_label: "模型标识",
-                        placeholder: "例如 work_order",
-                        value: name(),
-                        oninput: move |event: FormEvent| name.set(event.value()),
-                    }
-                }
                 label {
                     span { "显示标题" }
                     Input {

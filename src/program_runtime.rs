@@ -20,7 +20,7 @@ use az_plugin_core::{
     RecordSortDirection, RecordStore,
 };
 
-pub const PROGRAM_COMPILER_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), ":program-v9");
+pub const PROGRAM_COMPILER_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), ":program-v10");
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ProgramActivationEvent {

@@ -281,7 +281,7 @@ pub(super) fn PermissionEditorDialog(
     let editing = matches!(mode, PermissionEditorMode::Edit);
     let permission_id = permission.id;
     let selected_effects = permission.allowed_effects.clone();
-    let mut name = use_signal(move || permission.name);
+    let stable_name = permission.name;
     let mut title = use_signal(move || permission.title);
     let close_editor = use_callback(move |_: ()| match mode {
         PermissionEditorMode::Create { .. } => creating_permission.set(None),
@@ -314,16 +314,21 @@ pub(super) fn PermissionEditorDialog(
             }
             form { class: "aio-definition-dialog__form", onsubmit: move |event| {
                 event.prevent_default();
-                let next_name = name().trim().to_owned();
                 let next_title = title().trim().to_owned();
-                if !permission_identifier_is_valid(&next_name) {
-                    status.set(Some("权限标识必须采用小写的 领域:动作 格式，例如 asset:read".to_owned()));
-                    return;
-                }
                 if next_title.is_empty() {
                     status.set(Some("权限名称不能为空".to_owned()));
                     return;
                 }
+                let next_name = if editing {
+                    stable_name.clone()
+                } else {
+                    let action = identifier_from_title(&next_title);
+                    if action.is_empty() {
+                        status.set(Some("权限名称无法生成有效标识，请包含中文、字母或数字".to_owned()));
+                        return;
+                    }
+                    format!("permission:{action}")
+                };
                 if siblings
                     .iter()
                     .any(|item| item.id != permission_id && item.name == next_name)
@@ -371,16 +376,6 @@ pub(super) fn PermissionEditorDialog(
                 close_editor.call(());
             },
                 div { class: "aio-definition-dialog__grid",
-                    label {
-                        span { "权限标识" }
-                        Input {
-                            class: "aio-input",
-                            aria_label: "权限标识",
-                            placeholder: "例如 asset:read",
-                            value: name(),
-                            oninput: move |event: FormEvent| name.set(event.value()),
-                        }
-                    }
                     label {
                         span { "权限名称" }
                         Input {

@@ -7,7 +7,7 @@ use crate::{
     FormStateExtractionRequest, FormStateExtractionResponse, FormStateExtractor, GraphPatchBatch,
     PatchOrigin, ProgramPatchAgent, RevisionSnapshot, RuntimeRecordCriteria, RuntimeRecordInput,
     RuntimeRecordPage, RuntimeRecordView, StudioPage, StudioPageParams, VibeMessageInput,
-    VibeRunAccepted, VibeRunRequest,
+    VibeRunAccepted, VibeRunRequest, VibeSessionSnapshot,
     program_runtime::{ProgramActivationEvent, ProgramRuntime},
     program_store::DraftVersionConflict,
 };
@@ -23,6 +23,7 @@ use futures_util::stream::Stream;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::broadcast;
+use uuid::Uuid;
 
 const CATALOG_PATH: &str = "/api/studio/catalog";
 const DRAFT_PATH: &str = "/api/studio/program/draft";
@@ -32,6 +33,7 @@ const EVENTS_PATH: &str = "/api/studio/program/events";
 const RUNTIME_IMAGE_PATH: &str = "/api/runtime/program/image";
 const SERVER_SEGMENT_PATH: &str = "/api/runtime/program/segments/{function_id}";
 const VIBE_RUNS_PATH: &str = "/api/studio/program/vibe-runs";
+const VIBE_RUN_PATH: &str = "/api/studio/program/vibe-runs/{session_id}";
 const CONVENTION_FILE_PATH: &str = "/api/studio/program/pages/{page_id}/convention-file";
 const RUNTIME_RECORDS_PATH: &str = "/api/runtime/models/{model_id}/records";
 const RUNTIME_RECORD_PATH: &str = "/api/runtime/models/{model_id}/records/{record_id}";
@@ -80,6 +82,7 @@ pub fn router(state: StudioState) -> Router {
         .route(RUNTIME_IMAGE_PATH, get(runtime_image))
         .route(SERVER_SEGMENT_PATH, post(invoke_server_segment))
         .route(VIBE_RUNS_PATH, post(start_vibe_run))
+        .route(VIBE_RUN_PATH, get(get_vibe_run))
         .route(CONVENTION_FILE_PATH, post(generate_convention_file))
         .route(FORM_STATE_EXTRACTION_PATH, post(extract_form_state))
         .route(
@@ -473,6 +476,21 @@ async fn start_vibe_run(
             }),
         }),
     ))
+}
+
+async fn get_vibe_run(
+    State(state): State<StudioState>,
+    ApiPath(session_id): ApiPath<String>,
+) -> Result<Json<ApiResponse<VibeSessionSnapshot>>, ApiError> {
+    Uuid::parse_str(&session_id).map_err(|_| ApiError::bad_request("Vibe Session ID 无效"))?;
+    let runtime = state.runtime()?;
+    let session = runtime
+        .store()
+        .vibe_session(&session_id)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::not_found("Vibe Session 不存在"))?;
+    Ok(ok_json(session))
 }
 
 async fn run_vibe_agent(

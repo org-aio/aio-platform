@@ -69,7 +69,7 @@ pub(super) fn ModelGrid(
                     code { "{model.name}" }
                 }
                 div { class: "aio-model-grid__metrics",
-                    span { strong { "{model.fields.len()}" } "字段" }
+                    span { strong { "{model.fields.len() + 1}" } "字段" }
                     span { strong { "{relation_count}" } "关系" }
                     span { strong { "{model.queries.len()}" } "查询" }
                     span {
@@ -166,6 +166,11 @@ pub(super) fn ModelGrid(
                         ModelFieldsTable {
                             model: model.clone(),
                             all_models: all_models.clone(),
+                            api_base_url: api_base_url.clone(),
+                            program_id: program_id.clone(),
+                            version,
+                            generation,
+                            status,
                             editor,
                             deleting: deleting_definition,
                         }
@@ -215,22 +220,12 @@ pub(super) fn ModelGrid(
                     on_saved: move |_| editor.set(None),
                 }
             }
-            if current_editor == Some(ModelEditorTarget::Audit) {
-                ModelAuditDialog {
-                    model: model.clone(),
-                    api_base_url: api_base_url.clone(),
-                    program_id: program_id.clone(),
-                    version,
-                    generation,
-                    status,
-                    editor,
-                }
-            }
             if current_editor == Some(ModelEditorTarget::CreateField) || editing_field.is_some() {
                 FieldEditorDialog {
                     model_id,
                     field_count: model.fields.len(),
                     field: editing_field,
+                    all_models: all_models.clone(),
                     api_base_url: api_base_url.clone(),
                     program_id: program_id.clone(),
                     version,
@@ -323,7 +318,11 @@ pub(super) fn model_designer_tabs(
         .count();
     [
         (ModelDesignerTab::Overview, "概览", None),
-        (ModelDesignerTab::Fields, "字段", Some(model.fields.len())),
+        (
+            ModelDesignerTab::Fields,
+            "字段",
+            Some(model.fields.len() + 1),
+        ),
         (ModelDesignerTab::Relations, "关系", Some(relation_count)),
         (ModelDesignerTab::Indexes, "索引", Some(model.indexes.len())),
         (ModelDesignerTab::Queries, "查询", Some(model.queries.len())),
@@ -365,7 +364,7 @@ pub(super) fn ModelOverview(
                 dl { class: "aio-model-overview__definition",
                     div { dt { "显示标题" } dd { "{model.title}" } }
                     div { dt { "模型标识" } dd { code { "{model.name}" } } }
-                    div { dt { "字段" } dd { "{model.fields.len()}" } }
+                    div { dt { "字段" } dd { "{model.fields.len() + 1}" } }
                     div { dt { "关系" } dd { "{relation_count}" } }
                     div { dt { "索引" } dd { "{model.indexes.len()}" } }
                     div { dt { "命名查询" } dd { "{model.queries.len()}" } }
@@ -375,15 +374,7 @@ pub(super) fn ModelOverview(
                 header {
                     div {
                         h4 { "审计能力" }
-                        p { "按语义角色自动维护正式字段" }
-                    }
-                    Button {
-                        r#type: "button",
-                        size: ButtonSize::Sm,
-                        variant: ButtonVariant::Outline,
-                        onclick: move |_| editor.set(Some(ModelEditorTarget::Audit)),
-                        icons::Pencil { class: "size-4" }
-                        "配置"
+                        p { "审计字段统一在字段页签中启用" }
                     }
                 }
                 div { class: "aio-model-overview__audit",

@@ -63,7 +63,7 @@ fn convention_page_source() -> String {
 
 use dioxus::prelude::*;
 use rudi::Singleton;
-use studio::{
+use az_dioxus_admin_shell::{
     ConventionPageContext, ConventionPageProvider, DynConventionPageProvider,
 };
 

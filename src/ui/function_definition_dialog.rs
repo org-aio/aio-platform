@@ -19,7 +19,7 @@ pub(super) fn FunctionDefinitionDialog(
     let function_id = function
         .as_ref()
         .map_or_else(SymbolId::new, |function| function.id);
-    let initial_name = function
+    let stable_name = function
         .as_ref()
         .map(|function| function.name.clone())
         .unwrap_or_default();
@@ -31,7 +31,6 @@ pub(super) fn FunctionDefinitionDialog(
         .as_ref()
         .map(|function| function.required_permissions.clone())
         .unwrap_or_default();
-    let mut name = use_signal(move || initial_name);
     let mut title = use_signal(move || initial_title);
     let existing_functions = functions;
     let save_permissions = permissions.clone();
@@ -62,14 +61,18 @@ pub(super) fn FunctionDefinitionDialog(
             }
             form { class: "aio-definition-dialog__form", onsubmit: move |event| {
                 event.prevent_default();
-                let next_name = name().trim().to_owned();
                 let next_title = title().trim().to_owned();
-                if !data_identifier_is_valid(&next_name) {
-                    status.set(Some("函数标识必须采用 snake_case".to_owned()));
-                    return;
-                }
                 if next_title.is_empty() {
                     status.set(Some("函数标题不能为空".to_owned()));
+                    return;
+                }
+                let next_name = if editing {
+                    stable_name.clone()
+                } else {
+                    identifier_from_title(&next_title)
+                };
+                if next_name.is_empty() {
+                    status.set(Some("函数标题无法生成有效标识，请包含中文、字母或数字".to_owned()));
                     return;
                 }
                 if existing_functions
@@ -122,16 +125,6 @@ pub(super) fn FunctionDefinitionDialog(
                 on_saved.call(function_id);
             },
                 div { class: "aio-definition-dialog__grid",
-                    label {
-                        span { "函数标识" }
-                        Input {
-                            class: "aio-input",
-                            aria_label: "函数标识",
-                            placeholder: "例如 approve_order",
-                            value: name(),
-                            oninput: move |event: FormEvent| name.set(event.value()),
-                        }
-                    }
                     label {
                         span { "函数标题" }
                         Input {
@@ -203,7 +196,7 @@ pub(super) fn FunctionPortDialog(
         .as_ref()
         .map(|port| port.value_type.clone())
         .unwrap_or(ValueType::Text);
-    let initial_name = port
+    let stable_name = port
         .as_ref()
         .map(|port| port.name.clone())
         .unwrap_or_default();
@@ -211,7 +204,6 @@ pub(super) fn FunctionPortDialog(
     let initial_model_id = value_type_model_id(&current_value_type)
         .map(|model_id| model_id.to_string())
         .unwrap_or_default();
-    let mut name = use_signal(move || initial_name);
     let mut type_key = use_signal(move || initial_type_key);
     let mut model_id = use_signal(move || initial_model_id);
     let direction = if input { "输入" } else { "输出" };
@@ -254,11 +246,11 @@ pub(super) fn FunctionPortDialog(
             }
             form { class: "aio-definition-dialog__form", onsubmit: move |event| {
                 event.prevent_default();
-                let next_name = name().trim().to_owned();
-                if !data_identifier_is_valid(&next_name) {
-                    status.set(Some("端口标识必须采用 snake_case".to_owned()));
-                    return;
-                }
+                let next_name = if editing {
+                    stable_name.clone()
+                } else {
+                    next_port_name(&function, input)
+                };
                 if function
                     .inputs
                     .iter()
@@ -309,16 +301,6 @@ pub(super) fn FunctionPortDialog(
                 on_saved.call(());
             },
                 div { class: "aio-definition-dialog__grid",
-                    label {
-                        span { "端口标识" }
-                        Input {
-                            class: "aio-input",
-                            aria_label: "端口标识",
-                            placeholder: if input { "例如 order_id" } else { "例如 result" },
-                            value: name(),
-                            oninput: move |event: FormEvent| name.set(event.value()),
-                        }
-                    }
                     label {
                         span { "值类型" }
                         select {
@@ -419,6 +401,20 @@ pub(super) fn value_type_model_id(value_type: &ValueType) -> Option<SymbolId> {
         | ValueType::TimestampMs
         | ValueType::File => None,
     }
+}
+
+pub(super) fn next_port_name(function: &FunctionDefinition, input: bool) -> String {
+    let prefix = if input { "input" } else { "output" };
+    let existing = function
+        .inputs
+        .iter()
+        .chain(&function.outputs)
+        .map(|port| port.name.as_str())
+        .collect::<BTreeSet<_>>();
+    (1..)
+        .map(|index| format!("{prefix}_{index}"))
+        .find(|candidate| !existing.contains(candidate.as_str()))
+        .unwrap_or_else(|| format!("{prefix}_{}", existing.len().saturating_add(1)))
 }
 
 pub(super) fn function_port_value_type(

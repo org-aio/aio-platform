@@ -6,7 +6,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 /// 当前数据库程序协议版本。
-pub const PROGRAM_SCHEMA_VERSION: u32 = 11;
+pub const PROGRAM_SCHEMA_VERSION: u32 = 12;
 
 /// 创建时分配且永不因改名、改路由而变化的符号身份。
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -171,6 +171,7 @@ pub struct ModelDefinition {
     pub title: String,
     #[serde(default)]
     pub state: DefinitionState,
+    pub primary_key: ModelPrimaryKeyDefinition,
     #[serde(default)]
     pub fields: Vec<FieldDefinition>,
     #[serde(default)]
@@ -181,6 +182,45 @@ pub struct ModelDefinition {
     pub validations: Vec<ModelValidationDefinition>,
     #[serde(default)]
     pub audit: ModelAuditDefinition,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ModelPrimaryKeyDefinition {
+    pub generation: PrimaryKeyGeneration,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrimaryKeyGeneration {
+    #[default]
+    Uuid,
+    AutoIncrement,
+}
+
+impl PrimaryKeyGeneration {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Uuid => "uuid",
+            Self::AutoIncrement => "auto_increment",
+        }
+    }
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Uuid => "UUID",
+            Self::AutoIncrement => "自增整数",
+        }
+    }
+
+    #[must_use]
+    pub const fn value_type(self) -> ValueType {
+        match self {
+            Self::Uuid => ValueType::Text,
+            Self::AutoIncrement => ValueType::Integer,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -607,6 +647,12 @@ pub struct EndpointOutputDefinition {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PageRendererDefinition {
     ConventionFile,
+    Extension {
+        extension_type: String,
+        schema_version: u32,
+        #[serde(default)]
+        config: Value,
+    },
     MenuTree,
     TreeTable {
         tree: TreeDefinition,

@@ -10,13 +10,14 @@ mod convention_contract;
 mod convention_endpoint;
 #[cfg(not(target_arch = "wasm32"))]
 mod convention_file;
-#[cfg(any(target_arch = "wasm32", test))]
-#[path = "components/data_table/layout.rs"]
-mod data_table_layout;
 mod definition;
 #[cfg(not(target_arch = "wasm32"))]
 mod form_state;
+#[cfg(any(target_arch = "wasm32", test))]
+mod identifier_generation;
 mod image;
+#[cfg(any(target_arch = "wasm32", test))]
+mod model_audit;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_contract;
 #[cfg(any(target_arch = "wasm32", test))]
@@ -26,26 +27,23 @@ mod page_renderer_draft;
 #[cfg(target_arch = "wasm32")]
 mod page_runtime;
 mod patch;
+#[cfg(target_arch = "wasm32")]
+mod runtime_bridge;
 #[cfg(any(target_arch = "wasm32", test))]
 mod runtime_record_form;
+#[cfg(target_arch = "wasm32")]
+mod runtime_tree;
 mod studio_contract;
 #[cfg(any(target_arch = "wasm32", test))]
 mod studio_navigation;
 mod vm;
 
-pub mod bootstrap;
-pub use bootstrap::*;
-
-#[cfg(target_arch = "wasm32")]
-mod browser_bootstrap;
 #[cfg(target_arch = "wasm32")]
 pub mod browser_http;
 #[cfg(target_arch = "wasm32")]
-pub mod components;
-#[cfg(target_arch = "wasm32")]
 mod ui;
 #[cfg(target_arch = "wasm32")]
-mod workbench;
+pub use ui::StudioPage;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod capability;
@@ -79,11 +77,10 @@ pub use native_contract::*;
 #[cfg(target_arch = "wasm32")]
 pub use page_runtime::*;
 pub use patch::*;
+#[cfg(target_arch = "wasm32")]
+pub use runtime_bridge::*;
 pub use studio_contract::*;
 pub use vm::*;
-
-#[cfg(target_arch = "wasm32")]
-pub use workbench::App;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use patch_agent::ProgramPatchAgent;

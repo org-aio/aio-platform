@@ -11,9 +11,10 @@ Cargo 工件：`az-studio`
 
 场景只是 `ProgramDefinition.menus` 的根节点，顶部工具条展示这些根菜单；不存在 `ContextDefinition` 或单独的场景表。Studio 使用一张树表管理菜单名称、图标、顺序、页面、路由、启用状态以及详情、编辑、删除权限，禁用节点不会进入发布后的 `ApplicationImage`。
 
-`PageDefinition` 不保存组件树，只选择三种渲染声明：
+`PageDefinition` 不保存组件树，只保存渲染声明：
 
 - `ConventionFile`：按 `应用标识/页面标识` 匹配 Rudi `ConventionPageProvider`。期望文件固定生成到 `app/src/pages/{application}__{page}.rs`，补完文件并重新构建后生效。
+- `Extension`：保存扩展的 Rust 限定类型、配置协议版本和 JSON 配置，由 `az-dioxus-admin-shell` 的 Rudi 编译器与渲染器消费。
 - `TreeTable`：声明树模型、树标题/父级字段、表模型、关联字段、查询字段和显示列，运行时渲染左树右表。
 - `CrudTable`：声明表模型、查询字段、显示列和分页大小，运行时渲染增删改查表格。
 
@@ -29,7 +30,7 @@ Cargo 工件：`az-studio`
 
 本插件不实现资产、IoT、SSH 等领域能力；这些插件只保留类型化 API 或 Capability，业务页面统一由 Studio 配置。正式程序只在 PostgreSQL 中保存，不持久化 Dioxus `Element`、SQL、HTML、CSS 或 JavaScript。约定文件是显式代码扩展点，不是页面配置真源。
 
-Studio 的基础交互控件采用 [Dioxus Components](https://github.com/DioxusLabs/dioxus-components) `bf007c15` 的固定源码 registry，按需纳入 Button、Badge、Input、Textarea、Checkbox 和 Dialog。上游未提供 Table，因此仓库在 `components/data_table` 维护一个复合数据表格：支持单元格编辑、固定表头、左右固定列、辅助信息面板插槽、合并单元格和树形表头，内部编辑器继续使用官方基础控件。完整对象 Form 只由明确操作打开 Dialog，不常驻表格或页面内容流。`app/assets/dx-components-theme.css` 提供同一提交的设计令牌，`app/assets/tailwind.css` 只提供整站布局工具类。完整网页开发约定见仓库 Skill `.agents/skills/aio-dioxus-web`。
+Studio 的基础交互控件统一消费固定 Git 提交的 `az-ui-components`。该 crate 的源码位于独立 [`dioxus-admin-workbench`](https://github.com/zjarlin/dioxus-admin-workbench) 仓库的 `crates/ui/components`，AIO 不保留本地副本、转发层或 CSS；组件主题、布局与控件样式全部随 crate 依赖自动加载。完整对象 Form 只由明确操作打开 Dialog，不常驻表格或页面内容流。完整网页开发约定见仓库 Skill `.agents/skills/aio-dioxus-web`。
 
 ```bash
 cargo test -p az-studio

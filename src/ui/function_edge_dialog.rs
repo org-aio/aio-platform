@@ -25,8 +25,6 @@ pub(super) fn FunctionEdgeDialog(
         .unwrap_or_default();
     let mut from_node_id = use_signal(move || first_node_id);
     let mut to_node_id = use_signal(move || second_node_id);
-    let mut from_port = use_signal(|| "out".to_owned());
-    let mut to_port = use_signal(|| "in".to_owned());
     rsx! {
         Dialog {
             class: "aio-definition-dialog aio-function-edge-dialog",
@@ -89,17 +87,11 @@ pub(super) fn FunctionEdgeDialog(
                     status.set(Some("所选节点不允许建立这条连线".to_owned()));
                     return;
                 }
-                let next_from_port = from_port().trim().to_owned();
-                let next_to_port = to_port().trim().to_owned();
-                if next_from_port.is_empty() || next_to_port.is_empty() {
-                    status.set(Some("连线端口名称不能为空".to_owned()));
-                    return;
-                }
                 if function.graph.edges.iter().any(|edge| {
                     edge.from_node == from_node
                         && edge.to_node == to_node
-                        && edge.from_port == next_from_port
-                        && edge.to_port == next_to_port
+                        && edge.from_port == "out"
+                        && edge.to_port == "in"
                 }) {
                     status.set(Some("相同节点与端口的连线已存在".to_owned()));
                     return;
@@ -107,9 +99,9 @@ pub(super) fn FunctionEdgeDialog(
                 let edge = GraphEdge {
                     id: SymbolId::new(),
                     from_node,
-                    from_port: next_from_port,
+                    from_port: "out".to_owned(),
                     to_node,
-                    to_port: next_to_port,
+                    to_port: "in".to_owned(),
                 };
                 submit_patches(
                     api_base_url.clone(),
@@ -136,14 +128,6 @@ pub(super) fn FunctionEdgeDialog(
                             }
                         }
                     }
-                    label { "起点端口"
-                        Input {
-                            class: "aio-input",
-                            aria_label: "连线起点端口",
-                            value: from_port(),
-                            oninput: move |event: FormEvent| from_port.set(event.value()),
-                        }
-                    }
                     label { "终点节点"
                         select {
                             class: "aio-input",
@@ -153,14 +137,6 @@ pub(super) fn FunctionEdgeDialog(
                             for node in &function.graph.nodes {
                                 option { value: "{node.id}", "{node.name} · {function_node_kind_title(&node.kind)}" }
                             }
-                        }
-                    }
-                    label { "终点端口"
-                        Input {
-                            class: "aio-input",
-                            aria_label: "连线终点端口",
-                            value: to_port(),
-                            oninput: move |event: FormEvent| to_port.set(event.value()),
                         }
                     }
                 }

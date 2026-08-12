@@ -5,6 +5,7 @@ pub(super) fn FieldEditorDialog(
     model_id: SymbolId,
     field_count: usize,
     field: Option<FieldDefinition>,
+    all_models: Vec<ModelDefinition>,
     api_base_url: String,
     program_id: String,
     version: i64,
@@ -29,9 +30,40 @@ pub(super) fn FieldEditorDialog(
         .as_ref()
         .map(Value::to_string)
         .unwrap_or_default();
+    let stable_name = initial_field.name.clone();
+    let previous_relation = initial_field.relation.clone();
+    let initial_type = if initial_field.relation.is_some() {
+        "relation".to_owned()
+    } else {
+        editable_value_type_key(&initial_field.value_type).to_owned()
+    };
+    let initial_relation_kind = initial_field
+        .relation
+        .as_ref()
+        .map(|relation| relation_kind_key(relation.kind).to_owned())
+        .unwrap_or_else(|| "many_to_one".to_owned());
+    let initial_target_model = initial_field
+        .relation
+        .as_ref()
+        .map(|relation| relation.target_model_id.to_string())
+        .unwrap_or_default();
+    let initial_target_field = initial_field
+        .relation
+        .as_ref()
+        .map(|relation| relation.target_field_id.to_string())
+        .unwrap_or_default();
     let mut draft = use_signal(move || initial_field);
     let mut default_value = use_signal(move || initial_default_value);
-    let has_relation = draft().relation.is_some();
+    let mut field_type = use_signal(move || initial_type);
+    let mut relation_kind = use_signal(move || initial_relation_kind);
+    let mut target_model = use_signal(move || initial_target_model);
+    let mut target_field = use_signal(move || initial_target_field);
+    let relation_selected = field_type() == "relation";
+    let target_fields = SymbolId::parse(&target_model())
+        .ok()
+        .and_then(|target_model_id| all_models.iter().find(|model| model.id == target_model_id))
+        .map(|model| model.fields.clone())
+        .unwrap_or_default();
     rsx! {
         Dialog {
             class: "aio-definition-dialog aio-field-dialog",
@@ -45,8 +77,8 @@ pub(super) fn FieldEditorDialog(
                 div {
                     DialogTitle { if editing { "编辑字段" } else { "新建字段" } }
                     DialogDescription {
-                        if has_relation {
-                            "关联字段的类型由关系基数自动维护"
+                        if relation_selected {
+                            "选择关联模型、基数与对端字段"
                         } else {
                             "定义字段结构、页面行为与校验约束"
                         }
@@ -67,14 +99,80 @@ pub(super) fn FieldEditorDialog(
                 onsubmit: move |event| {
                     event.prevent_default();
                     let mut next = draft();
-                    next.name = next.name.trim().to_owned();
                     next.title = next.title.trim().to_owned();
-                    if next.name.is_empty() || next.title.is_empty() {
-                        status.set(Some("字段标识和标题不能为空".to_owned()));
+                    if next.title.is_empty() {
+                        status.set(Some("字段标题不能为空".to_owned()));
                         return;
                     }
+                    next.name = if editing {
+                        stable_name.clone()
+                    } else {
+                        identifier_from_title(&next.title)
+                    };
+                    if next.name.is_empty() {
+                        status.set(Some("字段标题无法生成有效标识，请包含中文、字母或数字".to_owned()));
+                        return;
+                    }
+                    if next.name == "id" {
+                        status.set(Some("id 是系统主键字段，请直接选择主键生成策略".to_owned()));
+                        return;
+                    }
+                    let relation = if relation_selected {
+                        let Ok(target_model_id) = SymbolId::parse(&target_model()) else {
+                            status.set(Some("请选择关联模型".to_owned()));
+                            return;
+                        };
+                        let Ok(target_field_id) = SymbolId::parse(&target_field()) else {
+                            status.set(Some("请选择对端字段".to_owned()));
+                            return;
+                        };
+                        let Some(target) = all_models
+                            .iter()
+                            .find(|model| model.id == target_model_id)
+                        else {
+                            status.set(Some("关联模型不存在".to_owned()));
+                            return;
+                        };
+                        let Some(other_field) = target
+                            .fields
+                            .iter()
+                            .find(|candidate| candidate.id == target_field_id)
+                        else {
+                            status.set(Some("对端字段不属于关联模型".to_owned()));
+                            return;
+                        };
+                        let kind = relation_kind_from_key(&relation_kind());
+                        if target_model_id == model_id
+                            && target_field_id == next.id
+                            && kind != kind.opposite()
+                        {
+                            status.set(Some("同一字段自关联只能使用对称基数".to_owned()));
+                            return;
+                        }
+                        if other_field.relation.as_ref().is_some_and(|relation| {
+                            relation.target_model_id != model_id
+                                || relation.target_field_id != next.id
+                        }) {
+                            status.set(Some("对端字段已关联到其他字段，请先解除原关联".to_owned()));
+                            return;
+                        }
+                        next.value_type = relation_value_type(kind, target_model_id);
+                        Some(crate::FieldRelation {
+                            kind,
+                            target_model_id,
+                            target_field_id,
+                        })
+                    } else {
+                        next.value_type = editable_value_type_from_key(
+                            &field_type(),
+                            &next.value_type,
+                        );
+                        None
+                    };
+                    next.relation = relation.clone();
                     next.options.default_value = editable_default_value(&default_value());
-                    let patches = if editing {
+                    let field_id = next.id;
+                    let mut patches = if editing {
                         vec![
                             GraphPatch::Rename {
                                 target_id: next.id,
@@ -96,6 +194,11 @@ pub(super) fn FieldEditorDialog(
                                 property: crate::EditableProperty::FieldOptions,
                                 value: serde_json::json!(next.options),
                             },
+                            GraphPatch::SetProperty {
+                                target_id: next.id,
+                                property: crate::EditableProperty::FieldRelation,
+                                value: serde_json::json!(next.relation),
+                            },
                         ]
                     } else {
                         vec![GraphPatch::Insert {
@@ -105,6 +208,38 @@ pub(super) fn FieldEditorDialog(
                             entity: GraphEntity::Field(next),
                         }]
                     };
+                    if let Some(previous) = &previous_relation
+                        && relation.as_ref().is_none_or(|current| {
+                            current.target_model_id != previous.target_model_id
+                                || current.target_field_id != previous.target_field_id
+                        })
+                    {
+                        patches.extend(relation_target_clear_patches(previous.target_field_id));
+                    }
+                    if let Some(relation) = relation
+                        && relation.target_field_id != field_id
+                    {
+                        let target_relation = crate::FieldRelation {
+                            kind: relation.kind.opposite(),
+                            target_model_id: model_id,
+                            target_field_id: field_id,
+                        };
+                        patches.extend([
+                            GraphPatch::SetProperty {
+                                target_id: relation.target_field_id,
+                                property: crate::EditableProperty::FieldRelation,
+                                value: serde_json::json!(target_relation),
+                            },
+                            GraphPatch::SetProperty {
+                                target_id: relation.target_field_id,
+                                property: crate::EditableProperty::FieldValueType,
+                                value: serde_json::json!(relation_value_type(
+                                    relation.kind.opposite(),
+                                    model_id,
+                                )),
+                            },
+                        ]);
+                    }
                     submit_patches(
                         api_base_url.clone(),
                         program_id.clone(),
@@ -119,18 +254,6 @@ pub(super) fn FieldEditorDialog(
                     h3 { "基础定义" }
                     div { class: "aio-definition-dialog__grid",
                         label {
-                            span { "字段标识" }
-                            Input {
-                                class: "aio-input",
-                                aria_label: "字段标识",
-                                placeholder: "例如 status",
-                                value: draft().name.clone(),
-                                oninput: move |event: FormEvent| {
-                                    draft.with_mut(|field| field.name = event.value());
-                                },
-                            }
-                        }
-                        label {
                             span { "显示标题" }
                             Input {
                                 class: "aio-input",
@@ -144,23 +267,13 @@ pub(super) fn FieldEditorDialog(
                         }
                         label {
                             span { "字段类型" }
-                            select {
-                                class: "aio-input",
+                            Select {
                                 aria_label: "字段类型",
-                                disabled: has_relation,
-                                value: editable_value_type_key(&draft().value_type),
-                                onchange: move |event: FormEvent| {
-                                    draft.with_mut(|field| {
-                                        field.value_type = editable_value_type_from_key(
-                                            &event.value(),
-                                            &field.value_type,
-                                        );
-                                    });
+                                value: field_type(),
+                                options: field_value_type_select_items(&draft().value_type),
+                                on_value_change: move |value| {
+                                    field_type.set(value);
                                 },
-                                {editable_value_type_options(
-                                    &draft().value_type,
-                                    editable_value_type_key(&draft().value_type).to_owned(),
-                                )}
                             }
                         }
                         label { class: "aio-definition-dialog__checkbox-field",
@@ -174,6 +287,48 @@ pub(super) fn FieldEditorDialog(
                                 },
                             }
                             span { "必填字段" }
+                        }
+                    }
+                    if relation_selected {
+                        label {
+                            span { "关联基数" }
+                            Select {
+                                aria_label: "关联基数",
+                                value: relation_kind(),
+                                options: relation_kind_select_items(),
+                                on_value_change: move |value| relation_kind.set(value),
+                            }
+                        }
+                        label {
+                            span { "关联模型" }
+                            Select {
+                                aria_label: "关联模型",
+                                value: target_model(),
+                                options: std::iter::once(SelectItem::new("", "选择模型"))
+                                    .chain(all_models.iter().map(|model| SelectItem::new(
+                                        model.id.to_string(),
+                                        format!("{} · {}", model.title, model.name),
+                                    )))
+                                    .collect(),
+                                on_value_change: move |value| {
+                                    target_model.set(value);
+                                    target_field.set(String::new());
+                                },
+                            }
+                        }
+                        label {
+                            span { "对端字段" }
+                            Select {
+                                aria_label: "关联对端字段",
+                                value: target_field(),
+                                options: std::iter::once(SelectItem::new("", "选择字段"))
+                                    .chain(target_fields.iter().map(|field| SelectItem::new(
+                                        field.id.to_string(),
+                                        format!("{} · {}", field.title, field.name),
+                                    )))
+                                    .collect(),
+                                on_value_change: move |value| target_field.set(value),
+                            }
                         }
                     }
                 }
@@ -330,4 +485,33 @@ pub(super) fn FieldEditorDialog(
             }
         }
     }
+}
+
+pub(super) fn field_value_type_select_items(current: &ValueType) -> Vec<SelectItem> {
+    let mut options = vec![
+        SelectItem::new("text", "文本"),
+        SelectItem::new("integer", "整数"),
+        SelectItem::new("decimal", "小数"),
+        SelectItem::new("boolean", "布尔"),
+        SelectItem::new("timestamp_ms", "时间"),
+        SelectItem::new("file", "文件"),
+        SelectItem::new("any", "任意结构"),
+        SelectItem::new("relation", "关联对象"),
+    ];
+    if editable_value_type_key(current) == "preserve" {
+        options.push(SelectItem::new(
+            "preserve",
+            format!("{}（保持定义）", value_type_label(current)),
+        ));
+    }
+    options
+}
+
+pub(super) fn relation_kind_select_items() -> Vec<SelectItem> {
+    vec![
+        SelectItem::new("one_to_one", "一对一"),
+        SelectItem::new("many_to_one", "多对一"),
+        SelectItem::new("one_to_many", "一对多"),
+        SelectItem::new("many_to_many", "多对多"),
+    ]
 }

@@ -255,6 +255,14 @@ impl<'a> ProgramCompiler<'a> {
             }
             let mut field_names = BTreeSet::new();
             for field in &model.fields {
+                if field.name == "id" {
+                    diagnostics.push(diagnostic(
+                        "FIELD_IDENTIFIER_RESERVED",
+                        CompilerStage::Schema,
+                        format!("模型 {} 的 id 由系统主键定义维护", model.name),
+                        Some(field.id),
+                    ));
+                }
                 if !data_identifier_is_valid(&field.name) {
                     diagnostics.push(diagnostic(
                         "FIELD_IDENTIFIER_INVALID",
@@ -715,6 +723,7 @@ impl<'a> ProgramCompiler<'a> {
                         id: model.id,
                         name: model.name.clone(),
                         title: model.title.clone(),
+                        primary_key: model.primary_key,
                         field_slots,
                         field_types,
                         field_names,
@@ -1306,6 +1315,15 @@ pub fn compile_page(definition: &ProgramDefinition, page: &PageDefinition) -> Co
             module_name: convention_page_module_name(&definition.name, &page.name),
             expected_path: convention_page_path(&definition.name, &page.name),
         },
+        PageRendererDefinition::Extension {
+            extension_type,
+            schema_version,
+            config,
+        } => CompiledPageRenderer::Extension {
+            extension_type: extension_type.clone(),
+            schema_version: *schema_version,
+            config: config.clone(),
+        },
         PageRendererDefinition::MenuTree => CompiledPageRenderer::MenuTree {
             provider_key: page_provider_key::<ProgramMenuTreePageProvider>(),
         },
@@ -1397,7 +1415,9 @@ fn built_in_page_endpoints(
         PageRendererDefinition::TreeTable { table, .. } => {
             (table, page_provider_key::<TreeTablePageProvider>())
         }
-        PageRendererDefinition::ConventionFile | PageRendererDefinition::MenuTree => {
+        PageRendererDefinition::ConventionFile
+        | PageRendererDefinition::Extension { .. }
+        | PageRendererDefinition::MenuTree => {
             return Vec::new();
         }
     };
@@ -1705,7 +1725,9 @@ fn validate_page_references(
 ) {
     let mut references = Vec::new();
     match &page.renderer {
-        PageRendererDefinition::ConventionFile | PageRendererDefinition::MenuTree => {}
+        PageRendererDefinition::ConventionFile
+        | PageRendererDefinition::Extension { .. }
+        | PageRendererDefinition::MenuTree => {}
         PageRendererDefinition::CrudTable { table } => {
             collect_table_references(table, &mut references)
         }
@@ -1777,7 +1799,9 @@ fn validate_page_renderer(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match &page.renderer {
-        PageRendererDefinition::ConventionFile | PageRendererDefinition::MenuTree => {}
+        PageRendererDefinition::ConventionFile
+        | PageRendererDefinition::Extension { .. }
+        | PageRendererDefinition::MenuTree => {}
         PageRendererDefinition::CrudTable { table } => {
             validate_table(definition, page.id, table, diagnostics);
         }
@@ -1880,7 +1904,9 @@ fn validate_model_fields(
 fn page_model_dependencies(page: &PageDefinition) -> Vec<SymbolId> {
     let mut values = BTreeSet::new();
     match &page.renderer {
-        PageRendererDefinition::ConventionFile | PageRendererDefinition::MenuTree => {}
+        PageRendererDefinition::ConventionFile
+        | PageRendererDefinition::Extension { .. }
+        | PageRendererDefinition::MenuTree => {}
         PageRendererDefinition::CrudTable { table } => {
             values.extend(table.model_id);
         }
@@ -2287,6 +2313,7 @@ mod tests {
             name: name.to_owned(),
             title: title.to_owned(),
             state: DefinitionState::Known,
+            primary_key: crate::ModelPrimaryKeyDefinition::default(),
             fields: vec![
                 FieldDefinition {
                     id: SymbolId::new(),
@@ -2705,6 +2732,7 @@ mod tests {
             name: "asset".to_owned(),
             title: "资产".to_owned(),
             state: DefinitionState::Known,
+            primary_key: crate::ModelPrimaryKeyDefinition::default(),
             fields: vec![
                 FieldDefinition {
                     id: tenant_id,
@@ -2770,6 +2798,7 @@ mod tests {
             name: "department".to_owned(),
             title: "部门".to_owned(),
             state: DefinitionState::Known,
+            primary_key: crate::ModelPrimaryKeyDefinition::default(),
             fields: vec![
                 FieldDefinition {
                     id: department_name_id,
@@ -2836,6 +2865,7 @@ mod tests {
             name: "user".to_owned(),
             title: "用户".to_owned(),
             state: DefinitionState::Known,
+            primary_key: crate::ModelPrimaryKeyDefinition::default(),
             fields: vec![
                 FieldDefinition {
                     id: user_name_id,
@@ -3063,6 +3093,33 @@ mod tests {
     fn content_hash_is_deterministic() -> anyhow::Result<()> {
         let program = crud_program();
         assert_eq!(content_hash(&program)?, content_hash(&program)?);
+        Ok(())
+    }
+
+    #[test]
+    fn compiles_consumer_extension_without_interpreting_its_config() -> anyhow::Result<()> {
+        let mut program = crud_program();
+        program.pages[0].renderer = PageRendererDefinition::Extension {
+            extension_type: "aio::pages::AuditPage".to_owned(),
+            schema_version: 3,
+            config: serde_json::json!({"resource_id": "audit"}),
+        };
+
+        let image = ProgramCompiler::new("test", &CapabilityCatalog::default()).compile(
+            &program,
+            "revision-1",
+            ImageTarget::Universal,
+        )?;
+
+        assert!(matches!(
+            image.pages.get(&program.pages[0].id).map(|page| &page.renderer),
+            Some(CompiledPageRenderer::Extension {
+                extension_type,
+                schema_version: 3,
+                config,
+            }) if extension_type == "aio::pages::AuditPage"
+                && config == &serde_json::json!({"resource_id": "audit"})
+        ));
         Ok(())
     }
 

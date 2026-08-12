@@ -140,6 +140,8 @@ fn agent_contract() -> &'static str {
 "method":"GET|POST|PUT|PATCH|DELETE","path":"/相对路径","inputs":[{"id":"新 UUID","name":"snake_case",
 "title":"中文说明","location":"path|query|header|body","value_type":{"kind":"text"},"required":true}],
 "outputs":[{"id":"新 UUID","name":"snake_case","title":"中文说明","value_type":{"kind":"text"}}]}}}。
+模型主键只能通过 SetProperty 的 model_primary_key 修改，value 为
+{"generation":"uuid"} 或 {"generation":"auto_increment"}；不得把 id 插入普通字段集合。
 不要修改 base_version 和 origin，它们会由服务端覆盖。页面只能选择 convention_file、tree_table 或 crud_table。
 若 previous_diagnostics 非空，修复这些诊断并保留用户原始意图。"#
 }

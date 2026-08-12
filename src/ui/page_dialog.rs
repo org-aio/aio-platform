@@ -25,11 +25,10 @@ pub(super) fn PageDefinitionDialog(
 ) -> Element {
     let editing = page.is_some();
     let page_id = page.as_ref().map_or_else(SymbolId::new, |page| page.id);
-    let initial_name = page
+    let stable_name = page
         .as_ref()
         .map(|page| page.name.clone())
         .unwrap_or_default();
-    let stable_name = initial_name.clone();
     let initial_title = page
         .as_ref()
         .map(|page| page.title.clone())
@@ -44,7 +43,6 @@ pub(super) fn PageDefinitionDialog(
     } else {
         PageRendererKind::CrudTable
     };
-    let mut name = use_signal(move || initial_name);
     let mut title = use_signal(move || initial_title);
     let mut route_path = use_signal(String::new);
     let mut renderer_kind = use_signal(move || default_renderer_kind);
@@ -81,18 +79,18 @@ pub(super) fn PageDefinitionDialog(
             }
             form { class: "aio-definition-dialog__form", onsubmit: move |event| {
                 event.prevent_default();
+                let next_title = title().trim().to_owned();
+                if next_title.is_empty() {
+                    status.set(Some("页面标题不能为空".to_owned()));
+                    return;
+                }
                 let next_name = if editing {
                     stable_name.clone()
                 } else {
-                    name().trim().to_owned()
+                    identifier_from_title(&next_title)
                 };
-                let next_title = title().trim().to_owned();
-                if !page_identifier_is_valid(&next_name) {
-                    status.set(Some("页面标识必须以小写字母开头，只能包含小写字母、数字、下划线或连字符".to_owned()));
-                    return;
-                }
-                if next_title.is_empty() {
-                    status.set(Some("页面标题不能为空".to_owned()));
+                if next_name.is_empty() {
+                    status.set(Some("页面标题无法生成有效标识，请包含中文、字母或数字".to_owned()));
                     return;
                 }
                 if existing_pages
@@ -122,10 +120,15 @@ pub(super) fn PageDefinitionDialog(
                         PageRendererKind::ConventionFile => {
                             crate::PageRendererDefinition::ConventionFile
                         }
+                        PageRendererKind::Extension => {
+                            status.set(Some("扩展页面必须从 Admin Workbench 新建".to_owned()));
+                            return;
+                        }
                         PageRendererKind::MenuTree => crate::PageRendererDefinition::MenuTree,
                         PageRendererKind::TreeTable | PageRendererKind::CrudTable => {
                             let draft = PageRendererDraft {
                                 kind: PageRendererKind::CrudTable,
+                                extension: None,
                                 table_model_id: table_model_id(),
                                 page_size: page_size(),
                                 tree_model_id: String::new(),
@@ -184,17 +187,6 @@ pub(super) fn PageDefinitionDialog(
                 on_saved.call(page_id);
             },
                 div { class: "aio-definition-dialog__grid",
-                    label {
-                        span { "页面标识" }
-                        Input {
-                            class: "aio-input",
-                            aria_label: "页面标识",
-                            placeholder: "例如 work-orders",
-                            disabled: editing,
-                            value: name(),
-                            oninput: move |event: FormEvent| name.set(event.value()),
-                        }
-                    }
                     label {
                         span { "显示标题" }
                         Input {
@@ -335,7 +327,7 @@ pub(super) fn PageRouteDialog(
 ) -> Element {
     let editing = route.is_some();
     let route_id = route.as_ref().map_or_else(SymbolId::new, |route| route.id);
-    let initial_name = route
+    let stable_name = route
         .as_ref()
         .map(|route| route.name.clone())
         .unwrap_or_default();
@@ -347,7 +339,6 @@ pub(super) fn PageRouteDialog(
         .as_ref()
         .map(|route| route.required_permissions.clone())
         .unwrap_or_default();
-    let mut name = use_signal(move || initial_name);
     let mut path = use_signal(move || initial_path);
     let existing_routes = routes;
     let save_permissions = permissions.clone();
@@ -377,10 +368,14 @@ pub(super) fn PageRouteDialog(
             }
             form { class: "aio-definition-dialog__form", onsubmit: move |event| {
                 event.prevent_default();
-                let next_name = name().trim().to_owned();
                 let next_path = path().trim().to_owned();
-                if !page_identifier_is_valid(&next_name) {
-                    status.set(Some("路由标识必须以小写字母开头，只能包含小写字母、数字、下划线或连字符".to_owned()));
+                let next_name = if editing {
+                    stable_name.clone()
+                } else {
+                    identifier_from_title(&next_path)
+                };
+                if next_name.is_empty() {
+                    status.set(Some("路由路径无法生成有效标识".to_owned()));
                     return;
                 }
                 if let Err(error) = validate_route_path(&next_path) {
@@ -440,16 +435,6 @@ pub(super) fn PageRouteDialog(
                 on_saved.call(());
             },
                 div { class: "aio-definition-dialog__grid",
-                    label {
-                        span { "路由标识" }
-                        Input {
-                            class: "aio-input",
-                            aria_label: "路由标识",
-                            placeholder: "例如 work-orders",
-                            value: name(),
-                            oninput: move |event: FormEvent| name.set(event.value()),
-                        }
-                    }
                     label {
                         span { "访问路径" }
                         Input {

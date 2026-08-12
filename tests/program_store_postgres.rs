@@ -46,6 +46,9 @@ async fn program_store_enforces_versions_revisions_cache_and_activation() -> any
                         name: model_name.clone(),
                         title: "程序模型".to_owned(),
                         state: az_studio::DefinitionState::Known,
+                        primary_key: az_studio::ModelPrimaryKeyDefinition {
+                            generation: az_studio::PrimaryKeyGeneration::AutoIncrement,
+                        },
                         fields: vec![az_studio::FieldDefinition {
                             id: field_id,
                             name: "serial_number".to_owned(),
@@ -119,6 +122,13 @@ async fn program_store_enforces_versions_revisions_cache_and_activation() -> any
     .fetch_one(store.pool())
     .await?;
     assert_eq!(linked_model, model_id.to_string());
+    let primary_key_generation = sqlx::query_scalar::<_, String>(
+        "SELECT primary_key_generation FROM engine_meta_models WHERE name = $1",
+    )
+    .bind(&model_name)
+    .fetch_one(store.pool())
+    .await?;
+    assert_eq!(primary_key_generation, "auto_increment");
     let linked_field = sqlx::query_scalar::<_, String>(
         "SELECT program_symbol_id FROM engine_meta_fields
          WHERE model_name = $1 AND name = 'serial_number'",

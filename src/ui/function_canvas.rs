@@ -158,9 +158,9 @@ pub(super) fn FunctionGraphCanvas(
                 if function.graph.nodes.is_empty() {
                     div { class: "aio-function-graph__empty", "暂无函数节点" }
                 } else {
-                    div {
-                        class: "aio-function-graph__canvas",
-                        style: "width: {canvas_width}px; height: {canvas_height}px;",
+                    GraphCanvas {
+                        width: canvas_width,
+                        height: canvas_height,
                         onpointermove: move |event: PointerEvent| {
                             let Some(mut drag) = drag_state() else {
                                 return;
@@ -219,16 +219,17 @@ pub(super) fn FunctionGraphCanvas(
                             }
                         }
                         for (node, node_left, node_top, node_detail, reference_count, can_receive_connection, can_emit_connection) in node_cards {
-                            article {
+                            GraphNode {
                                 key: "{node.id}",
-                                class: if active_drag.is_some_and(|drag| drag.node_id == node.id) {
-                                    "aio-function-node is-dragging"
+                                state: if active_drag.is_some_and(|drag| drag.node_id == node.id) {
+                                    GraphNodeState::Dragging
                                 } else if connection_source() == Some(node.id) {
-                                    "aio-function-node is-connection-source"
+                                    GraphNodeState::ConnectionSource
                                 } else {
-                                    "aio-function-node"
+                                    GraphNodeState::Default
                                 },
-                                style: "left: {node_left}px; top: {node_top}px;",
+                                left: node_left,
+                                top: node_top,
                                 aria_label: "函数节点 {node.name}",
                                 Button {
                                     class: "aio-function-node__port aio-function-node__port--input",

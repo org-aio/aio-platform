@@ -285,6 +285,7 @@ mod tests {
             id: SymbolId::new(),
             name: "record".to_owned(),
             title: "记录".to_owned(),
+            primary_key: crate::ModelPrimaryKeyDefinition::default(),
             field_slots: BTreeMap::new(),
             field_types: types
                 .into_iter()

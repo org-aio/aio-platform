@@ -12,24 +12,15 @@ use crate::{
     ModelDefinition, ModelIndexDefinition, NotificationLevel, PageDefinition,
     PageEndpointDefinition, PageEndpointSource, PatchOrigin, PermissionDefinition, PortDefinition,
     PropertyValue, RestMethod, RouteDefinition, SymbolId, ValidationRule, ValidationRuleKind,
-    ValueType, VibeRunAccepted, VibeRunRequest, data_identifier_is_valid, page_identifier_is_valid,
-    permission_identifier_is_valid, validate_route_path,
+    ValueType, VibeRunAccepted, VibeRunRequest, VibeSessionSnapshot, validate_route_path,
 };
 use dioxus::prelude::*;
 use serde_json::Value;
 
 use crate::browser_http::{get_api, patch_api, post_api};
-use crate::components::{
-    badge::{Badge, BadgeVariant},
-    button::{Button, ButtonSize, ButtonVariant},
-    checkbox::{Checkbox, checkbox_is_checked, checkbox_state},
-    data_table::{
-        DataTable, DataTableAlign, DataTableCellContext, DataTableColumn, DataTableEditContext,
-        DataTableEditTrigger, DataTableFixed, DataTableSpan,
-    },
-    dialog::{Dialog, DialogDescription, DialogTitle},
-    input::Input,
-    textarea::Textarea,
+use crate::identifier_generation::{
+    next_endpoint_path_parameter_name, next_function_node_name, normalize_endpoint_parameter_names,
+    synchronize_path_parameter_names, unique_identifier_from_title,
 };
 use crate::page_endpoint_draft::validate_page_endpoint_draft;
 use crate::page_renderer_draft::{PageRendererDraft, PageRendererKind};
@@ -38,6 +29,24 @@ use crate::studio_navigation::{
     delete_page_patches, function_node_reference_count, function_port_reference_count,
     function_reference_count, model_usage_summary, page_menu_reference_count, permission_usage_map,
     preferred_draft_scene_id,
+};
+use az_admin_shell_core::identifier_from_title;
+use az_ui_components::{
+    agent_chat::{AgentChat, AgentChatMessage},
+    badge::{Badge, BadgeVariant},
+    button::{Button, ButtonSize, ButtonVariant},
+    checkbox::{Checkbox, checkbox_is_checked, checkbox_state},
+    collection_tree::{CollectionTree, CollectionTreeData, CollectionTreeItemContext},
+    data_table::{
+        DataTable, DataTableAlign, DataTableCellContext, DataTableColumn, DataTableEditContext,
+        DataTableEditTrigger, DataTableFixed, DataTableRowTone, DataTableSpan,
+    },
+    dialog::{Dialog, DialogDescription, DialogTitle},
+    input::Input,
+    navigation_icon::{NavigationIcon, NavigationIconPicker, resolved_navigation_icon},
+    select::{Select, SelectItem, SelectPlacement},
+    spatial::{GraphCanvas, GraphNode, GraphNodeState, TreeIndent},
+    textarea::Textarea,
 };
 use gloo_timers::future::TimeoutFuture;
 
@@ -57,6 +66,7 @@ mod index_dialog;
 mod menu_dialog;
 mod menu_panel;
 mod menu_table;
+mod model_agent_chat;
 mod model_audit;
 mod model_fields;
 mod model_grid;
@@ -88,6 +98,7 @@ use index_dialog::*;
 use menu_dialog::*;
 use menu_panel::*;
 use menu_table::*;
+use model_agent_chat::*;
 use model_audit::*;
 use model_fields::*;
 use model_grid::*;
@@ -102,6 +113,5 @@ use query_dialog::*;
 use relation_dialog::*;
 use validation_dialog::*;
 
-pub(crate) use shell::{
-    AdminMenuCreator, AdminPageEditor, AdminSceneCreator, ProgramMenuTreePage, StudioPage,
-};
+pub(crate) use shell::ProgramMenuTreePage;
+pub use shell::StudioPage;

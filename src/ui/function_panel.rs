@@ -132,23 +132,24 @@ pub(super) fn FunctionsPanel(
                         }
                     }
                 }
-                div { class: "aio-function-workspace__directory-list",
-                    if visible_functions.is_empty() {
-                        div { class: "aio-function-workspace__empty", "没有匹配的函数" }
-                    }
-                    for function in visible_functions {
-                        Button {
-                            r#type: "button",
-                            variant: ButtonVariant::Ghost,
-                            class: if Some(function.id) == current_function_id {
-                                "aio-function-workspace__function is-active"
-                            } else {
-                                "aio-function-workspace__function"
-                            },
-                            onclick: {
-                                let function_id = function.id;
-                                move |_| selected_function.set(Some(function_id))
-                            },
+                CollectionTree::<FunctionDefinition> {
+                    class: "aio-function-workspace__directory-list",
+                    aria_label: "函数目录",
+                    data: CollectionTreeData::Collection(
+                        visible_functions
+                            .iter()
+                            .map(|function| (*function).clone())
+                            .collect()
+                    ),
+                    selected_key: current_function_id.map(|function_id| function_id.to_string()),
+                    empty_text: "没有匹配的函数",
+                    item_key: |function: FunctionDefinition| function.id.to_string(),
+                    on_select: move |function: FunctionDefinition| {
+                        selected_function.set(Some(function.id));
+                    },
+                    render_item: |item: CollectionTreeItemContext<FunctionDefinition>| {
+                        let function = item.item;
+                        rsx! {
                             span { class: "aio-function-workspace__function-content",
                                 strong { "{function.title}" }
                                 code { "{function.name}" }

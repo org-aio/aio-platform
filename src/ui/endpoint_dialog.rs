@@ -13,6 +13,16 @@ pub(super) fn EndpointEditorDialog(
     mut creating_endpoint: Signal<Option<PageEndpointDefinition>>,
     mut editing_endpoint: Signal<Option<SymbolId>>,
 ) -> Element {
+    let stable_input_names = endpoint
+        .inputs
+        .iter()
+        .map(|input| (input.id, input.name.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let stable_output_names = endpoint
+        .outputs
+        .iter()
+        .map(|output| (output.id, output.name.clone()))
+        .collect::<BTreeMap<_, _>>();
     let editor_draft = use_signal(move || endpoint);
     let current = editor_draft();
     let dialog_title = if matches!(mode, EndpointEditorMode::Create { .. }) {
@@ -73,6 +83,8 @@ pub(super) fn EndpointEditorDialog(
                 EndpointEditor {
                     draft: editor_draft,
                     siblings,
+                    stable_input_names,
+                    stable_output_names,
                     status,
                     on_submit: move |endpoint| submit_editor.call(endpoint),
                     on_cancel: move |_| close_editor.call(()),

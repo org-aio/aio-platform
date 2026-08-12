@@ -7,6 +7,7 @@ pub(super) fn function_node_editor_fields(
     models: Vec<ModelDefinition>,
     routes: Vec<RouteDefinition>,
     functions: Vec<FunctionDefinition>,
+    capabilities: crate::CapabilityCatalog,
 ) -> Element {
     let current_node_id = node.id;
     let reference_nodes = function_node_reference_options(&function, current_node_id);
@@ -351,40 +352,67 @@ pub(super) fn function_node_editor_fields(
         FunctionNodeKind::Capability {
             capability_id,
             operation,
-        } => rsx! {
-            div { class: "aio-definition-dialog__grid",
-                label { "能力标识"
-                    Input {
-                        class: "aio-input",
-                        aria_label: "能力标识",
-                        value: capability_id,
-                        oninput: move |event: FormEvent| {
-                            let capability_id = event.value();
-                            draft.with_mut(|node| {
-                                if let FunctionNodeKind::Capability { capability_id: current, .. } = &mut node.kind {
-                                    *current = capability_id;
-                                }
-                            });
+        } => {
+            let capability_options = capabilities
+                .capabilities
+                .keys()
+                .map(|id| SelectItem::new(id, id))
+                .collect::<Vec<_>>();
+            let operation_options = capabilities
+                .capabilities
+                .get(&capability_id)
+                .map(|capability| {
+                    capability
+                        .operations
+                        .keys()
+                        .map(|name| SelectItem::new(name, name))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            rsx! {
+                div { class: "aio-definition-dialog__grid",
+                    label { "能力"
+                        Select {
+                            aria_label: "选择能力",
+                            value: capability_id,
+                            options: capability_options,
+                            on_value_change: move |next_capability_id| {
+                                let next_operation = capabilities
+                                    .capabilities
+                                    .get(&next_capability_id)
+                                    .and_then(|capability| capability.operations.keys().next())
+                                    .cloned()
+                                    .unwrap_or_default();
+                                draft.with_mut(|node| {
+                                    if let FunctionNodeKind::Capability {
+                                        capability_id,
+                                        operation,
+                                    } = &mut node.kind
+                                    {
+                                        *capability_id = next_capability_id;
+                                        *operation = next_operation;
+                                    }
+                                });
+                            },
                         }
                     }
-                }
-                label { "能力操作"
-                    Input {
-                        class: "aio-input",
-                        aria_label: "能力操作",
-                        value: operation,
-                        oninput: move |event: FormEvent| {
-                            let operation = event.value();
-                            draft.with_mut(|node| {
-                                if let FunctionNodeKind::Capability { operation: current, .. } = &mut node.kind {
-                                    *current = operation;
-                                }
-                            });
+                    label { "能力操作"
+                        Select {
+                            aria_label: "选择能力操作",
+                            value: operation,
+                            options: operation_options,
+                            on_value_change: move |operation| {
+                                draft.with_mut(|node| {
+                                    if let FunctionNodeKind::Capability { operation: current, .. } = &mut node.kind {
+                                        *current = operation;
+                                    }
+                                });
+                            },
                         }
                     }
                 }
             }
-        },
+        }
         FunctionNodeKind::Object { fields } => {
             let next_field_id = field_options
                 .iter()

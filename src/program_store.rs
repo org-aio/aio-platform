@@ -132,10 +132,37 @@ impl ProgramStore {
             }
             .into());
         }
+        let previous_definition = draft.definition.clone();
         draft
             .definition
             .apply_patch_batch(batch)
             .context("应用 GraphPatchBatch 失败")?;
+        for previous_model in &previous_definition.models {
+            let Some(next_model) = draft
+                .definition
+                .models
+                .iter()
+                .find(|model| model.id == previous_model.id)
+            else {
+                continue;
+            };
+            if previous_model.primary_key == next_model.primary_key {
+                continue;
+            }
+            let has_records = sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM engine_data_records WHERE model_name = $1)",
+            )
+            .bind(&previous_model.name)
+            .fetch_one(&mut *transaction)
+            .await
+            .with_context(|| format!("检查模型历史记录失败: {}", previous_model.name))?;
+            if has_records {
+                bail!(
+                    "模型 {} 已存在业务记录，不能切换主键生成策略",
+                    previous_model.title
+                );
+            }
+        }
         draft.version += 1;
         draft.updated_at_ms = timestamp_ms();
         let result = sqlx::query(
@@ -441,6 +468,7 @@ impl ProgramStore {
             let model_symbol = model.id.to_string();
             let audit_metadata_json =
                 serde_json::to_string(&model.audit).context("序列化模型审计配置失败")?;
+            let primary_key_generation = model.primary_key.generation.as_str();
             let conflicting_symbol = sqlx::query_scalar::<_, String>(
                 "SELECT program_symbol_id FROM engine_meta_models
                  WHERE name = $1 AND program_symbol_id IS NOT NULL AND program_symbol_id <> $2
@@ -457,10 +485,36 @@ impl ProgramStore {
                     model.name
                 );
             }
+            let existing_primary_key_generation = sqlx::query_scalar::<_, String>(
+                "SELECT primary_key_generation FROM engine_meta_models
+                 WHERE program_symbol_id = $1
+                    OR (program_symbol_id IS NULL AND name = $2)
+                 LIMIT 1",
+            )
+            .bind(&model_symbol)
+            .bind(&model.name)
+            .fetch_optional(&mut *transaction)
+            .await
+            .with_context(|| format!("读取动态模型主键策略失败: {}", model.name))?;
+            if existing_primary_key_generation
+                .as_deref()
+                .is_some_and(|value| value != primary_key_generation)
+            {
+                let has_records = sqlx::query_scalar::<_, bool>(
+                    "SELECT EXISTS(SELECT 1 FROM engine_data_records WHERE model_name = $1)",
+                )
+                .bind(&model.name)
+                .fetch_one(&mut *transaction)
+                .await
+                .with_context(|| format!("检查模型历史记录失败: {}", model.name))?;
+                if has_records {
+                    bail!("模型 {} 已存在业务记录，不能切换主键生成策略", model.title);
+                }
+            }
             let updated = sqlx::query(
                 "UPDATE engine_meta_models
                  SET program_symbol_id = $1, name = $2, display_name = $3,
-                     audit_metadata_json = $4, updated_at_ms = $5
+                     audit_metadata_json = $4, primary_key_generation = $5, updated_at_ms = $6
                  WHERE program_symbol_id = $1
                     OR (program_symbol_id IS NULL AND name = $2)",
             )
@@ -468,6 +522,7 @@ impl ProgramStore {
             .bind(&model.name)
             .bind(&model.title)
             .bind(&audit_metadata_json)
+            .bind(primary_key_generation)
             .bind(timestamp_ms())
             .execute(&mut *transaction)
             .await
@@ -479,14 +534,15 @@ impl ProgramStore {
                 sqlx::query(
                     "INSERT INTO engine_meta_models
                      (id, name, display_name, created_at_ms, updated_at_ms, program_symbol_id,
-                      audit_metadata_json)
-                     VALUES ($1, $2, $3, $4, $4, $1, $5)",
+                      audit_metadata_json, primary_key_generation)
+                     VALUES ($1, $2, $3, $4, $4, $1, $5, $6)",
                 )
                 .bind(&model_symbol)
                 .bind(&model.name)
                 .bind(&model.title)
                 .bind(timestamp_ms())
                 .bind(&audit_metadata_json)
+                .bind(primary_key_generation)
                 .execute(&mut *transaction)
                 .await
                 .with_context(|| format!("创建动态模型失败: {}", model.name))?;
@@ -715,6 +771,20 @@ impl ProgramStore {
             created_at_ms: now,
             updated_at_ms: now,
         })
+    }
+
+    pub async fn vibe_session(&self, session_id: &str) -> Result<Option<VibeSessionSnapshot>> {
+        let row = sqlx::query(
+            "SELECT id, program_id, base_version, status, final_revision_id,
+                    created_at_ms, updated_at_ms
+             FROM engine_vibe_sessions
+             WHERE id = $1",
+        )
+        .bind(session_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("查询 vibe session 失败")?;
+        row.as_ref().map(vibe_session_from_row).transpose()
     }
 
     pub async fn append_vibe_message(
@@ -1040,6 +1110,18 @@ fn revision_from_row(row: &sqlx::postgres::PgRow) -> Result<RevisionSnapshot> {
         origin: row.try_get("origin")?,
         diagnostics: diagnostics.0,
         created_at_ms: row.try_get("created_at_ms")?,
+    })
+}
+
+fn vibe_session_from_row(row: &sqlx::postgres::PgRow) -> Result<VibeSessionSnapshot> {
+    Ok(VibeSessionSnapshot {
+        id: row.try_get("id")?,
+        program_id: row.try_get("program_id")?,
+        base_version: row.try_get("base_version")?,
+        status: row.try_get("status")?,
+        final_revision_id: row.try_get("final_revision_id")?,
+        created_at_ms: row.try_get("created_at_ms")?,
+        updated_at_ms: row.try_get("updated_at_ms")?,
     })
 }
 

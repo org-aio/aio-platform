@@ -1,5 +1,18 @@
 use super::*;
 
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum ModelFieldRow {
+    PrimaryKey {
+        generation: crate::PrimaryKeyGeneration,
+    },
+    Field(FieldDefinition),
+    Audit {
+        kind: crate::AuditFieldKind,
+        field: Option<FieldDefinition>,
+        enabled: bool,
+    },
+}
+
 pub(super) fn model_field_columns() -> Vec<DataTableColumn> {
     vec![
         DataTableColumn::group(
@@ -42,23 +55,44 @@ pub(super) fn model_field_columns() -> Vec<DataTableColumn> {
 pub(super) fn ModelFieldsTable(
     model: ModelDefinition,
     all_models: Vec<ModelDefinition>,
+    api_base_url: String,
+    program_id: String,
+    version: i64,
+    generation: Signal<u64>,
+    status: Signal<Option<String>>,
     mut editor: Signal<Option<ModelEditorTarget>>,
     mut deleting: Signal<Option<DefinitionDeleteTarget>>,
 ) -> Element {
     let models_for_cells = all_models.clone();
+    let rows = model_field_rows(&model);
+    let model_for_cells = model.clone();
     rsx! {
-        DataTable::<FieldDefinition> {
+        DataTable::<ModelFieldRow> {
             class: "aio-model-data-table",
             aria_label: "模型字段",
-            rows: model.fields.clone(),
+            rows,
             columns: model_field_columns(),
             max_height: "100%",
             empty_text: "暂无字段，请使用右上角新建字段".to_owned(),
-            row_key: |field: FieldDefinition| field.id.to_string(),
-            render_cell: move |cell: DataTableCellContext<FieldDefinition>| {
+            row_key: model_field_row_key,
+            row_tone: |row: ModelFieldRow| if matches!(
+                row,
+                ModelFieldRow::PrimaryKey { .. } | ModelFieldRow::Audit { .. }
+            ) {
+                DataTableRowTone::Muted
+            } else {
+                DataTableRowTone::Default
+            },
+            render_cell: move |cell: DataTableCellContext<ModelFieldRow>| {
                 model_field_cell(
                     cell,
+                    model_for_cells.clone(),
                     models_for_cells.clone(),
+                    api_base_url.clone(),
+                    program_id.clone(),
+                    version,
+                    generation,
+                    status,
                     editor,
                     deleting,
                 )
@@ -68,12 +102,41 @@ pub(super) fn ModelFieldsTable(
 }
 
 pub(super) fn model_field_cell(
-    cell: DataTableCellContext<FieldDefinition>,
+    cell: DataTableCellContext<ModelFieldRow>,
+    model: ModelDefinition,
     all_models: Vec<ModelDefinition>,
+    api_base_url: String,
+    program_id: String,
+    version: i64,
+    generation: Signal<u64>,
+    status: Signal<Option<String>>,
     mut editor: Signal<Option<ModelEditorTarget>>,
     mut deleting: Signal<Option<DefinitionDeleteTarget>>,
 ) -> Element {
-    let field = cell.row;
+    if matches!(&cell.row, ModelFieldRow::PrimaryKey { .. }) {
+        return model_primary_key_cell(
+            cell.row,
+            &cell.column.key,
+            model,
+            api_base_url,
+            program_id,
+            version,
+            generation,
+            status,
+        );
+    }
+    let ModelFieldRow::Field(field) = cell.row else {
+        return model_audit_field_cell(
+            cell.row,
+            &cell.column.key,
+            model,
+            api_base_url,
+            program_id,
+            version,
+            generation,
+            status,
+        );
+    };
     match cell.column.key.as_str() {
         "title" => rsx! { strong { "{field.title}" } },
         "name" => rsx! { code { class: "aio-model-table__code", "{field.name}" } },
@@ -142,6 +205,187 @@ pub(super) fn model_field_cell(
                 }
             }
         }
+        _ => rsx! { "—" },
+    }
+}
+
+pub(super) fn model_field_rows(model: &ModelDefinition) -> Vec<ModelFieldRow> {
+    let audit_names = crate::AuditFieldKind::all()
+        .into_iter()
+        .map(crate::AuditFieldKind::default_name)
+        .collect::<BTreeSet<_>>();
+    let audit_field_ids = model
+        .audit
+        .fields
+        .iter()
+        .map(|field| field.field_id)
+        .collect::<BTreeSet<_>>();
+    let mut rows = vec![ModelFieldRow::PrimaryKey {
+        generation: model.primary_key.generation,
+    }];
+    rows.extend(
+        model
+            .fields
+            .iter()
+            .filter(|field| {
+                !audit_field_ids.contains(&field.id) && !audit_names.contains(field.name.as_str())
+            })
+            .cloned()
+            .map(ModelFieldRow::Field)
+            .collect::<Vec<_>>(),
+    );
+    rows.extend(crate::AuditFieldKind::all().into_iter().map(|kind| {
+        let binding = model.audit.fields.iter().find(|field| field.kind == kind);
+        let field = binding
+            .and_then(|binding| {
+                model
+                    .fields
+                    .iter()
+                    .find(|field| field.id == binding.field_id)
+            })
+            .or_else(|| {
+                model
+                    .fields
+                    .iter()
+                    .find(|field| field.name == kind.default_name())
+            })
+            .cloned();
+        ModelFieldRow::Audit {
+            kind,
+            field,
+            enabled: binding.is_some(),
+        }
+    }));
+    rows
+}
+
+pub(super) fn model_field_row_key(row: ModelFieldRow) -> String {
+    match row {
+        ModelFieldRow::PrimaryKey { .. } => "primary-key:id".to_owned(),
+        ModelFieldRow::Field(field) => field.id.to_string(),
+        ModelFieldRow::Audit { kind, .. } => format!("audit:{}", kind.default_name()),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn model_primary_key_cell(
+    row: ModelFieldRow,
+    column: &str,
+    model: ModelDefinition,
+    api_base_url: String,
+    program_id: String,
+    version: i64,
+    generation: Signal<u64>,
+    status: Signal<Option<String>>,
+) -> Element {
+    let ModelFieldRow::PrimaryKey {
+        generation: strategy,
+    } = row
+    else {
+        return rsx! { "—" };
+    };
+    match column {
+        "title" => rsx! { strong { "主键" } },
+        "name" => rsx! { code { class: "aio-model-table__code", "id" } },
+        "type" => rsx! {
+            Select {
+                aria_label: "主键生成策略",
+                value: strategy.as_str(),
+                options: vec![
+                    SelectItem::new("uuid", "UUID"),
+                    SelectItem::new("auto_increment", "自增整数"),
+                ],
+                on_value_change: move |value: String| {
+                    let generation_strategy = match value.as_str() {
+                        "auto_increment" => crate::PrimaryKeyGeneration::AutoIncrement,
+                        _ => crate::PrimaryKeyGeneration::Uuid,
+                    };
+                    let patches = vec![GraphPatch::SetProperty {
+                        target_id: model.id,
+                        property: crate::EditableProperty::ModelPrimaryKey,
+                        value: serde_json::json!(crate::ModelPrimaryKeyDefinition {
+                            generation: generation_strategy,
+                        }),
+                    }];
+                    submit_patches(
+                        api_base_url.clone(),
+                        program_id.clone(),
+                        version,
+                        patches,
+                        generation,
+                        status,
+                    );
+                },
+            }
+        },
+        "required" => rsx! { Badge { "是" } },
+        "relation" => rsx! { span { class: "aio-model-table__muted", "系统主键" } },
+        "capabilities" => rsx! { span { class: "aio-model-table__summary", "列表 · 详情" } },
+        "validation" => rsx! {
+            span { class: "aio-model-table__summary", "数据库生成 · 唯一" }
+        },
+        "actions" => rsx! { span { class: "aio-model-table__muted", "不可删除" } },
+        _ => rsx! { "—" },
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn model_audit_field_cell(
+    row: ModelFieldRow,
+    column: &str,
+    model: ModelDefinition,
+    api_base_url: String,
+    program_id: String,
+    version: i64,
+    generation: Signal<u64>,
+    status: Signal<Option<String>>,
+) -> Element {
+    let ModelFieldRow::Audit {
+        kind,
+        field,
+        enabled,
+    } = row
+    else {
+        return rsx! { "—" };
+    };
+    match column {
+        "title" => rsx! { strong { "{kind.default_title()}" } },
+        "name" => rsx! { code { class: "aio-model-table__code", "{kind.default_name()}" } },
+        "type" => rsx! {
+            Badge { variant: BadgeVariant::Outline, "{value_type_label(&kind.default_value_type())}" }
+        },
+        "required" => rsx! { span { class: "aio-model-table__muted", "否" } },
+        "relation" => rsx! { span { class: "aio-model-table__muted", "系统维护" } },
+        "capabilities" => rsx! {
+            span { class: "aio-model-table__summary",
+                if enabled { "已启用审计语义" } else { "未启用" }
+            }
+        },
+        "validation" => rsx! {
+            span { class: "aio-model-table__summary",
+                if field.is_some() { "字段已就绪" } else { "启用时自动创建" }
+            }
+        },
+        "actions" => rsx! {
+            div { class: "aio-model-table__actions",
+                Checkbox {
+                    checked: Some(checkbox_state(enabled)),
+                    aria_label: "启用审计字段 {kind.label()}",
+                    on_checked_change: move |checked| {
+                        toggle_model_audit_field(
+                            model.clone(),
+                            kind,
+                            checkbox_is_checked(checked),
+                            api_base_url.clone(),
+                            program_id.clone(),
+                            version,
+                            generation,
+                            status,
+                        );
+                    },
+                }
+            }
+        },
         _ => rsx! { "—" },
     }
 }

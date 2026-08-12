@@ -4,17 +4,33 @@ use super::*;
 pub(super) fn EndpointEditor(
     mut draft: Signal<PageEndpointDefinition>,
     siblings: Vec<PageEndpointDefinition>,
+    stable_input_names: BTreeMap<SymbolId, String>,
+    stable_output_names: BTreeMap<SymbolId, String>,
     mut status: Signal<Option<String>>,
     on_submit: EventHandler<PageEndpointDefinition>,
     on_cancel: EventHandler<()>,
 ) -> Element {
-    let endpoint = draft();
+    let initial_path = draft().path.clone();
+    let mut path = use_signal(move || initial_path);
+    let mut endpoint = draft();
+    endpoint.path = path();
+    normalize_endpoint_parameter_names(&mut endpoint, &stable_input_names, &stable_output_names);
     let errors = validate_page_endpoint_draft(&endpoint, &siblings);
     let can_save = errors.is_empty();
+    let submit_stable_input_names = stable_input_names.clone();
+    let submit_stable_output_names = stable_output_names.clone();
+    let input_stable_names = stable_input_names;
+    let output_stable_names = stable_output_names;
     rsx! {
         form { class: "aio-endpoint-editor", onsubmit: move |event| {
             event.prevent_default();
-            let endpoint = draft();
+            let mut endpoint = draft();
+            endpoint.path = path();
+            normalize_endpoint_parameter_names(
+                &mut endpoint,
+                &submit_stable_input_names,
+                &submit_stable_output_names,
+            );
             let errors = validate_page_endpoint_draft(&endpoint, &siblings);
             if let Some(error) = errors.first() {
                 status.set(Some(error.clone()));
@@ -36,11 +52,15 @@ pub(super) fn EndpointEditor(
                     }
                     Input {
                         class: "aio-input aio-endpoint-path",
-                        value: "{endpoint.path}",
+                        value: path(),
                         aria_label: "REST 路径",
                         placeholder: "/api/users/batch-disable",
                         oninput: move |event: FormEvent| {
-                            draft.with_mut(|endpoint| endpoint.path = event.value());
+                            path.set(event.value());
+                            draft.with_mut(|endpoint| {
+                                endpoint.path = event.value();
+                                synchronize_path_parameter_names(endpoint);
+                            });
                         }
                     }
                 }
@@ -75,14 +95,16 @@ pub(super) fn EndpointEditor(
                         variant: ButtonVariant::Outline,
                         onclick: move |_| {
                             draft.with_mut(|endpoint| {
-                                let name = next_endpoint_parameter_name(
+                                let title = format!("入参 {}", endpoint.inputs.len() + 1);
+                                let name = unique_identifier_from_title(
+                                    &title,
                                     "input",
                                     endpoint.inputs.iter().map(|input| input.name.as_str()),
                                 );
                                 endpoint.inputs.push(EndpointInputDefinition {
                                     id: SymbolId::new(),
-                                    name: name.clone(),
-                                    title: name,
+                                    name,
+                                    title,
                                     location: EndpointInputLocation::Body,
                                     value_type: ValueType::Text,
                                     required: false,
@@ -101,7 +123,7 @@ pub(super) fn EndpointEditor(
                     max_height: "18rem",
                     row_key: |input: EndpointInputDefinition| input.id.to_string(),
                     render_cell: move |cell: DataTableCellContext<EndpointInputDefinition>| {
-                        endpoint_input_draft_cell(cell, draft)
+                        endpoint_input_draft_cell(cell, draft, path, input_stable_names.clone())
                     },
                     empty_text: "无入参",
                 }
@@ -115,14 +137,16 @@ pub(super) fn EndpointEditor(
                         variant: ButtonVariant::Outline,
                         onclick: move |_| {
                             draft.with_mut(|endpoint| {
-                                let name = next_endpoint_parameter_name(
+                                let title = format!("响应字段 {}", endpoint.outputs.len() + 1);
+                                let name = unique_identifier_from_title(
+                                    &title,
                                     "output",
                                     endpoint.outputs.iter().map(|output| output.name.as_str()),
                                 );
                                 endpoint.outputs.push(EndpointOutputDefinition {
                                     id: SymbolId::new(),
-                                    name: name.clone(),
-                                    title: name,
+                                    name,
+                                    title,
                                     value_type: ValueType::Text,
                                 });
                             });
@@ -139,7 +163,7 @@ pub(super) fn EndpointEditor(
                     max_height: "18rem",
                     row_key: |output: EndpointOutputDefinition| output.id.to_string(),
                     render_cell: move |cell: DataTableCellContext<EndpointOutputDefinition>| {
-                        endpoint_output_draft_cell(cell, draft)
+                        endpoint_output_draft_cell(cell, draft, output_stable_names.clone())
                     },
                     empty_text: "无响应字段",
                 }
@@ -172,8 +196,8 @@ pub(super) fn EndpointEditor(
 
 pub(super) fn endpoint_input_columns() -> Vec<DataTableColumn> {
     vec![
-        DataTableColumn::leaf("name", "名称").width(150),
-        DataTableColumn::leaf("title", "说明").width(180),
+        DataTableColumn::leaf("name", "自动标识").width(150),
+        DataTableColumn::leaf("title", "显示标题").width(180),
         DataTableColumn::leaf("location", "位置").width(110),
         DataTableColumn::leaf("type", "类型").width(130),
         DataTableColumn::leaf("required", "必填")
@@ -188,8 +212,8 @@ pub(super) fn endpoint_input_columns() -> Vec<DataTableColumn> {
 
 pub(super) fn endpoint_output_columns() -> Vec<DataTableColumn> {
     vec![
-        DataTableColumn::leaf("name", "名称").width(170),
-        DataTableColumn::leaf("title", "说明").width(220),
+        DataTableColumn::leaf("name", "自动标识").width(170),
+        DataTableColumn::leaf("title", "显示标题").width(220),
         DataTableColumn::leaf("type", "类型").width(150),
         DataTableColumn::leaf("actions", "操作")
             .width(64)
@@ -201,37 +225,66 @@ pub(super) fn endpoint_output_columns() -> Vec<DataTableColumn> {
 pub(super) fn endpoint_input_draft_cell(
     cell: DataTableCellContext<EndpointInputDefinition>,
     mut draft: Signal<PageEndpointDefinition>,
+    path: Signal<String>,
+    stable_names: BTreeMap<SymbolId, String>,
 ) -> Element {
     let input = cell.row;
     let input_id = input.id;
     match cell.column.key.as_str() {
-        "name" => rsx! {
-            Input {
-                class: "aio-input aio-endpoint-parameter-input",
-                value: "{input.name}",
-                aria_label: "入参名称",
-                oninput: move |event: FormEvent| update_endpoint_input(&mut draft, input_id, |input| {
-                    input.name = event.value();
-                }),
-            }
-        },
+        "name" => rsx! { code { "{input.name}" } },
         "title" => rsx! {
             Input {
                 class: "aio-input aio-endpoint-parameter-input",
                 value: "{input.title}",
-                aria_label: "入参说明",
-                oninput: move |event: FormEvent| update_endpoint_input(&mut draft, input_id, |input| {
-                    input.title = event.value();
-                }),
+                aria_label: "入参显示标题",
+                oninput: move |event: FormEvent| {
+                    let title = event.value();
+                    let generated_name = (!stable_names.contains_key(&input_id)
+                        && input.location != EndpointInputLocation::Path)
+                        .then(|| {
+                        unique_identifier_from_title(
+                            &title,
+                            "input",
+                            draft()
+                                .inputs
+                                .iter()
+                                .filter(|candidate| candidate.id != input_id)
+                                .map(|candidate| candidate.name.as_str()),
+                        )
+                    });
+                    update_endpoint_input(&mut draft, input_id, |input| {
+                        input.title = title;
+                        if let Some(name) = generated_name {
+                            input.name = name;
+                        }
+                    });
+                },
             }
         },
         "location" => rsx! {
             select {
                 class: "aio-input aio-endpoint-parameter-input",
                 aria_label: "入参位置",
-                onchange: move |event: FormEvent| update_endpoint_input(&mut draft, input_id, |input| {
-                    input.location = endpoint_location_from_key(&event.value());
-                }),
+                onchange: move |event: FormEvent| {
+                    let location = endpoint_location_from_key(&event.value());
+                    let path_name = (location == EndpointInputLocation::Path).then(|| {
+                        next_endpoint_path_parameter_name(
+                            &path(),
+                            draft()
+                                .inputs
+                                .iter()
+                                .filter(|candidate| candidate.id != input_id)
+                                .map(|candidate| candidate.name.as_str()),
+                        )
+                    }).flatten();
+                    update_endpoint_input(&mut draft, input_id, |input| {
+                        input.location = location;
+                        input.required = location == EndpointInputLocation::Path || input.required;
+                        if let Some(name) = path_name {
+                            input.name = name;
+                        }
+                    });
+                },
                 {endpoint_location_options(input.location)}
             }
         },
@@ -282,28 +335,37 @@ pub(super) fn endpoint_input_draft_cell(
 pub(super) fn endpoint_output_draft_cell(
     cell: DataTableCellContext<EndpointOutputDefinition>,
     mut draft: Signal<PageEndpointDefinition>,
+    stable_names: BTreeMap<SymbolId, String>,
 ) -> Element {
     let output = cell.row;
     let output_id = output.id;
     match cell.column.key.as_str() {
-        "name" => rsx! {
-            Input {
-                class: "aio-input aio-endpoint-parameter-input",
-                value: "{output.name}",
-                aria_label: "响应字段名称",
-                oninput: move |event: FormEvent| update_endpoint_output(&mut draft, output_id, |output| {
-                    output.name = event.value();
-                }),
-            }
-        },
+        "name" => rsx! { code { "{output.name}" } },
         "title" => rsx! {
             Input {
                 class: "aio-input aio-endpoint-parameter-input",
                 value: "{output.title}",
-                aria_label: "响应字段说明",
-                oninput: move |event: FormEvent| update_endpoint_output(&mut draft, output_id, |output| {
-                    output.title = event.value();
-                }),
+                aria_label: "响应字段显示标题",
+                oninput: move |event: FormEvent| {
+                    let title = event.value();
+                    let generated_name = (!stable_names.contains_key(&output_id)).then(|| {
+                        unique_identifier_from_title(
+                            &title,
+                            "output",
+                            draft()
+                                .outputs
+                                .iter()
+                                .filter(|candidate| candidate.id != output_id)
+                                .map(|candidate| candidate.name.as_str()),
+                        )
+                    });
+                    update_endpoint_output(&mut draft, output_id, |output| {
+                        output.title = title;
+                        if let Some(name) = generated_name {
+                            output.name = name;
+                        }
+                    });
+                },
             }
         },
         "type" => {
@@ -369,21 +431,6 @@ pub(super) fn update_endpoint_output(
             update(output);
         }
     });
-}
-
-pub(super) fn next_endpoint_parameter_name<'a>(
-    prefix: &str,
-    existing: impl Iterator<Item = &'a str>,
-) -> String {
-    let existing = existing.collect::<BTreeSet<_>>();
-    let mut index = existing.len() + 1;
-    loop {
-        let name = format!("{prefix}_{index}");
-        if !existing.contains(name.as_str()) {
-            return name;
-        }
-        index += 1;
-    }
 }
 
 pub(super) fn submit_endpoint_update(

@@ -119,26 +119,26 @@ pub(super) fn PagesPanel(
                         }
                     }
                 }
-                div { class: "aio-studio-catalog__directory-list",
-                    if visible_pages.is_empty() {
-                        div { class: "aio-studio-catalog__directory-empty", "没有匹配的页面" }
-                    }
-                    for page in visible_pages {
-                        Button {
-                            r#type: "button",
-                            variant: ButtonVariant::Ghost,
-                            class: if Some(page.id) == current_page_id {
-                                "aio-studio-catalog__page aio-studio-catalog__page--active"
-                            } else {
-                                "aio-studio-catalog__page"
-                            },
-                            onclick: {
-                                let page_id = page.id;
-                                move |_| selected_page.set(Some(page_id))
-                            },
-                            strong { "{page.title}" }
-                            code { "{page.name}" }
-                            span { "{page_renderer_title(page)} · {page.endpoints.len()} 接口" }
+                CollectionTree::<PageDefinition> {
+                    class: "aio-studio-catalog__directory-list",
+                    aria_label: "页面目录",
+                    data: CollectionTreeData::Collection(
+                        visible_pages.iter().map(|page| (*page).clone()).collect()
+                    ),
+                    selected_key: current_page_id.map(|page_id| page_id.to_string()),
+                    empty_text: "没有匹配的页面",
+                    item_key: |page: PageDefinition| page.id.to_string(),
+                    on_select: move |page: PageDefinition| {
+                        selected_page.set(Some(page.id));
+                    },
+                    render_item: |item: CollectionTreeItemContext<PageDefinition>| {
+                        let page = item.item;
+                        rsx! {
+                            div { class: "aio-studio-catalog__page-content",
+                                strong { "{page.title}" }
+                                code { "{page.name}" }
+                                span { "{page_renderer_title(&page)} · {page.endpoints.len()} 接口" }
+                            }
                         }
                     }
                 }

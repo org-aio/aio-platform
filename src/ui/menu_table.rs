@@ -51,12 +51,7 @@ pub(super) fn menu_table_cell(
                 .map(|permission| permission.name.as_str())
         })
         .collect::<Vec<_>>();
-    let icon = menu
-        .icon
-        .as_deref()
-        .filter(|value| !value.is_empty())
-        .unwrap_or("—");
-    let indent_style = format!("padding-left:{}px;", cell.row.depth * 20);
+    let icon = resolved_navigation_icon(menu.icon.as_deref(), &menu.name);
     let mut toggle_context = context.clone();
     let mut edit_context = context.clone();
     let mut add_context = context.clone();
@@ -69,13 +64,9 @@ pub(super) fn menu_table_cell(
     };
     match cell.column.key.as_str() {
         "name" => rsx! {
-            div {
-                class: if cell.row.depth == 0 {
-                    "aio-menu-cell__name aio-menu-cell__name--scene"
-                } else {
-                    "aio-menu-cell__name"
-                },
-                style: indent_style,
+            TreeIndent {
+                depth: cell.row.depth,
+                root: cell.row.depth == 0,
                     if child_count == 0 {
                     span { class: "aio-menu-cell__tree-spacer" }
                     } else {
@@ -111,7 +102,11 @@ pub(super) fn menu_table_cell(
                 }
             }
         },
-        "icon" => rsx! { span { class: "aio-menu-cell__icon", title: "{icon}", "{icon}" } },
+        "icon" => rsx! {
+            span { class: "aio-menu-cell__icon", title: "{icon}",
+                NavigationIcon { name: icon.to_owned(), class: "size-4".to_owned() }
+            }
+        },
         "sort" => rsx! { "{cell.row.position + 1}" },
         "permissions" => rsx! {
             div { class: "aio-menu-cell__permissions",

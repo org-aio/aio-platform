@@ -20,7 +20,7 @@ pub(super) fn FunctionNodeDialog(
     let next_editor = next_function_node_editor(&function.graph.nodes);
     let initial_node = node.unwrap_or_else(|| FunctionNode {
         id: SymbolId::new(),
-        name: format!("node_{}", node_count + 1),
+        name: next_function_node_name(&function.graph.nodes),
         state: DefinitionState::Known,
         editor: next_editor,
         kind: FunctionNodeKind::Constant {
@@ -32,6 +32,17 @@ pub(super) fn FunctionNodeDialog(
     let mut draft = use_signal(move || initial_node);
     let current = draft();
     let current_kind_key = function_node_kind_key(&current.kind);
+    let catalog_api = api_base_url.clone();
+    let capability_catalog = use_resource(move || {
+        let api_base_url = catalog_api.clone();
+        async move { get_api::<crate::StudioCatalog>(&api_base_url, "/api/studio/catalog").await }
+    });
+    let capabilities = capability_catalog
+        .read()
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .map(|catalog| catalog.capabilities.clone())
+        .unwrap_or_default();
     let option_function = function.clone();
     let option_models = models.clone();
     let option_routes = routes.clone();
@@ -94,17 +105,6 @@ pub(super) fn FunctionNodeDialog(
             },
                 div { class: "aio-definition-dialog__grid aio-function-node-dialog__identity",
                     label {
-                        span { "节点名称" }
-                        Input {
-                            class: "aio-input",
-                            aria_label: "节点名称",
-                            value: "{current.name}",
-                            oninput: move |event: FormEvent| {
-                                draft.with_mut(|node| node.name = event.value());
-                            }
-                        }
-                    }
-                    label {
                         span { "节点类型" }
                         select {
                             class: "aio-input",
@@ -119,6 +119,7 @@ pub(super) fn FunctionNodeDialog(
                                     &option_models,
                                     &option_routes,
                                     &option_functions,
+                                    &capabilities,
                                 ) {
                                     Ok(kind) => draft.with_mut(|node| node.kind = kind),
                                     Err(error) => status.set(Some(error)),
@@ -131,6 +132,7 @@ pub(super) fn FunctionNodeDialog(
                                 &models,
                                 &routes,
                                 &functions,
+                                &capabilities,
                             )}
                         }
                     }
@@ -176,6 +178,7 @@ pub(super) fn FunctionNodeDialog(
                         models.clone(),
                         routes.clone(),
                         functions.clone(),
+                        capabilities.clone(),
                     )}
                 }
                 footer { class: "aio-definition-dialog__actions",
@@ -253,6 +256,7 @@ pub(super) fn function_node_kind_options(
     models: &[ModelDefinition],
     routes: &[RouteDefinition],
     functions: &[FunctionDefinition],
+    capabilities: &crate::CapabilityCatalog,
 ) -> Element {
     let has_inputs = !function.inputs.is_empty();
     let has_outputs = !function.outputs.is_empty();
@@ -289,7 +293,12 @@ pub(super) fn function_node_kind_options(
         option { value: "notify", selected: current_key == "notify", "通知" }
         option { value: "return", selected: current_key == "return", "返回" }
         option { value: "fail", selected: current_key == "fail", "失败" }
-        option { value: "capability", selected: current_key == "capability", "能力调用" }
+        option {
+            value: "capability",
+            selected: current_key == "capability",
+            disabled: capabilities.capabilities.is_empty(),
+            "能力调用"
+        }
     }
 }
 
@@ -300,6 +309,7 @@ pub(super) fn default_function_node_kind(
     models: &[ModelDefinition],
     routes: &[RouteDefinition],
     functions: &[FunctionDefinition],
+    capabilities: &crate::CapabilityCatalog,
 ) -> Result<FunctionNodeKind, String> {
     let first_model_id = || {
         models
@@ -408,10 +418,21 @@ pub(super) fn default_function_node_kind(
         "fail" => Ok(FunctionNodeKind::Fail {
             code: "FUNCTION_FAILED".to_owned(),
         }),
-        "capability" => Ok(FunctionNodeKind::Capability {
-            capability_id: String::new(),
-            operation: String::new(),
-        }),
+        "capability" => {
+            capabilities
+                .capabilities
+                .iter()
+                .next()
+                .and_then(|(capability_id, capability)| {
+                    capability.operations.keys().next().map(|operation| {
+                        FunctionNodeKind::Capability {
+                            capability_id: capability_id.clone(),
+                            operation: operation.clone(),
+                        }
+                    })
+                })
+                .ok_or_else(|| "暂无已注册能力".to_owned())
+        }
         _ => Err("未知函数节点类型".to_owned()),
     }
 }

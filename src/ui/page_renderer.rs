@@ -164,6 +164,13 @@ pub(super) fn PageRendererSettings(
                                         selected: layout.kind == PageRendererKind::ConventionFile,
                                         "约定文件渲染"
                                     }
+                                    if layout.kind == PageRendererKind::Extension {
+                                        option {
+                                            value: "extension",
+                                            selected: true,
+                                            "扩展页面"
+                                        }
+                                    }
                                     option {
                                         value: "menu_tree",
                                         selected: layout.kind == PageRendererKind::MenuTree,
@@ -505,6 +512,7 @@ pub(super) fn suggest_user_tree_renderer(
     })?;
     Some(PageRendererDraft {
         kind: PageRendererKind::TreeTable,
+        extension: None,
         table_model_id: table.id.to_string(),
         page_size: "20".to_owned(),
         tree_model_id: tree.id.to_string(),

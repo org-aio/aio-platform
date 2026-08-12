@@ -384,6 +384,7 @@ mod tests {
             id: SymbolId::new(),
             name: "user".to_owned(),
             title: "用户".to_owned(),
+            primary_key: crate::ModelPrimaryKeyDefinition::default(),
             field_slots,
             field_types: BTreeMap::from([(0, ValueType::Text), (1, ValueType::Text)]),
             field_names: BTreeMap::from([(0, "username".to_owned()), (1, "secret".to_owned())]),
@@ -431,6 +432,7 @@ mod tests {
             id: SymbolId::new(),
             name: "user".to_owned(),
             title: "用户".to_owned(),
+            primary_key: crate::ModelPrimaryKeyDefinition::default(),
             field_slots: BTreeMap::from([(username_id, 0), (display_name_id, 1)]),
             field_types: BTreeMap::from([(0, ValueType::Text), (1, ValueType::Text)]),
             field_names: BTreeMap::from([

@@ -58,7 +58,7 @@ pub(super) fn QueryEditorDialog(
 ) -> Element {
     let editing = query.is_some();
     let query_id = query.as_ref().map_or_else(SymbolId::new, |query| query.id);
-    let initial_name = query
+    let stable_name = query
         .as_ref()
         .map(|query| query.name.clone())
         .unwrap_or_default();
@@ -90,7 +90,6 @@ pub(super) fn QueryEditorDialog(
                 parameter: String::new(),
             }]
         });
-    let mut name = use_signal(move || initial_name);
     let mut title = use_signal(move || initial_title);
     let mut conjunction = use_signal(move || initial_conjunction);
     let mut conditions = use_signal(move || initial_conditions);
@@ -122,10 +121,18 @@ pub(super) fn QueryEditorDialog(
                 class: "aio-definition-dialog__form aio-query-dialog__form",
                 onsubmit: move |event| {
                     event.prevent_default();
-                    let next_name = name().trim().to_owned();
                     let next_title = title().trim().to_owned();
-                    if next_name.is_empty() || next_title.is_empty() {
-                        status.set(Some("查询标识和标题不能为空".to_owned()));
+                    if next_title.is_empty() {
+                        status.set(Some("查询标题不能为空".to_owned()));
+                        return;
+                    }
+                    let next_name = if editing {
+                        stable_name.clone()
+                    } else {
+                        identifier_from_title(&next_title)
+                    };
+                    if next_name.is_empty() {
+                        status.set(Some("查询标题无法生成有效标识，请包含中文、字母或数字".to_owned()));
                         return;
                     }
                     let next_conditions = conditions()
@@ -180,16 +187,6 @@ pub(super) fn QueryEditorDialog(
                     h3 { "查询定义" }
                     div { class: "aio-definition-dialog__grid aio-definition-dialog__grid--three",
                         label {
-                            span { "查询标识" }
-                            Input {
-                                class: "aio-input",
-                                aria_label: "查询标识",
-                                placeholder: "例如 by_department",
-                                value: name(),
-                                oninput: move |event: FormEvent| name.set(event.value()),
-                            }
-                        }
-                        label {
                             span { "显示标题" }
                             Input {
                                 class: "aio-input",
@@ -201,13 +198,14 @@ pub(super) fn QueryEditorDialog(
                         }
                         label {
                             span { "条件关系" }
-                            select {
-                                class: "aio-input",
+                            Select {
                                 aria_label: "查询条件关系",
                                 value: conjunction(),
-                                onchange: move |event: FormEvent| conjunction.set(event.value()),
-                                option { value: "all", "全部满足" }
-                                option { value: "any", "任一满足" }
+                                options: vec![
+                                    SelectItem::new("all", "全部满足"),
+                                    SelectItem::new("any", "任一满足"),
+                                ],
+                                on_value_change: move |value| conjunction.set(value),
                             }
                         }
                     }
@@ -310,117 +308,120 @@ pub(super) fn QueryConditionEditorRow(
                 }
             }
             match condition.clone() {
-                QueryConditionDraft::Field { field_id, operator, parameter } => rsx! {
+                QueryConditionDraft::Field { field_id, operator, .. } => rsx! {
                     label {
                         span { "字段" }
-                        select {
-                            class: "aio-input",
+                        Select {
                             aria_label: "查询条件字段 {index}",
                             value: field_id,
-                            onchange: move |event: FormEvent| conditions.with_mut(|items| {
-                                if let Some(QueryConditionDraft::Field { field_id, .. }) = items.get_mut(index) {
-                                    *field_id = event.value();
+                            placement: SelectPlacement::Top,
+                            options: std::iter::once(SelectItem::new("", "选择字段"))
+                                .chain(fields.iter().map(|field| SelectItem::new(
+                                    field.id.to_string(),
+                                    format!("{} · {}", field.title, field.name),
+                                )))
+                                .collect(),
+                            on_value_change: move |value| conditions.with_mut(|items| {
+                                if let Some(QueryConditionDraft::Field { field_id, parameter, .. }) = items.get_mut(index) {
+                                    let next_parameter = fields
+                                        .iter()
+                                        .find(|field| field.id.to_string() == value)
+                                        .map(|field| field.name.clone())
+                                        .unwrap_or_default();
+                                    *field_id = value;
+                                    *parameter = next_parameter;
                                 }
                             }),
-                            option { value: "", "选择字段" }
-                            for field in &fields {
-                                option { value: "{field.id}", "{field.title} · {field.name}" }
-                            }
                         }
                     }
                     label {
                         span { "匹配" }
-                        select {
-                            class: "aio-input",
+                        Select {
                             aria_label: "查询条件操作符 {index}",
                             value: operator,
-                            onchange: move |event: FormEvent| conditions.with_mut(|items| {
+                            placement: SelectPlacement::Top,
+                            options: query_operator_select_items(),
+                            on_value_change: move |value| conditions.with_mut(|items| {
                                 if let Some(QueryConditionDraft::Field { operator, .. }) = items.get_mut(index) {
-                                    *operator = event.value();
-                                }
-                            }),
-                            {query_operator_options(&query_condition_operator(&condition))}
-                        }
-                    }
-                    label {
-                        span { "参数名" }
-                        Input {
-                            class: "aio-input",
-                            aria_label: "查询条件参数 {index}",
-                            placeholder: "例如 status",
-                            value: parameter,
-                            oninput: move |event: FormEvent| conditions.with_mut(|items| {
-                                if let Some(QueryConditionDraft::Field { parameter, .. }) = items.get_mut(index) {
-                                    *parameter = event.value();
+                                    *operator = value;
                                 }
                             }),
                         }
                     }
                 },
-                QueryConditionDraft::Relation { relation_field_id, target_field_id, operator, parameter } => rsx! {
+                QueryConditionDraft::Relation { relation_field_id, target_field_id, operator, .. } => rsx! {
                     label {
                         span { "关联字段" }
-                        select {
-                            class: "aio-input",
+                        Select {
                             aria_label: "关联查询字段 {index}",
                             value: relation_field_id,
-                            onchange: move |event: FormEvent| conditions.with_mut(|items| {
+                            placement: SelectPlacement::Top,
+                            options: std::iter::once(SelectItem::new("", "选择关系"))
+                                .chain(fields.iter().filter(|field| field.relation.is_some()).map(|field| SelectItem::new(
+                                    field.id.to_string(),
+                                    format!("{} · {}", field.title, field.name),
+                                )))
+                                .collect(),
+                            on_value_change: move |value| conditions.with_mut(|items| {
                                 if let Some(QueryConditionDraft::Relation {
                                     relation_field_id,
                                     target_field_id,
+                                    parameter,
                                     ..
                                 }) = items.get_mut(index) {
-                                    *relation_field_id = event.value();
+                                    *relation_field_id = value;
                                     target_field_id.clear();
+                                    parameter.clear();
                                 }
                             }),
-                            option { value: "", "选择关系" }
-                            for field in fields.iter().filter(|field| field.relation.is_some()) {
-                                option { value: "{field.id}", "{field.title} · {field.name}" }
-                            }
                         }
                     }
                     label {
                         span { "对端字段" }
-                        select {
-                            class: "aio-input",
+                        Select {
                             aria_label: "关联查询对端字段 {index}",
                             value: target_field_id,
-                            onchange: move |event: FormEvent| conditions.with_mut(|items| {
-                                if let Some(QueryConditionDraft::Relation { target_field_id, .. }) = items.get_mut(index) {
-                                    *target_field_id = event.value();
+                            placement: SelectPlacement::Top,
+                            options: std::iter::once(SelectItem::new("", "选择字段"))
+                                .chain(relation_target_fields.iter().map(|field| SelectItem::new(
+                                    field.id.to_string(),
+                                    format!("{} · {}", field.title, field.name),
+                                )))
+                                .collect(),
+                            on_value_change: move |value| conditions.with_mut(|items| {
+                                if let Some(QueryConditionDraft::Relation {
+                                    relation_field_id,
+                                    target_field_id,
+                                    parameter,
+                                    ..
+                                }) = items.get_mut(index) {
+                                    let relation_name = SymbolId::parse(relation_field_id)
+                                        .ok()
+                                        .and_then(|field_id| fields.iter().find(|field| field.id == field_id))
+                                        .map(|field| field.name.as_str());
+                                    let target_name = relation_target_fields
+                                        .iter()
+                                        .find(|field| field.id.to_string() == value)
+                                        .map(|field| field.name.as_str());
+                                    *target_field_id = value;
+                                    *parameter = match (relation_name, target_name) {
+                                        (Some(relation), Some(target)) => format!("{relation}_{target}"),
+                                        _ => String::new(),
+                                    };
                                 }
                             }),
-                            option { value: "", "选择字段" }
-                            for field in &relation_target_fields {
-                                option { value: "{field.id}", "{field.title} · {field.name}" }
-                            }
                         }
                     }
                     label {
                         span { "匹配" }
-                        select {
-                            class: "aio-input",
+                        Select {
                             aria_label: "关联查询操作符 {index}",
                             value: operator,
-                            onchange: move |event: FormEvent| conditions.with_mut(|items| {
+                            placement: SelectPlacement::Top,
+                            options: query_operator_select_items(),
+                            on_value_change: move |value| conditions.with_mut(|items| {
                                 if let Some(QueryConditionDraft::Relation { operator, .. }) = items.get_mut(index) {
-                                    *operator = event.value();
-                                }
-                            }),
-                            {query_operator_options(&query_condition_operator(&condition))}
-                        }
-                    }
-                    label {
-                        span { "参数名" }
-                        Input {
-                            class: "aio-input",
-                            aria_label: "关联查询参数 {index}",
-                            placeholder: "例如 department_name",
-                            value: parameter,
-                            oninput: move |event: FormEvent| conditions.with_mut(|items| {
-                                if let Some(QueryConditionDraft::Relation { parameter, .. }) = items.get_mut(index) {
-                                    *parameter = event.value();
+                                    *operator = value;
                                 }
                             }),
                         }
@@ -445,13 +446,6 @@ pub(super) fn QueryConditionEditorRow(
     }
 }
 
-pub(super) fn query_condition_operator(condition: &QueryConditionDraft) -> String {
-    match condition {
-        QueryConditionDraft::Field { operator, .. }
-        | QueryConditionDraft::Relation { operator, .. } => operator.clone(),
-    }
-}
-
 pub(super) fn query_condition_from_draft(
     condition: &QueryConditionDraft,
     fields: &[FieldDefinition],
@@ -467,7 +461,16 @@ pub(super) fn query_condition_from_draft(
             if !fields.iter().any(|field| field.id == field_id) {
                 return Err("查询字段不属于当前模型".to_owned());
             }
-            let parameter = parameter.trim().to_owned();
+            let parameter = parameter.trim();
+            let parameter = if parameter.is_empty() {
+                fields
+                    .iter()
+                    .find(|field| field.id == field_id)
+                    .map(|field| field.name.clone())
+                    .unwrap_or_default()
+            } else {
+                parameter.to_owned()
+            };
             if parameter.is_empty() {
                 return Err("查询参数名不能为空".to_owned());
             }
@@ -503,7 +506,23 @@ pub(super) fn query_condition_from_draft(
             {
                 return Err("关联查询字段不属于对端模型".to_owned());
             }
-            let parameter = parameter.trim().to_owned();
+            let parameter = parameter.trim();
+            let parameter = if parameter.is_empty() {
+                let relation_name = fields
+                    .iter()
+                    .find(|field| field.id == relation_field_id)
+                    .map(|field| field.name.as_str())
+                    .unwrap_or_default();
+                let target_name = target_model
+                    .fields
+                    .iter()
+                    .find(|field| field.id == target_field_id)
+                    .map(|field| field.name.as_str())
+                    .unwrap_or_default();
+                format!("{relation_name}_{target_name}")
+            } else {
+                parameter.to_owned()
+            };
             if parameter.is_empty() {
                 return Err("关联查询参数名不能为空".to_owned());
             }

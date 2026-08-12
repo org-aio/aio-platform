@@ -275,18 +275,18 @@ pub(super) fn query_operator_from_key(value: &str) -> crate::QueryOperator {
     }
 }
 
-pub(super) fn query_operator_options(selected: &str) -> Element {
-    rsx! {
-        option { value: "contains", selected: selected == "contains", "包含" }
-        option { value: "equals", selected: selected == "equals", "等于" }
-        option { value: "not_equals", selected: selected == "not_equals", "不等于" }
-        option { value: "starts_with", selected: selected == "starts_with", "开头是" }
-        option { value: "ends_with", selected: selected == "ends_with", "结尾是" }
-        option { value: "greater_than", selected: selected == "greater_than", "大于" }
-        option { value: "greater_or_equal", selected: selected == "greater_or_equal", "大于等于" }
-        option { value: "less_than", selected: selected == "less_than", "小于" }
-        option { value: "less_or_equal", selected: selected == "less_or_equal", "小于等于" }
-    }
+pub(super) fn query_operator_select_items() -> Vec<SelectItem> {
+    vec![
+        SelectItem::new("contains", "包含"),
+        SelectItem::new("equals", "等于"),
+        SelectItem::new("not_equals", "不等于"),
+        SelectItem::new("starts_with", "开头是"),
+        SelectItem::new("ends_with", "结尾是"),
+        SelectItem::new("greater_than", "大于"),
+        SelectItem::new("greater_or_equal", "大于等于"),
+        SelectItem::new("less_than", "小于"),
+        SelectItem::new("less_or_equal", "小于等于"),
+    ]
 }
 
 pub(super) fn model_validation_label(rule: &crate::ModelValidationRule) -> &'static str {
