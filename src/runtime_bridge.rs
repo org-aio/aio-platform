@@ -67,6 +67,7 @@ pub fn PublishedApplication(
     let mut scene_creator_open = use_signal(|| false);
     let mut deleting_scene = use_signal(|| None::<SymbolId>);
     let mut menu_creator_open = use_signal(|| false);
+    let mut deleting_menu = use_signal(|| None::<SymbolId>);
     let Some(result) = image.read().as_ref().cloned() else {
         return state("正在加载应用", false);
     };
@@ -141,7 +142,19 @@ pub fn PublishedApplication(
             move |scene_id: String| match SymbolId::parse(&scene_id) {
                 Ok(scene_id) => {
                     status.set(None);
+                    deleting_menu.set(None);
                     deleting_scene.set(Some(scene_id));
+                }
+                Err(error) => status.set(Some(error.to_string())),
+            },
+        ));
+    let delete_menu =
+        admin_enabled.then_some(Callback::new(
+            move |menu_id: String| match SymbolId::parse(&menu_id) {
+                Ok(menu_id) => {
+                    status.set(None);
+                    deleting_scene.set(None);
+                    deleting_menu.set(Some(menu_id));
                 }
                 Err(error) => status.set(Some(error.to_string())),
             },
@@ -177,6 +190,7 @@ pub fn PublishedApplication(
             on_create_scene: create_scene,
             on_delete_scene: delete_scene,
             on_create_menu: create_menu,
+            on_delete_menu: delete_menu,
             on_configure_page: configure_page,
             on_account_action: account_action,
             {content}
@@ -215,16 +229,28 @@ pub fn PublishedApplication(
         if admin_enabled
             && let Some(scene_id) = deleting_scene()
         {
-            crate::ui::AdminSceneDeleteDialog {
+            crate::ui::AdminMenuDeleteDialog {
                 api_base_url: String::new(),
-                scene_id,
+                menu_id: scene_id,
                 generation: image_generation,
                 status,
-                deleting_scene,
+                deleting_menu: deleting_scene,
                 on_deleted: move |_| {
                     selected_scene.set(None);
                     selected_page.set(None);
                 },
+            }
+        }
+        if admin_enabled
+            && let Some(menu_id) = deleting_menu()
+        {
+            crate::ui::AdminMenuDeleteDialog {
+                api_base_url: String::new(),
+                menu_id,
+                generation: image_generation,
+                status,
+                deleting_menu,
+                on_deleted: move |_| selected_page.set(None),
             }
         }
         if admin_enabled
