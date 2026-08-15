@@ -327,24 +327,7 @@ pub(crate) fn AdminPageEditor(
         return empty_panel("当前页面不在 Draft 中");
     };
     let menu_row = menu_id.and_then(|menu_id| {
-        draft
-            .definition
-            .menus
-            .iter()
-            .enumerate()
-            .find_map(|(position, scene)| {
-                menu_table_rows(
-                    scene,
-                    0,
-                    position,
-                    draft.definition.id,
-                    ChildCollection::Menus,
-                    draft.definition.menus.len(),
-                    &BTreeSet::new(),
-                )
-                .into_iter()
-                .find(|row| row.menu.id == menu_id)
-            })
+        find_menu_table_row(&draft.definition.menus, draft.definition.id, menu_id)
     });
     let delete_action = menu_row.as_ref().map(|row| {
         let menu_id = row.menu.id;

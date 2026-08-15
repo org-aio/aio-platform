@@ -92,14 +92,14 @@ pub(crate) fn AdminApplicationTitleEditor(
     }
 }
 
-/// 发布应用壳删除场景时复用 Studio 的依赖分析与确认流程。
+/// 发布应用壳删除菜单项时复用 Studio 的依赖分析与确认流程。
 #[component]
-pub(crate) fn AdminSceneDeleteDialog(
+pub(crate) fn AdminMenuDeleteDialog(
     api_base_url: String,
-    scene_id: SymbolId,
+    menu_id: SymbolId,
     generation: Signal<u64>,
     status: Signal<Option<String>>,
-    deleting_scene: Signal<Option<SymbolId>>,
+    deleting_menu: Signal<Option<SymbolId>>,
     on_deleted: EventHandler<()>,
 ) -> Element {
     let draft_api = api_base_url.clone();
@@ -109,29 +109,15 @@ pub(crate) fn AdminSceneDeleteDialog(
         async move { get_api::<DraftSnapshot>(&api_base_url, "/api/studio/program/draft").await }
     });
     let Some(result) = draft.read().as_ref().cloned() else {
-        return scene_delete_state("正在加载场景定义", deleting_scene);
+        return menu_delete_state("正在加载菜单定义", deleting_menu);
     };
     let draft = match result {
         Ok(draft) => draft,
-        Err(error) => return scene_delete_state(&error, deleting_scene),
+        Err(error) => return menu_delete_state(&error, deleting_menu),
     };
-    let Some((position, scene)) = draft
-        .definition
-        .menus
-        .iter()
-        .cloned()
-        .enumerate()
-        .find(|(_, scene)| scene.id == scene_id)
+    let Some(row) = find_menu_table_row(&draft.definition.menus, draft.definition.id, menu_id)
     else {
-        return scene_delete_state("场景已经不存在", deleting_scene);
-    };
-    let row = MenuTableRow {
-        menu: scene,
-        depth: 0,
-        position,
-        parent_id: draft.definition.id,
-        collection: ChildCollection::Menus,
-        sibling_count: draft.definition.menus.len(),
+        return menu_delete_state("菜单已经不存在", deleting_menu);
     };
     rsx! {
         MenuDeleteDialog {
@@ -143,7 +129,7 @@ pub(crate) fn AdminSceneDeleteDialog(
             version: draft.version,
             generation,
             status,
-            deleting_menu: deleting_scene,
+            deleting_menu,
             on_deleted,
         }
     }
@@ -169,23 +155,23 @@ fn title_editor_state(message: &str, mut editor_open: Signal<bool>) -> Element {
     }
 }
 
-fn scene_delete_state(message: &str, mut deleting_scene: Signal<Option<SymbolId>>) -> Element {
+fn menu_delete_state(message: &str, mut deleting_menu: Signal<Option<SymbolId>>) -> Element {
     rsx! {
         Dialog {
             class: "aio-endpoint-confirm-dialog",
             open: true,
             on_open_change: move |open: bool| {
                 if !open {
-                    deleting_scene.set(None);
+                    deleting_menu.set(None);
                 }
             },
-            DialogTitle { "删除场景" }
+            DialogTitle { "删除菜单项" }
             p { role: "status", "{message}" }
             footer {
                 Button {
                     r#type: "button",
                     variant: ButtonVariant::Ghost,
-                    onclick: move |_| deleting_scene.set(None),
+                    onclick: move |_| deleting_menu.set(None),
                     "关闭"
                 }
             }

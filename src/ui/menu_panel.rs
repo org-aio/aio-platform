@@ -267,6 +267,28 @@ pub(super) fn menu_table_rows(
     rows
 }
 
+pub(super) fn find_menu_table_row(
+    menus: &[MenuDefinition],
+    program_id: SymbolId,
+    target_id: SymbolId,
+) -> Option<MenuTableRow> {
+    menus
+        .iter()
+        .enumerate()
+        .flat_map(|(position, scene)| {
+            menu_table_rows(
+                scene,
+                0,
+                position,
+                program_id,
+                ChildCollection::Menus,
+                menus.len(),
+                &BTreeSet::new(),
+            )
+        })
+        .find(|row| row.menu.id == target_id)
+}
+
 pub(super) fn menu_table_columns() -> Vec<DataTableColumn> {
     vec![
         DataTableColumn::leaf("name", "菜单名称")

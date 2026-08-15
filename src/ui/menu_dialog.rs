@@ -459,7 +459,7 @@ pub(super) fn MenuDeleteDialog(
             },
             DialogTitle { "删除{delete_kind}" }
             DialogDescription {
-                "确认删除“{menu_title}”？将同时删除 {descendant_count} 个子菜单、{deleted_page_count} 个独占页面和 {deleted_route_count} 条独占路由，此操作不可恢复。"
+                "确认删除“{menu_title}”？将同时删除 {descendant_count} 个子菜单、{deleted_page_count} 个独占页面、{deleted_route_count} 条独占路由及相关生成代码文件，此操作不可恢复。"
             }
             footer { class: "aio-endpoint-confirm-dialog__actions",
                 Button {

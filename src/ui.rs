@@ -116,6 +116,6 @@ use query_dialog::*;
 use relation_dialog::*;
 use validation_dialog::*;
 
-pub(crate) use published_shell_dialogs::{AdminApplicationTitleEditor, AdminSceneDeleteDialog};
+pub(crate) use published_shell_dialogs::{AdminApplicationTitleEditor, AdminMenuDeleteDialog};
 pub use shell::StudioPage;
 pub(crate) use shell::{AdminMenuCreator, AdminPageEditor, AdminSceneCreator, ProgramMenuTreePage};
