@@ -10,7 +10,6 @@ pub(super) enum PageSettingsTab {
 #[component]
 pub(super) fn PageRendererSettings(
     page: PageDefinition,
-    program_name: String,
     models: Vec<ModelDefinition>,
     api_base_url: String,
     program_id: String,
@@ -19,6 +18,7 @@ pub(super) fn PageRendererSettings(
     status: Signal<Option<String>>,
     mut settings_tab: Signal<PageSettingsTab>,
     mut settings_open: Signal<bool>,
+    on_delete_menu: Option<Callback<()>>,
     draft: DraftSnapshot,
 ) -> Element {
     let page_id = page.id;
@@ -28,7 +28,6 @@ pub(super) fn PageRendererSettings(
     let creating_endpoint = use_signal(|| None::<PageEndpointDefinition>);
     let editing_endpoint = use_signal(|| None::<SymbolId>);
     let deleting_endpoint = use_signal(|| None::<SymbolId>);
-    let expected_path = crate::convention_page_path(&program_name, &page.name);
     let layout = layout_draft();
     let selected_table = SymbolId::parse(&layout.table_model_id).ok();
     let selected_tree = SymbolId::parse(&layout.tree_model_id).ok();
@@ -60,7 +59,6 @@ pub(super) fn PageRendererSettings(
     let save_api = api_base_url.clone();
     let save_application = program_id.clone();
     let functions_api = api_base_url.clone();
-    let generate_api = api_base_url;
     rsx! {
         Dialog {
             class: "aio-page-settings__panel aio-page-settings__panel--fullscreen",
@@ -78,6 +76,18 @@ pub(super) fn PageRendererSettings(
                 div { class: "aio-page-settings__header-actions",
                     if let Some(message) = status() {
                         Badge { variant: BadgeVariant::Outline, "{message}" }
+                    }
+                    if let Some(delete_menu) = on_delete_menu {
+                        Button {
+                            r#type: "button",
+                            size: ButtonSize::Sm,
+                            variant: ButtonVariant::Destructive,
+                            title: "删除当前菜单",
+                            aria_label: "删除当前菜单",
+                            onclick: move |_| delete_menu.call(()),
+                            icons::Trash2 { class: "size-4" }
+                            "删除菜单"
+                        }
                     }
                     Button {
                         size: ButtonSize::IconSm,
@@ -164,13 +174,6 @@ pub(super) fn PageRendererSettings(
                                         selected: layout.kind == PageRendererKind::ConventionFile,
                                         "约定文件渲染"
                                     }
-                                    if layout.kind == PageRendererKind::Extension {
-                                        option {
-                                            value: "extension",
-                                            selected: true,
-                                            "扩展页面"
-                                        }
-                                    }
                                     option {
                                         value: "menu_tree",
                                         selected: layout.kind == PageRendererKind::MenuTree,
@@ -201,22 +204,9 @@ pub(super) fn PageRendererSettings(
                                         }
                                     }
                                 }
-                                if layout.kind == PageRendererKind::ConventionFile {
-                                    div { class: "aio-page-settings__convention",
-                                        code { "{expected_path}" }
-                                        p { "页面模块由程序标识和页面标识确定。" }
-                                        Button {
-                                            r#type: "button",
-                                            variant: ButtonVariant::Outline,
-                                            onclick: move |_| generate_convention_file(
-                                                generate_api.clone(),
-                                                page_id,
-                                                status,
-                                            ),
-                                            "生成期望文件"
-                                        }
-                                    }
-                                } else if layout.kind != PageRendererKind::MenuTree {
+                                if layout.kind != PageRendererKind::ConventionFile
+                                    && layout.kind != PageRendererKind::MenuTree
+                                {
                                     label { r#for: "table-model", "表格模型" }
                                     select {
                                         id: "table-model",
@@ -447,20 +437,6 @@ pub(super) fn PageRendererSettings(
     }
 }
 
-pub(super) fn generate_convention_file(
-    api_base_url: String,
-    page_id: SymbolId,
-    mut status: Signal<Option<String>>,
-) {
-    spawn(async move {
-        let path = format!("/api/studio/program/pages/{page_id}/convention-file");
-        match post_api::<(), crate::ConventionFileResult>(&api_base_url, &path, &()).await {
-            Ok(result) => status.set(Some(format!("已生成 {}", result.path))),
-            Err(error) => status.set(Some(error)),
-        }
-    });
-}
-
 /// 用户明确采用建议时，才根据稳定模型与字段语义生成树表草稿。
 pub(super) fn suggest_user_tree_renderer(
     page: &PageDefinition,
@@ -512,7 +488,6 @@ pub(super) fn suggest_user_tree_renderer(
     })?;
     Some(PageRendererDraft {
         kind: PageRendererKind::TreeTable,
-        extension: None,
         table_model_id: table.id.to_string(),
         page_size: "20".to_owned(),
         tree_model_id: tree.id.to_string(),

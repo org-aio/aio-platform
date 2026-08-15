@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, fmt, str::FromStr};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+    str::FromStr,
+};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -6,7 +10,32 @@ use serde_json::Value;
 use uuid::Uuid;
 
 /// 当前数据库程序协议版本。
-pub const PROGRAM_SCHEMA_VERSION: u32 = 12;
+pub const PROGRAM_SCHEMA_VERSION: u32 = 15;
+
+/// 应用源码需要支持的客户端发布目标。
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicationTarget {
+    Web,
+    Desktop,
+}
+
+impl ApplicationTarget {
+    #[must_use]
+    pub const fn cargo_feature(self) -> &'static str {
+        match self {
+            Self::Web => "web",
+            Self::Desktop => "desktop",
+        }
+    }
+}
+
+#[must_use]
+pub fn default_application_targets() -> BTreeSet<ApplicationTarget> {
+    [ApplicationTarget::Web, ApplicationTarget::Desktop]
+        .into_iter()
+        .collect()
+}
 
 /// 创建时分配且永不因改名、改路由而变化的符号身份。
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -23,12 +52,6 @@ impl SymbolId {
         Uuid::parse_str(value)
             .map(Self)
             .with_context(|| format!("无效的 SymbolId: {value}"))
-    }
-
-    #[must_use]
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn from_stable_key(value: &str) -> Self {
-        Self(Uuid::from_bytes(md5::compute(value).0))
     }
 }
 
@@ -83,6 +106,8 @@ pub struct ProgramDefinition {
     pub id: SymbolId,
     pub name: String,
     pub title: String,
+    #[serde(default = "default_application_targets")]
+    pub application_targets: BTreeSet<ApplicationTarget>,
     #[serde(default)]
     pub menus: Vec<MenuDefinition>,
     #[serde(default)]
@@ -105,6 +130,7 @@ impl ProgramDefinition {
             id: SymbolId::new(),
             name: name.into(),
             title: title.into(),
+            application_targets: default_application_targets(),
             menus: Vec::new(),
             models: Vec::new(),
             pages: Vec::new(),
@@ -541,7 +567,7 @@ pub struct PageDefinition {
     #[serde(default)]
     pub state: DefinitionState,
     pub renderer: PageRendererDefinition,
-    /// 页面声明的原生或约定 REST 接口；内置布局接口由编译器推导。
+    /// 页面声明的 REST 接口；内置布局接口由编译器推导。
     #[serde(default)]
     pub endpoints: Vec<PageEndpointDefinition>,
 }
@@ -556,20 +582,12 @@ pub struct PageEndpointDefinition {
     pub description: String,
     #[serde(default)]
     pub state: DefinitionState,
-    pub implementation: EndpointImplementationDefinition,
     pub method: RestMethod,
     pub path: String,
     #[serde(default)]
     pub inputs: Vec<EndpointInputDefinition>,
     #[serde(default)]
     pub outputs: Vec<EndpointOutputDefinition>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum EndpointImplementationDefinition {
-    Native { plugin_id: String },
-    Convention,
 }
 
 impl PageEndpointDefinition {
@@ -647,12 +665,6 @@ pub struct EndpointOutputDefinition {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PageRendererDefinition {
     ConventionFile,
-    Extension {
-        extension_type: String,
-        schema_version: u32,
-        #[serde(default)]
-        config: Value,
-    },
     MenuTree,
     TreeTable {
         tree: TreeDefinition,
@@ -977,7 +989,7 @@ impl EffectKind {
     }
 
     #[must_use]
-    pub const fn key(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::ClientState => "client_state",
             Self::Navigation => "navigation",
@@ -1106,7 +1118,6 @@ mod tests {
             "id": "5cbf910c-05af-4537-94d3-673c3b4c444b",
             "title": "",
             "description": "批量停用资产",
-            "implementation": {"kind": "convention"},
             "method": "POST",
             "path": "/api/assets/batch-disable",
             "inputs": [],
@@ -1115,7 +1126,7 @@ mod tests {
         let value = serde_json::to_value(&endpoint)?;
 
         assert_eq!(endpoint.display_title(), "batch disable");
-        assert_eq!(value["implementation"]["kind"], "convention");
+        assert!(value.get("implementation").is_none());
         Ok(())
     }
 }

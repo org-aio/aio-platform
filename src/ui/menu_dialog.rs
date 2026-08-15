@@ -428,6 +428,7 @@ pub(super) fn MenuDeleteDialog(
     generation: Signal<u64>,
     status: Signal<Option<String>>,
     mut deleting_menu: Signal<Option<SymbolId>>,
+    #[props(default)] on_deleted: Option<EventHandler<()>>,
 ) -> Element {
     let menu_id = row.menu.id;
     let menu_title = row.menu.title.clone();
@@ -480,6 +481,9 @@ pub(super) fn MenuDeleteDialog(
                             status,
                         );
                         deleting_menu.set(None);
+                        if let Some(on_deleted) = on_deleted {
+                            on_deleted.call(());
+                        }
                     },
                     "删除"
                 }

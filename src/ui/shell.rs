@@ -39,6 +39,14 @@ pub fn StudioPage(api_base_url: String, published_scene: Option<SymbolId>) -> El
             header { class: "aio-studio-shell__toolbar border-b px-3",
                 nav { class: "aio-studio-view-tabs", aria_label: "Studio 管理视图",
                     Button {
+                        class: if studio_tab() == StudioTab::Applications { "is-active" } else { "" },
+                        r#type: "button",
+                        variant: ButtonVariant::Ghost,
+                        aria_label: "应用生成",
+                        onclick: move |_| studio_tab.set(StudioTab::Applications),
+                        "应用"
+                    }
+                    Button {
                         class: if studio_tab() == StudioTab::Models { "is-active" } else { "" },
                         r#type: "button",
                         variant: ButtonVariant::Ghost,
@@ -94,6 +102,15 @@ pub fn StudioPage(api_base_url: String, published_scene: Option<SymbolId>) -> El
             main { class: "aio-studio-shell__content min-w-0 p-4",
                 match draft_snapshot {
                     Some(Ok(draft)) => match studio_tab() {
+                        StudioTab::Applications => rsx! {
+                            ApplicationPanel {
+                                key: "studio-application:{draft.version}",
+                                draft,
+                                api_base_url: api_base_url.clone(),
+                                generation: draft_generation,
+                                status,
+                            }
+                        },
                         StudioTab::Models => rsx! {
                             ModelsPanel {
                                 key: "{models_panel_key}",
@@ -280,11 +297,13 @@ pub(crate) fn ProgramMenuTreePage(api_base_url: String, title: String) -> Elemen
 pub(crate) fn AdminPageEditor(
     api_base_url: String,
     page_id: SymbolId,
+    menu_id: Option<SymbolId>,
+    generation: Signal<u64>,
+    status: Signal<Option<String>>,
     settings_open: Signal<bool>,
 ) -> Element {
-    let generation = use_signal(|| 0_u64);
-    let status = use_signal(|| None::<String>);
     let settings_tab = use_signal(PageSettingsTab::default);
+    let mut deleting_menu = use_signal(|| None::<SymbolId>);
     let draft_api = api_base_url.clone();
     let draft = use_resource(move || {
         let api_base_url = draft_api.clone();
@@ -307,20 +326,60 @@ pub(crate) fn AdminPageEditor(
     else {
         return empty_panel("当前页面不在 Draft 中");
     };
+    let menu_row = menu_id.and_then(|menu_id| {
+        draft
+            .definition
+            .menus
+            .iter()
+            .enumerate()
+            .find_map(|(position, scene)| {
+                menu_table_rows(
+                    scene,
+                    0,
+                    position,
+                    draft.definition.id,
+                    ChildCollection::Menus,
+                    draft.definition.menus.len(),
+                    &BTreeSet::new(),
+                )
+                .into_iter()
+                .find(|row| row.menu.id == menu_id)
+            })
+    });
+    let delete_action = menu_row.as_ref().map(|row| {
+        let menu_id = row.menu.id;
+        Callback::new(move |()| deleting_menu.set(Some(menu_id)))
+    });
     rsx! {
         PageRendererSettings {
             key: "admin:{page_id}:{draft.version}",
             page,
-            program_name: draft.definition.name.clone(),
             models: draft.definition.models.clone(),
-            api_base_url,
+            api_base_url: api_base_url.clone(),
             program_id: draft.program_id.clone(),
             version: draft.version,
             generation,
             status,
             settings_tab,
             settings_open,
-            draft,
+            on_delete_menu: delete_action,
+            draft: draft.clone(),
+        }
+        if deleting_menu().is_some()
+            && let Some(row) = menu_row
+        {
+            MenuDeleteDialog {
+                row,
+                menus: draft.definition.menus.clone(),
+                routes: draft.definition.routes.clone(),
+                api_base_url,
+                program_id: draft.program_id,
+                version: draft.version,
+                generation,
+                status,
+                deleting_menu,
+                on_deleted: move |_| settings_open.set(false),
+            }
         }
     }
 }
@@ -330,10 +389,10 @@ pub(crate) fn AdminPageEditor(
 pub(crate) fn AdminMenuCreator(
     api_base_url: String,
     scene_id: SymbolId,
+    generation: Signal<u64>,
+    mut status: Signal<Option<String>>,
     creator_open: Signal<bool>,
 ) -> Element {
-    let generation = use_signal(|| 0_u64);
-    let mut status = use_signal(|| None::<String>);
     let draft_api = api_base_url.clone();
     let draft = use_resource(move || {
         let api_base_url = draft_api.clone();
@@ -352,23 +411,26 @@ pub(crate) fn AdminMenuCreator(
     let submit_api = api_base_url;
     let submit_program = draft.program_id.clone();
     rsx! {
-        div { class: "aio-page-settings__backdrop", onclick: move |_| creator_open.set(false) }
-        aside { class: "aio-page-settings__panel", aria_label: "添加菜单",
-            header {
+        Dialog {
+            class: "aio-definition-dialog",
+            open: true,
+            on_open_change: move |open| creator_open.set(open),
+            header { class: "aio-definition-dialog__header",
                 div {
-                    strong { "添加菜单" }
-                    p { "当前场景" }
+                    DialogTitle { "新建菜单" }
+                    DialogDescription { "同时创建页面、路由和当前场景下的菜单入口" }
                 }
                 Button {
+                    r#type: "button",
                     size: ButtonSize::IconSm,
                     variant: ButtonVariant::Ghost,
-                    title: "关闭",
-                    aria_label: "关闭",
+                    title: "关闭新建菜单",
+                    aria_label: "关闭新建菜单",
                     onclick: move |_| creator_open.set(false),
                     icons::X { class: "size-4" }
                 }
             }
-            form { class: "aio-page-settings__form", onsubmit: move |event| {
+            form { class: "aio-definition-dialog__form", onsubmit: move |event| {
                 event.prevent_default();
                 let title = form_text(&event, "title").trim().to_owned();
                 let path = form_text(&event, "path").trim().to_owned();
@@ -499,20 +561,26 @@ pub(crate) fn AdminSceneCreator(
     let scene_count = draft.definition.menus.len();
     let submit_program = draft.program_id.clone();
     rsx! {
-        div { class: "aio-page-settings__backdrop", onclick: move |_| creator_open.set(false) }
-        aside { class: "aio-page-settings__panel", aria_label: "添加场景",
-            header {
-                strong { "添加场景" }
+        Dialog {
+            class: "aio-definition-dialog",
+            open: true,
+            on_open_change: move |open| creator_open.set(open),
+            header { class: "aio-definition-dialog__header",
+                div {
+                    DialogTitle { "新建场景" }
+                    DialogDescription { "创建顶栏场景，并在其中继续添加菜单" }
+                }
                 Button {
+                    r#type: "button",
                     size: ButtonSize::IconSm,
                     variant: ButtonVariant::Ghost,
-                    title: "关闭",
-                    aria_label: "关闭",
+                    title: "关闭新建场景",
+                    aria_label: "关闭新建场景",
                     onclick: move |_| creator_open.set(false),
                     icons::X { class: "size-4" }
                 }
             }
-            form { class: "aio-page-settings__form", onsubmit: move |event| {
+            form { class: "aio-definition-dialog__form", onsubmit: move |event| {
                 event.prevent_default();
                 let title = form_text(&event, "title").trim().to_owned();
                 if title.is_empty() {
@@ -563,14 +631,14 @@ pub(crate) fn AdminSceneCreator(
                 if let Some(message) = status() {
                     p { class: "text-xs text-destructive", "{message}" }
                 }
-                footer {
-                    Button { r#type: "submit", "添加" }
+                footer { class: "aio-definition-dialog__actions",
                     Button {
                         r#type: "button",
                         variant: ButtonVariant::Ghost,
                         onclick: move |_| creator_open.set(false),
                         "取消"
                     }
+                    Button { r#type: "submit", "创建场景" }
                 }
             }
         }

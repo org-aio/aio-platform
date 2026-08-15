@@ -1,4 +1,11 @@
-use std::{collections::BTreeMap, fmt::Debug, future::Future, pin::Pin, sync::Arc};
+use std::{
+    any::{Any, TypeId},
+    collections::{BTreeMap, HashSet},
+    fmt::Debug,
+    future::Future,
+    pin::Pin,
+    sync::Arc,
+};
 
 use anyhow::{Context, Result, bail, ensure};
 use axum::{
@@ -9,7 +16,6 @@ use axum::{
     routing::{MethodFilter, on},
 };
 use az_plugin_core::http::{ApiError, ApiResponse, ok_json};
-use rudi::Context as RudiContext;
 use serde_json::Value;
 
 use crate::{PageEndpointSource, ProgramImage, RestMethod, SymbolId};
@@ -26,8 +32,11 @@ pub struct ConventionEndpointRequest {
 
 pub type ConventionEndpointFuture<'a> = Pin<Box<dyn Future<Output = Result<Value>> + Send + 'a>>;
 
-pub trait ConventionEndpointProvider: Send + Sync + Debug {
-    fn key(&self) -> &'static str;
+pub trait ConventionEndpointProvider: Any + Send + Sync + Debug {
+    /// 可选的人类可读说明，只用于日志和诊断。
+    fn comment(&self) -> &'static str {
+        ""
+    }
 
     fn endpoint_id(&self) -> &'static str;
 
@@ -42,30 +51,22 @@ pub struct ConventionEndpointIndex {
 }
 
 impl ConventionEndpointIndex {
-    pub fn from_context(context: &mut RudiContext) -> Result<Self> {
-        let provider_names = context
-            .get_providers_by_type::<DynConventionEndpointProvider>()
-            .into_iter()
-            .map(|provider| provider.definition().key.name.to_string())
-            .collect::<Vec<_>>();
+    pub fn new(resolved: Vec<DynConventionEndpointProvider>) -> Result<Self> {
+        let mut provider_types = HashSet::<TypeId>::new();
         let mut providers = BTreeMap::new();
-        for provider_name in provider_names {
-            let provider = context
-                .resolve_option_with_name::<DynConventionEndpointProvider>(provider_name.clone())
-                .with_context(|| format!("无法解析约定接口 Provider: {provider_name}"))?;
+        for provider in resolved {
+            let type_id = provider.as_ref().type_id();
             ensure!(
-                provider.key() == provider_name,
-                "约定接口的 Rudi name 与 Provider key 不一致: {provider_name} != {}",
-                provider.key()
+                provider_types.insert(type_id),
+                "约定接口 Provider 类型重复: {type_id:?}"
             );
-            SymbolId::parse(provider.endpoint_id()).with_context(|| {
-                format!("约定接口 Provider {} 的 endpoint_id 无效", provider.key())
-            })?;
+            SymbolId::parse(provider.endpoint_id())
+                .with_context(|| format!("约定接口 Provider {type_id:?} 的 endpoint_id 无效"))?;
             if providers
                 .insert(provider.endpoint_id().to_owned(), provider)
                 .is_some()
             {
-                bail!("约定接口 Provider endpoint_id 重复: {provider_name}");
+                bail!("约定接口 Provider endpoint_id 重复: {type_id:?}");
             }
         }
         Ok(Self { providers })
@@ -165,13 +166,13 @@ const fn method_filter(method: RestMethod) -> MethodFilter {
 #[cfg(test)]
 mod tests {
     use axum::{body::Body, http::Request};
+    use dill::Catalog;
     use serde_json::json;
     use tower::ServiceExt;
 
     use crate::{
-        CapabilityCatalog, DefinitionState, EndpointImplementationDefinition, ImageTarget,
-        PageDefinition, PageEndpointDefinition, PageRendererDefinition, ProgramCompiler,
-        ProgramDefinition, RouteDefinition,
+        CapabilityCatalog, DefinitionState, ImageTarget, PageDefinition, PageEndpointDefinition,
+        PageRendererDefinition, ProgramCompiler, ProgramDefinition, RouteDefinition,
     };
 
     use super::*;
@@ -182,10 +183,6 @@ mod tests {
     struct TestEndpoint;
 
     impl ConventionEndpointProvider for TestEndpoint {
-        fn key(&self) -> &'static str {
-            "test::orders::submit"
-        }
-
         fn endpoint_id(&self) -> &'static str {
             ENDPOINT_ID
         }
@@ -220,7 +217,6 @@ mod tests {
                 title: "提交订单".to_owned(),
                 description: "提交一笔订单".to_owned(),
                 state: DefinitionState::Known,
-                implementation: EndpointImplementationDefinition::Convention,
                 method: RestMethod::Post,
                 path: "/api/orders/{order_id}".to_owned(),
                 inputs: Vec::new(),
@@ -242,12 +238,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatches_compiled_convention_endpoint_to_provider() -> Result<()> {
-        let index = ConventionEndpointIndex {
-            providers: BTreeMap::from([(
-                ENDPOINT_ID.to_owned(),
-                Arc::new(TestEndpoint) as DynConventionEndpointProvider,
-            )]),
-        };
+        let catalog = Catalog::builder()
+            .add_value(TestEndpoint)
+            .bind::<dyn ConventionEndpointProvider, TestEndpoint>()
+            .build();
+        let providers = catalog.get::<dill::AllOf<dyn ConventionEndpointProvider>>()?;
+        let index = ConventionEndpointIndex::new(providers)?;
         let router = index.router(&image()?)?;
         let request = Request::builder()
             .method("POST")

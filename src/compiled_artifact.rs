@@ -99,8 +99,7 @@ mod tests {
 
     use crate::{
         CompiledPage, CompiledPageEndpoint, CompiledPageRenderer, DefinitionState, ImageTarget,
-        MenuDefinition, PROGRAM_SCHEMA_VERSION, PageEndpointSource, RestMethod,
-        RudiRouteInstruction, SymbolId,
+        MenuDefinition, PROGRAM_SCHEMA_VERSION, PageEndpointSource, RestMethod, SymbolId,
     };
 
     use super::*;
@@ -116,9 +115,6 @@ mod tests {
             inputs: Vec::new(),
             outputs: Vec::new(),
             source: PageEndpointSource::BuiltIn,
-            route_instruction: RudiRouteInstruction {
-                provider_key: "runtime".to_owned(),
-            },
         };
         ProgramImage {
             schema_version: PROGRAM_SCHEMA_VERSION,

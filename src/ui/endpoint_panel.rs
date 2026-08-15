@@ -140,12 +140,7 @@ pub(super) fn endpoint_panel(
                 .iter()
                 .find(|endpoint| endpoint.id.to_string() == compiled.id)
                 .cloned();
-            let editable = definition.as_ref().is_some_and(|endpoint| {
-                matches!(
-                    endpoint.implementation,
-                    crate::EndpointImplementationDefinition::Convention
-                )
-            });
+            let editable = definition.is_some();
             EndpointTableRow {
                 compiled,
                 definition: editable.then_some(definition).flatten(),
@@ -160,25 +155,13 @@ pub(super) fn endpoint_panel(
     let editing_dialog_endpoint = editing_endpoint().and_then(|endpoint_id| {
         custom_endpoints
             .iter()
-            .find(|endpoint| {
-                endpoint.id == endpoint_id
-                    && matches!(
-                        endpoint.implementation,
-                        crate::EndpointImplementationDefinition::Convention
-                    )
-            })
+            .find(|endpoint| endpoint.id == endpoint_id)
             .cloned()
     });
     let deleting_dialog_endpoint = deleting_endpoint().and_then(|endpoint_id| {
         custom_endpoints
             .iter()
-            .find(|endpoint| {
-                endpoint.id == endpoint_id
-                    && matches!(
-                        endpoint.implementation,
-                        crate::EndpointImplementationDefinition::Convention
-                    )
-            })
+            .find(|endpoint| endpoint.id == endpoint_id)
             .cloned()
     });
     let inline_api = api_base_url.clone();
@@ -198,7 +181,6 @@ pub(super) fn endpoint_panel(
                             title: String::new(),
                             description: String::new(),
                             state: DefinitionState::Known,
-                            implementation: crate::EndpointImplementationDefinition::Convention,
                             method: RestMethod::Post,
                             path: next_endpoint_path(&page_name, &create_endpoints),
                             inputs: Vec::new(),
@@ -431,9 +413,6 @@ pub(super) fn endpoint_table_cell(
                     PageEndpointSource::BuiltIn => rsx! {
                         Badge { variant: BadgeVariant::Outline, "内置" }
                     },
-                    PageEndpointSource::Native => rsx! {
-                        Badge { variant: BadgeVariant::Outline, "原生" }
-                    },
                     PageEndpointSource::Convention => rsx! {
                         Badge { variant: BadgeVariant::Outline, "约定" }
                     },
@@ -484,7 +463,7 @@ pub(super) fn endpoint_table_cell(
                         icons::Trash2 { class: "size-4" }
                     }
                 } else if endpoint.source == PageEndpointSource::BuiltIn {
-                    code { class: "aio-endpoint-table__provider", "{short_provider_key(&endpoint.route_instruction.provider_key)}" }
+                    code { class: "aio-endpoint-table__provider", "元数据生成" }
                 }
             }
         },

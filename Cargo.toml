@@ -8,47 +8,83 @@ authors.workspace = true
 description = "全栈低代码"
 workspace = "../../.."
 
+[features]
+default = ["server"]
+server = [
+    "dep:arc-swap",
+    "dep:async-stream",
+    "dep:async-trait",
+    "dep:axum",
+    "dep:az-plugin-core",
+    "dep:dill",
+    "dep:matchit",
+    "dep:rig-core",
+    "dep:sqlx",
+    "dep:tokio",
+    "dep:toasty",
+    "dep:tracing",
+]
+runtime-ui = [
+    "dep:az-dioxus-admin-shell",
+    "dep:az-ui-components",
+    "dep:icons",
+    "dioxus/document",
+    "dioxus/hooks",
+]
+web = ["runtime-ui", "dioxus/web", "dep:dioxus-web"]
+desktop = [
+    "runtime-ui",
+    "dioxus/desktop",
+    "dep:arboard",
+    "dep:chrono",
+    "dep:reqwest",
+    "dep:tokio",
+]
+
 [dependencies]
 anyhow.workspace = true
-az-admin-shell-core.workspace = true
+az-dioxus-admin-shell = { workspace = true, optional = true }
+az-ui-components = { workspace = true, optional = true }
+convert_case.workspace = true
+deunicode.workspace = true
 dioxus.workspace = true
+dill = { workspace = true, optional = true }
+futures-util = "0.3.31"
 hex.workspace = true
-md5.workspace = true
-rudi.workspace = true
+icons = { workspace = true, optional = true }
+pinyin.workspace = true
 regex.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+urlencoding.workspace = true
 uuid.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-az-ui-components.workspace = true
-dioxus = { workspace = true, features = ["web", "launch", "hooks", "document"] }
-dioxus-web = "0.7.9"
-futures-util = "0.3.31"
+dioxus-web = { version = "0.7.9", optional = true }
 gloo-net = { version = "0.6.0", features = ["http", "json", "eventsource"] }
 gloo-timers = { version = "0.3.0", features = ["futures"] }
-icons.workspace = true
 js-sys = "0.3.82"
-urlencoding.workspace = true
 wasm-bindgen = "0.2.105"
 wasm-bindgen-futures = "0.4.55"
 web-sys = { version = "0.3.82", features = ["Clipboard", "Document", "Element", "Navigator", "Window"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-arc-swap.workspace = true
-async-stream = "0.3.6"
-async-trait.workspace = true
-axum.workspace = true
-az-plugin-core.workspace = true
-futures-util = "0.3.31"
-matchit.workspace = true
-rig-core = { version = "0.36.0", default-features = false, features = ["native-tls", "reqwest"] }
-sqlx.workspace = true
-tokio.workspace = true
-toasty.workspace = true
-tracing.workspace = true
+arboard = { version = "3.6.1", optional = true }
+arc-swap = { workspace = true, optional = true }
+async-stream = { version = "0.3.6", optional = true }
+async-trait = { workspace = true, optional = true }
+axum = { workspace = true, optional = true }
+az-plugin-core = { workspace = true, optional = true }
+chrono = { version = "0.4.42", default-features = false, features = ["clock"], optional = true }
+matchit = { workspace = true, optional = true }
+reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls"], optional = true }
+rig-core = { version = "0.36.0", default-features = false, features = ["native-tls", "reqwest"], optional = true }
+sqlx = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+toasty = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio.workspace = true

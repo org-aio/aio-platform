@@ -482,7 +482,7 @@ pub(super) fn permission_effect_editor(selected: &[EffectKind]) -> Element {
 }
 
 pub(super) fn permission_effect_input_name(effect: EffectKind) -> String {
-    format!("permission_effect_{}", effect.key())
+    format!("permission_effect_{}", effect.as_str())
 }
 
 pub(super) fn permission_effects_from_form(event: &FormEvent) -> Vec<EffectKind> {

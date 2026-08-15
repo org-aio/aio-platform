@@ -1,10 +1,9 @@
 use std::{collections::BTreeSet, fmt};
 
 use crate::{
-    DraftSnapshot, GraphPatchBatch, ImageTarget, NativeContractCatalog,
-    NativeContractReconcileReport, ProgramDefinition, ProgramImage, RevisionRunSnapshot,
-    RevisionSnapshot, StudioPage, StudioPageParams, ValueType, VibeMessageInput,
-    VibeSessionSnapshot,
+    DraftSnapshot, GraphPatchBatch, ImageTarget, ProgramDefinition, ProgramImage,
+    RevisionRunSnapshot, RevisionSnapshot, StudioPage, StudioPageParams, ValueType,
+    VibeMessageInput, VibeSessionSnapshot,
 };
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -186,56 +185,6 @@ impl ProgramStore {
             .await
             .context("提交 Draft Patch 事务失败")?;
         Ok(draft)
-    }
-
-    pub async fn reconcile_native_contracts(
-        &self,
-        catalog: &NativeContractCatalog,
-    ) -> Result<NativeContractReconcileReport> {
-        let mut transaction = self
-            .pool
-            .begin()
-            .await
-            .context("开始原生接口元数据同步事务失败")?;
-        let row = sqlx::query(
-            "SELECT draft.program_id, draft.version, draft.definition, draft.updated_at_ms
-             FROM engine_program_drafts draft
-             INNER JOIN engine_programs program ON program.id = draft.program_id
-             WHERE program.singleton
-             FOR UPDATE",
-        )
-        .fetch_optional(&mut *transaction)
-        .await
-        .context("锁定原生接口 Program Draft 失败")?
-        .context("Program Draft 不存在")?;
-        let mut draft = draft_from_row(&row)?;
-        let report = catalog.reconcile(&mut draft.definition)?;
-        if !report.changed {
-            transaction
-                .rollback()
-                .await
-                .context("结束无变更原生接口同步事务失败")?;
-            return Ok(report);
-        }
-        draft.version += 1;
-        draft.updated_at_ms = timestamp_ms();
-        sqlx::query(
-            "UPDATE engine_program_drafts
-             SET version = $1, definition = $2, updated_at_ms = $3
-             WHERE program_id = $4",
-        )
-        .bind(draft.version)
-        .bind(Json(&draft.definition))
-        .bind(draft.updated_at_ms)
-        .bind(&draft.program_id)
-        .execute(&mut *transaction)
-        .await
-        .context("保存原生接口 Program Draft 失败")?;
-        transaction
-            .commit()
-            .await
-            .context("提交原生接口元数据同步事务失败")?;
-        Ok(report)
     }
 
     pub async fn create_revision_from_draft(
@@ -768,6 +717,7 @@ impl ProgramStore {
             base_version,
             status: "running".to_owned(),
             final_revision_id: None,
+            diagnostics: Value::Array(Vec::new()),
             created_at_ms: now,
             updated_at_ms: now,
         })
@@ -775,10 +725,18 @@ impl ProgramStore {
 
     pub async fn vibe_session(&self, session_id: &str) -> Result<Option<VibeSessionSnapshot>> {
         let row = sqlx::query(
-            "SELECT id, program_id, base_version, status, final_revision_id,
-                    created_at_ms, updated_at_ms
-             FROM engine_vibe_sessions
-             WHERE id = $1",
+            "SELECT sessions.id, sessions.program_id, sessions.base_version, sessions.status,
+                    sessions.final_revision_id, sessions.created_at_ms, sessions.updated_at_ms,
+                    COALESCE((
+                        SELECT messages.diagnostics
+                        FROM engine_vibe_messages messages
+                        WHERE messages.session_id = sessions.id
+                          AND messages.role = 'gate'
+                        ORDER BY messages.sequence DESC
+                        LIMIT 1
+                    ), '[]'::jsonb) AS diagnostics
+             FROM engine_vibe_sessions sessions
+             WHERE sessions.id = $1",
         )
         .bind(session_id)
         .fetch_optional(&self.pool)
@@ -1114,12 +1072,14 @@ fn revision_from_row(row: &sqlx::postgres::PgRow) -> Result<RevisionSnapshot> {
 }
 
 fn vibe_session_from_row(row: &sqlx::postgres::PgRow) -> Result<VibeSessionSnapshot> {
+    let diagnostics: Json<Value> = row.try_get("diagnostics")?;
     Ok(VibeSessionSnapshot {
         id: row.try_get("id")?,
         program_id: row.try_get("program_id")?,
         base_version: row.try_get("base_version")?,
         status: row.try_get("status")?,
         final_revision_id: row.try_get("final_revision_id")?,
+        diagnostics: diagnostics.0,
         created_at_ms: row.try_get("created_at_ms")?,
         updated_at_ms: row.try_get("updated_at_ms")?,
     })

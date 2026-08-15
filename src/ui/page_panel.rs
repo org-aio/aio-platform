@@ -47,14 +47,6 @@ pub(super) fn PagesPanel(
     let menu_references = current_page_id.map_or(0, |page_id| {
         page_menu_reference_count(&draft.definition.menus, page_id)
     });
-    let native_page = current_page.as_ref().is_some_and(|page| {
-        page.endpoints.iter().any(|endpoint| {
-            matches!(
-                endpoint.implementation,
-                crate::EndpointImplementationDefinition::Native { .. }
-            )
-        })
-    });
     let metadata_json = current_page
         .as_ref()
         .map(serde_json::to_string_pretty)
@@ -72,9 +64,7 @@ pub(super) fn PagesPanel(
         .as_ref()
         .map(|route| route.id.to_string())
         .unwrap_or_else(|| "new".to_owned());
-    let page_delete_title = if native_page {
-        "原生接口页面由插件声明维护，不能删除".to_owned()
-    } else if menu_references > 0 {
+    let page_delete_title = if menu_references > 0 {
         format!("该页面被 {menu_references} 个菜单引用，不能删除")
     } else {
         "删除页面".to_owned()
@@ -173,7 +163,7 @@ pub(super) fn PagesPanel(
                                     r#type: "button",
                                     size: ButtonSize::IconSm,
                                     variant: ButtonVariant::Ghost,
-                                    disabled: native_page || menu_references > 0,
+                                    disabled: menu_references > 0,
                                     title: "{page_delete_title}",
                                     aria_label: "{page_delete_title}",
                                     onclick: move |_| deleting_page.set(true),
@@ -305,7 +295,6 @@ pub(super) fn PagesPanel(
                         PageRendererSettings {
                             key: "catalog:{page.id}:{draft.version}",
                             page: page.clone(),
-                            program_name: draft.definition.name.clone(),
                             models: draft.definition.models.clone(),
                             api_base_url: api_base_url.clone(),
                             program_id: draft.program_id.clone(),

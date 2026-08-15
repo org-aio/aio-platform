@@ -62,7 +62,6 @@ mod tests {
             title: String::new(),
             description: String::new(),
             state: DefinitionState::Known,
-            implementation: crate::EndpointImplementationDefinition::Convention,
             method: RestMethod::Post,
             path: path.to_owned(),
             inputs: Vec::new(),

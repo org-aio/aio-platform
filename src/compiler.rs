@@ -8,14 +8,12 @@ use crate::{
     BytecodeInstruction, BytecodeSegment, CapabilityCatalog, CompiledEndpointInput,
     CompiledEndpointOutput, CompiledExpressionIndex, CompiledModel, CompiledPage,
     CompiledPageEndpoint, CompiledPageRenderer, CompiledRoute, CompiledTable, CompiledTree,
-    CrudTablePageProvider, DefinitionState, EffectKind, EndpointInputLocation, FieldDefinition,
-    FunctionDefinition, FunctionNode, FunctionNodeKind, GraphEdge, ImageTarget, Instruction,
-    ModelDefinition, PROGRAM_SCHEMA_VERSION, PageDefinition, PageEndpointSource,
-    PageRendererDefinition, ProgramDefinition, ProgramImage, ProgramMenuTreePageProvider,
-    RestFormPageProvider, RestMethod, RudiRouteInstruction, SymbolId, TableDefinition,
-    TreeTablePageProvider, data_identifier_is_valid, endpoint_identifier_is_valid,
-    function_nodes_can_connect, page_identifier_is_valid, page_provider_key,
-    permission_identifier_is_valid, validate_route_path,
+    DefinitionState, EffectKind, EndpointInputLocation, FieldDefinition, FunctionDefinition,
+    FunctionNode, FunctionNodeKind, GraphEdge, ImageTarget, Instruction, ModelDefinition,
+    PROGRAM_SCHEMA_VERSION, PageDefinition, PageEndpointSource, PageRendererDefinition,
+    ProgramDefinition, ProgramImage, RestMethod, SymbolId, TableDefinition,
+    data_identifier_is_valid, endpoint_identifier_is_valid, function_nodes_can_connect,
+    page_identifier_is_valid, permission_identifier_is_valid, validate_route_path,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1315,20 +1313,8 @@ pub fn compile_page(definition: &ProgramDefinition, page: &PageDefinition) -> Co
             module_name: convention_page_module_name(&definition.name, &page.name),
             expected_path: convention_page_path(&definition.name, &page.name),
         },
-        PageRendererDefinition::Extension {
-            extension_type,
-            schema_version,
-            config,
-        } => CompiledPageRenderer::Extension {
-            extension_type: extension_type.clone(),
-            schema_version: *schema_version,
-            config: config.clone(),
-        },
-        PageRendererDefinition::MenuTree => CompiledPageRenderer::MenuTree {
-            provider_key: page_provider_key::<ProgramMenuTreePageProvider>(),
-        },
+        PageRendererDefinition::MenuTree => CompiledPageRenderer::MenuTree,
         PageRendererDefinition::TreeTable { tree, table } => CompiledPageRenderer::TreeTable {
-            provider_key: page_provider_key::<TreeTablePageProvider>(),
             tree: CompiledTree {
                 model_id: tree.model_id.unwrap_or(page.id),
                 label_field_id: tree.label_field_id.unwrap_or(page.id),
@@ -1338,7 +1324,6 @@ pub fn compile_page(definition: &ProgramDefinition, page: &PageDefinition) -> Co
             table: compile_table(table, page.id),
         },
         PageRendererDefinition::CrudTable { table } => CompiledPageRenderer::CrudTable {
-            provider_key: page_provider_key::<CrudTablePageProvider>(),
             table: compile_table(table, page.id),
         },
     };
@@ -1357,7 +1342,6 @@ fn compile_page_endpoints(
     page: &PageDefinition,
 ) -> Vec<CompiledPageEndpoint> {
     let mut endpoints = built_in_page_endpoints(definition, page);
-    let provider_key = page_provider_key::<RestFormPageProvider>();
     endpoints.extend(
         page.endpoints
             .iter()
@@ -1388,17 +1372,7 @@ fn compile_page_endpoints(
                         value_type: output.value_type.clone(),
                     })
                     .collect(),
-                source: match endpoint.implementation {
-                    crate::EndpointImplementationDefinition::Native { .. } => {
-                        PageEndpointSource::Native
-                    }
-                    crate::EndpointImplementationDefinition::Convention => {
-                        PageEndpointSource::Convention
-                    }
-                },
-                route_instruction: RudiRouteInstruction {
-                    provider_key: provider_key.clone(),
-                },
+                source: PageEndpointSource::Convention,
             }),
     );
     endpoints
@@ -1408,16 +1382,10 @@ fn built_in_page_endpoints(
     definition: &ProgramDefinition,
     page: &PageDefinition,
 ) -> Vec<CompiledPageEndpoint> {
-    let (table, provider_key) = match &page.renderer {
-        PageRendererDefinition::CrudTable { table } => {
-            (table, page_provider_key::<CrudTablePageProvider>())
-        }
-        PageRendererDefinition::TreeTable { table, .. } => {
-            (table, page_provider_key::<TreeTablePageProvider>())
-        }
-        PageRendererDefinition::ConventionFile
-        | PageRendererDefinition::Extension { .. }
-        | PageRendererDefinition::MenuTree => {
+    let table = match &page.renderer {
+        PageRendererDefinition::CrudTable { table } => table,
+        PageRendererDefinition::TreeTable { table, .. } => table,
+        PageRendererDefinition::ConventionFile | PageRendererDefinition::MenuTree => {
             return Vec::new();
         }
     };
@@ -1487,9 +1455,6 @@ fn built_in_page_endpoints(
         inputs,
         outputs,
         source: PageEndpointSource::BuiltIn,
-        route_instruction: RudiRouteInstruction {
-            provider_key: provider_key.clone(),
-        },
     };
     vec![
         build(
@@ -1583,7 +1548,7 @@ fn compile_table(table: &TableDefinition, fallback: SymbolId) -> CompiledTable {
 pub fn convention_page_module_name(program_name: &str, page_name: &str) -> String {
     let program_name = rust_module_segment(program_name);
     let page_name = rust_module_segment(page_name);
-    format!("{program_name}__{page_name}")
+    format!("{program_name}_{page_name}")
 }
 
 #[must_use]
@@ -1725,9 +1690,7 @@ fn validate_page_references(
 ) {
     let mut references = Vec::new();
     match &page.renderer {
-        PageRendererDefinition::ConventionFile
-        | PageRendererDefinition::Extension { .. }
-        | PageRendererDefinition::MenuTree => {}
+        PageRendererDefinition::ConventionFile | PageRendererDefinition::MenuTree => {}
         PageRendererDefinition::CrudTable { table } => {
             collect_table_references(table, &mut references)
         }
@@ -1799,9 +1762,7 @@ fn validate_page_renderer(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match &page.renderer {
-        PageRendererDefinition::ConventionFile
-        | PageRendererDefinition::Extension { .. }
-        | PageRendererDefinition::MenuTree => {}
+        PageRendererDefinition::ConventionFile | PageRendererDefinition::MenuTree => {}
         PageRendererDefinition::CrudTable { table } => {
             validate_table(definition, page.id, table, diagnostics);
         }
@@ -1904,9 +1865,7 @@ fn validate_model_fields(
 fn page_model_dependencies(page: &PageDefinition) -> Vec<SymbolId> {
     let mut values = BTreeSet::new();
     match &page.renderer {
-        PageRendererDefinition::ConventionFile
-        | PageRendererDefinition::Extension { .. }
-        | PageRendererDefinition::MenuTree => {}
+        PageRendererDefinition::ConventionFile | PageRendererDefinition::MenuTree => {}
         PageRendererDefinition::CrudTable { table } => {
             values.extend(table.model_id);
         }
@@ -2414,10 +2373,6 @@ mod tests {
             page.endpoints[4].path,
             format!("/api/runtime/models/{model_id}/records/import")
         );
-        assert_eq!(
-            page.endpoints[0].route_instruction.provider_key,
-            page_provider_key::<CrudTablePageProvider>()
-        );
         assert_eq!(image.models[&program.models[0].id].title, "资产");
         Ok(())
     }
@@ -2450,11 +2405,7 @@ mod tests {
         )?;
         let page = &image.pages[&page_id];
 
-        assert!(matches!(
-            &page.renderer,
-            CompiledPageRenderer::MenuTree { provider_key }
-                if provider_key == &page_provider_key::<ProgramMenuTreePageProvider>()
-        ));
+        assert!(matches!(&page.renderer, CompiledPageRenderer::MenuTree));
         assert!(page.endpoints.is_empty());
         Ok(())
     }
@@ -2946,7 +2897,7 @@ mod tests {
     }
 
     #[test]
-    fn compiles_custom_rest_endpoint_with_rudi_form_instruction() -> anyhow::Result<()> {
+    fn compiles_custom_rest_endpoint_from_metadata() -> anyhow::Result<()> {
         let mut program = crud_program();
         let endpoint_id = SymbolId::new();
         program.pages[0].endpoints.push(PageEndpointDefinition {
@@ -2954,7 +2905,6 @@ mod tests {
             title: "批量停用资产".to_owned(),
             description: "批量停用指定分类中的资产".to_owned(),
             state: DefinitionState::Known,
-            implementation: crate::EndpointImplementationDefinition::Convention,
             method: RestMethod::Post,
             path: "/api/assets/{categoryId}/batch-disable".to_owned(),
             inputs: vec![EndpointInputDefinition {
@@ -2986,10 +2936,6 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Post);
         assert_eq!(endpoint.title, "批量停用资产");
         assert_eq!(endpoint.source, PageEndpointSource::Convention);
-        assert_eq!(
-            endpoint.route_instruction.provider_key,
-            page_provider_key::<RestFormPageProvider>()
-        );
         Ok(())
     }
 
@@ -3002,7 +2948,6 @@ mod tests {
             title: "重复查询".to_owned(),
             description: "错误覆盖内置查询".to_owned(),
             state: DefinitionState::Known,
-            implementation: crate::EndpointImplementationDefinition::Convention,
             method: RestMethod::Get,
             path: format!("/api/runtime/models/{model_id}/records"),
             inputs: Vec::new(),
@@ -3097,41 +3042,14 @@ mod tests {
     }
 
     #[test]
-    fn compiles_consumer_extension_without_interpreting_its_config() -> anyhow::Result<()> {
-        let mut program = crud_program();
-        program.pages[0].renderer = PageRendererDefinition::Extension {
-            extension_type: "aio::pages::AuditPage".to_owned(),
-            schema_version: 3,
-            config: serde_json::json!({"resource_id": "audit"}),
-        };
-
-        let image = ProgramCompiler::new("test", &CapabilityCatalog::default()).compile(
-            &program,
-            "revision-1",
-            ImageTarget::Universal,
-        )?;
-
-        assert!(matches!(
-            image.pages.get(&program.pages[0].id).map(|page| &page.renderer),
-            Some(CompiledPageRenderer::Extension {
-                extension_type,
-                schema_version: 3,
-                config,
-            }) if extension_type == "aio::pages::AuditPage"
-                && config == &serde_json::json!({"resource_id": "audit"})
-        ));
-        Ok(())
-    }
-
-    #[test]
     fn convention_path_is_a_safe_rust_module_path() {
         assert_eq!(
             convention_page_module_name("aio-first-party", "API Keys"),
-            "aio_first_party__api_keys"
+            "aio_first_party_api_keys"
         );
         assert_eq!(
             convention_page_path("aio-first-party", "API Keys"),
-            "src/pages/aio_first_party__api_keys.rs"
+            "src/pages/aio_first_party_api_keys.rs"
         );
     }
 }

@@ -5,7 +5,8 @@ use std::{
 };
 
 use crate::{
-    BooleanOperator, ChildCollection, CompareOperator, DefinitionState, DraftSnapshot, EffectKind,
+    ApplicationBundle, ApplicationGenerationResult, ApplicationTarget, BooleanOperator,
+    ChildCollection, CompareOperator, DefinitionState, DraftSnapshot, EffectKind,
     EndpointInputDefinition, EndpointInputLocation, EndpointOutputDefinition, FieldDefinition,
     FunctionDefinition, FunctionGraph, FunctionNode, FunctionNodeEditor, FunctionNodeKind,
     GraphEdge, GraphEntity, GraphPatch, GraphPatchBatch, MathOperator, MenuDefinition,
@@ -19,8 +20,9 @@ use serde_json::Value;
 
 use crate::browser_http::{get_api, patch_api, post_api};
 use crate::identifier_generation::{
-    next_endpoint_path_parameter_name, next_function_node_name, normalize_endpoint_parameter_names,
-    synchronize_path_parameter_names, unique_identifier_from_title,
+    identifier_from_title, next_endpoint_path_parameter_name, next_function_node_name,
+    normalize_endpoint_parameter_names, synchronize_path_parameter_names,
+    unique_identifier_from_title,
 };
 use crate::page_endpoint_draft::validate_page_endpoint_draft;
 use crate::page_renderer_draft::{PageRendererDraft, PageRendererKind};
@@ -30,7 +32,6 @@ use crate::studio_navigation::{
     function_reference_count, model_usage_summary, page_menu_reference_count, permission_usage_map,
     preferred_draft_scene_id,
 };
-use az_admin_shell_core::identifier_from_title;
 use az_ui_components::{
     agent_chat::{AgentChat, AgentChatMessage},
     badge::{Badge, BadgeVariant},
@@ -48,8 +49,8 @@ use az_ui_components::{
     spatial::{GraphCanvas, GraphNode, GraphNodeState, TreeIndent},
     textarea::Textarea,
 };
-use gloo_timers::future::TimeoutFuture;
 
+mod application_panel;
 mod endpoint_dialog;
 mod endpoint_editor;
 mod endpoint_panel;
@@ -77,11 +78,13 @@ mod page_panel;
 mod page_renderer;
 mod patch_queue;
 mod permission_panel;
+mod published_shell_dialogs;
 mod query_dialog;
 mod relation_dialog;
 mod shell;
 mod validation_dialog;
 
+use application_panel::*;
 use endpoint_dialog::*;
 use endpoint_editor::*;
 use endpoint_panel::*;
@@ -113,5 +116,6 @@ use query_dialog::*;
 use relation_dialog::*;
 use validation_dialog::*;
 
-pub(crate) use shell::ProgramMenuTreePage;
+pub(crate) use published_shell_dialogs::{AdminApplicationTitleEditor, AdminSceneDeleteDialog};
 pub use shell::StudioPage;
+pub(crate) use shell::{AdminMenuCreator, AdminPageEditor, AdminSceneCreator, ProgramMenuTreePage};

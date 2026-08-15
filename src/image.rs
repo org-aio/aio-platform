@@ -65,21 +65,12 @@ pub enum CompiledPageRenderer {
         module_name: String,
         expected_path: String,
     },
-    Extension {
-        extension_type: String,
-        schema_version: u32,
-        config: Value,
-    },
-    MenuTree {
-        provider_key: String,
-    },
+    MenuTree,
     TreeTable {
-        provider_key: String,
         tree: CompiledTree,
         table: CompiledTable,
     },
     CrudTable {
-        provider_key: String,
         table: CompiledTable,
     },
 }
@@ -94,7 +85,6 @@ pub struct CompiledPageEndpoint {
     pub inputs: Vec<CompiledEndpointInput>,
     pub outputs: Vec<CompiledEndpointOutput>,
     pub source: PageEndpointSource,
-    pub route_instruction: RudiRouteInstruction,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -117,31 +107,7 @@ pub struct CompiledEndpointOutput {
 #[serde(rename_all = "snake_case")]
 pub enum PageEndpointSource {
     BuiltIn,
-    Native,
     Convention,
-}
-
-/// 编译产物通过 Rudi Provider key 绑定页面接口组件。
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct RudiRouteInstruction {
-    pub provider_key: String,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct CrudTablePageProvider;
-
-#[derive(Clone, Debug, Default)]
-pub struct TreeTablePageProvider;
-
-#[derive(Clone, Debug, Default)]
-pub struct ProgramMenuTreePageProvider;
-
-#[derive(Clone, Debug, Default)]
-pub struct RestFormPageProvider;
-
-#[must_use]
-pub fn page_provider_key<T: 'static>() -> String {
-    std::any::type_name::<T>().to_owned()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

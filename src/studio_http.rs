@@ -3,11 +3,12 @@
 use std::{convert::Infallible, sync::Arc};
 
 use crate::{
-    ConventionContractManager, ConventionFileGenerator, ConventionFileResult, DraftSnapshot,
-    FormStateExtractionRequest, FormStateExtractionResponse, FormStateExtractor, GraphPatchBatch,
-    PatchOrigin, ProgramPatchAgent, RevisionSnapshot, RuntimeRecordCriteria, RuntimeRecordInput,
-    RuntimeRecordPage, RuntimeRecordView, StudioPage, StudioPageParams, VibeMessageInput,
-    VibeRunAccepted, VibeRunRequest, VibeSessionSnapshot,
+    ApplicationBundle, ApplicationCompiler, ApplicationGenerationResult, ApplicationWorkspace,
+    BusinessModuleManager, DraftSnapshot, FormStateExtractionRequest, FormStateExtractionResponse,
+    FormStateExtractor, GraphPatchBatch, PatchOrigin, ProgramDefinition, ProgramPatchAgent,
+    RevisionSnapshot, RuntimeRecordCriteria, RuntimeRecordInput, RuntimeRecordPage,
+    RuntimeRecordView, StudioPage, StudioPageParams, VibeMessageInput, VibeRunAccepted,
+    VibeRunRequest, VibeSessionSnapshot,
     program_runtime::{ProgramActivationEvent, ProgramRuntime},
     program_store::DraftVersionConflict,
 };
@@ -31,10 +32,12 @@ const REVISIONS_PATH: &str = "/api/studio/program/revisions";
 const ROLLBACK_PATH: &str = "/api/studio/program/revisions/{revision_id}/rollback";
 const EVENTS_PATH: &str = "/api/studio/program/events";
 const RUNTIME_IMAGE_PATH: &str = "/api/runtime/program/image";
+const RUNTIME_DEFINITION_PATH: &str = "/api/runtime/program/definition";
+const APPLICATION_PREVIEW_PATH: &str = "/api/studio/application/preview";
+const APPLICATION_GENERATE_PATH: &str = "/api/studio/application/generate";
 const SERVER_SEGMENT_PATH: &str = "/api/runtime/program/segments/{function_id}";
 const VIBE_RUNS_PATH: &str = "/api/studio/program/vibe-runs";
 const VIBE_RUN_PATH: &str = "/api/studio/program/vibe-runs/{session_id}";
-const CONVENTION_FILE_PATH: &str = "/api/studio/program/pages/{page_id}/convention-file";
 const RUNTIME_RECORDS_PATH: &str = "/api/runtime/models/{model_id}/records";
 const RUNTIME_RECORD_PATH: &str = "/api/runtime/models/{model_id}/records/{record_id}";
 const FORM_STATE_EXTRACTION_PATH: &str = "/api/runtime/models/{model_id}/form-state/extract";
@@ -44,22 +47,22 @@ pub struct StudioState {
     runtime: Option<Arc<ProgramRuntime>>,
     patch_agent: Arc<ProgramPatchAgent>,
     form_state_extractor: Arc<FormStateExtractor>,
-    convention_contracts: ConventionContractManager,
+    business_modules: Arc<BusinessModuleManager>,
 }
 
 impl StudioState {
     #[must_use]
     pub fn new(
-        runtime: Option<ProgramRuntime>,
-        patch_agent: ProgramPatchAgent,
-        form_state_extractor: FormStateExtractor,
-        convention_contracts: ConventionContractManager,
+        runtime: Option<Arc<ProgramRuntime>>,
+        patch_agent: Arc<ProgramPatchAgent>,
+        form_state_extractor: Arc<FormStateExtractor>,
+        business_modules: Arc<BusinessModuleManager>,
     ) -> Self {
         Self {
-            runtime: runtime.map(Arc::new),
-            patch_agent: Arc::new(patch_agent),
-            form_state_extractor: Arc::new(form_state_extractor),
-            convention_contracts,
+            runtime,
+            patch_agent,
+            form_state_extractor,
+            business_modules,
         }
     }
 
@@ -80,10 +83,12 @@ pub fn router(state: StudioState) -> Router {
         .route(ROLLBACK_PATH, post(rollback_revision))
         .route(EVENTS_PATH, get(program_events))
         .route(RUNTIME_IMAGE_PATH, get(runtime_image))
+        .route(RUNTIME_DEFINITION_PATH, get(runtime_definition))
+        .route(APPLICATION_PREVIEW_PATH, get(preview_application))
+        .route(APPLICATION_GENERATE_PATH, post(generate_application))
         .route(SERVER_SEGMENT_PATH, post(invoke_server_segment))
         .route(VIBE_RUNS_PATH, post(start_vibe_run))
         .route(VIBE_RUN_PATH, get(get_vibe_run))
-        .route(CONVENTION_FILE_PATH, post(generate_convention_file))
         .route(FORM_STATE_EXTRACTION_PATH, post(extract_form_state))
         .route(
             RUNTIME_RECORDS_PATH,
@@ -228,35 +233,11 @@ async fn patch_draft(
         }
     };
     state
-        .convention_contracts
+        .business_modules
         .reconcile(&draft.definition)
         .map_err(ApiError::from)?;
     runtime.schedule_publish(origin).await;
     Ok(ok_json(draft))
-}
-
-async fn generate_convention_file(
-    State(state): State<StudioState>,
-    ApiPath(page_id): ApiPath<String>,
-) -> Result<Json<ApiResponse<ConventionFileResult>>, ApiError> {
-    let runtime = state.runtime()?;
-    let page_id = parse_symbol_id(&page_id)?;
-    let draft = runtime.store().draft().await.map_err(ApiError::from)?;
-    let page = draft
-        .definition
-        .pages
-        .iter()
-        .find(|page| page.id == page_id)
-        .cloned()
-        .ok_or_else(|| ApiError::not_found(format!("页面不存在: {page_id}")))?;
-    let definition = draft.definition;
-    let result = tokio::task::spawn_blocking(move || {
-        ConventionFileGenerator::workspace_app().generate(&definition, &page)
-    })
-    .await
-    .map_err(|error| ApiError::internal(format!("生成约定页面任务失败: {error}")))?
-    .map_err(ApiError::from)?;
-    Ok(ok_json(result))
 }
 
 async fn list_runtime_records(
@@ -352,6 +333,11 @@ async fn rollback_revision(
         .rollback(&program_id, &revision_id)
         .await
         .map_err(ApiError::from)?;
+    let draft = runtime.store().draft().await.map_err(ApiError::from)?;
+    state
+        .business_modules
+        .reconcile(&draft.definition)
+        .map_err(ApiError::from)?;
     runtime
         .activate_existing_revision(&revision.id)
         .await
@@ -393,6 +379,69 @@ async fn runtime_image(
         .await
         .ok_or_else(|| ApiError::not_found("活动 ProgramImage 不存在"))?;
     Ok(ok_json(image.image().clone()))
+}
+
+async fn runtime_definition(
+    State(state): State<StudioState>,
+) -> Result<Json<ApiResponse<ProgramDefinition>>, ApiError> {
+    let runtime = state.runtime()?;
+    let program = runtime.store().program().await.map_err(ApiError::from)?;
+    let revision_id = program
+        .active_revision_id
+        .ok_or_else(|| ApiError::not_found("活动 Program Revision 不存在"))?;
+    runtime
+        .store()
+        .revision(&revision_id)
+        .await
+        .map(|revision| ok_json(revision.definition))
+        .map_err(ApiError::from)
+}
+
+async fn preview_application(
+    State(state): State<StudioState>,
+) -> Result<Json<ApiResponse<ApplicationBundle>>, ApiError> {
+    let runtime = state.runtime()?;
+    let draft = runtime.store().draft().await.map_err(ApiError::from)?;
+    let mut image = runtime
+        .validate_definition(&draft.definition)
+        .map_err(anyhow::Error::from)
+        .map_err(ApiError::from)?;
+    image.revision_id = format!("draft-{}", draft.version);
+    ApplicationCompiler
+        .compile(&draft.definition, &image)
+        .map(ok_json)
+        .map_err(ApiError::from)
+}
+
+async fn generate_application(
+    State(state): State<StudioState>,
+) -> Result<Json<ApiResponse<ApplicationGenerationResult>>, ApiError> {
+    let runtime = state.runtime()?;
+    runtime
+        .publish_draft_if_changed("application-generation")
+        .await
+        .map_err(ApiError::from)?;
+    let image = runtime
+        .image()
+        .await
+        .ok_or_else(|| ApiError::not_found("活动 ProgramImage 不存在"))?;
+    let revision = runtime
+        .store()
+        .revision(&image.image().revision_id)
+        .await
+        .map_err(ApiError::from)?;
+    state
+        .business_modules
+        .reconcile(&revision.definition)
+        .map_err(ApiError::from)?;
+    let bundle = ApplicationCompiler
+        .compile(&revision.definition, image.image())
+        .map_err(ApiError::from)?;
+    tokio::task::spawn_blocking(move || ApplicationWorkspace::repository().write(&bundle))
+        .await
+        .map_err(|error| ApiError::internal(format!("生成应用任务失败: {error}")))?
+        .map(ok_json)
+        .map_err(ApiError::from)
 }
 
 async fn invoke_server_segment(
@@ -444,9 +493,17 @@ async fn start_vibe_run(
     let session_id = session.id.clone();
     let failure_session_id = session.id.clone();
     let patch_agent = Arc::clone(&state.patch_agent);
+    let business_modules = state.business_modules.clone();
     tokio::spawn(async move {
-        if let Err(error) =
-            run_vibe_agent(runtime.clone(), patch_agent, session, draft, request).await
+        if let Err(error) = run_vibe_agent(
+            runtime.clone(),
+            patch_agent,
+            business_modules,
+            session,
+            draft,
+            request,
+        )
+        .await
         {
             tracing::error!(
                 error = %format!("{error:#}"),
@@ -496,6 +553,7 @@ async fn get_vibe_run(
 async fn run_vibe_agent(
     runtime: Arc<ProgramRuntime>,
     patch_agent: Arc<crate::ProgramPatchAgent>,
+    business_modules: Arc<BusinessModuleManager>,
     session: crate::VibeSessionSnapshot,
     draft: DraftSnapshot,
     request: VibeRunRequest,
@@ -520,7 +578,7 @@ async fn run_vibe_agent(
                 diagnostics = vec![json!({
                     "code": "VIBE_INFERENCE_FAILED",
                     "attempt": attempt,
-                    "message": error.to_string(),
+                    "message": vibe_error_message(&error),
                 })];
                 record_vibe_gate(&runtime, &session.id, attempt, &diagnostics).await?;
                 continue;
@@ -561,7 +619,8 @@ async fn run_vibe_agent(
                     patches: cumulative_patches,
                     origin: PatchOrigin::Vibe,
                 };
-                runtime.store().patch_draft(&batch).await?;
+                let draft = runtime.store().patch_draft(&batch).await?;
+                business_modules.reconcile(&draft.definition)?;
                 let image = runtime.publish_latest("vibe").await?;
                 runtime
                     .store()
@@ -580,7 +639,7 @@ async fn run_vibe_agent(
     }
 
     if !cumulative_patches.is_empty() {
-        runtime
+        let draft = runtime
             .store()
             .patch_draft(&GraphPatchBatch {
                 base_version: draft.version,
@@ -588,6 +647,7 @@ async fn run_vibe_agent(
                 origin: PatchOrigin::Vibe,
             })
             .await?;
+        business_modules.reconcile(&draft.definition)?;
     }
     runtime
         .store()
@@ -625,6 +685,15 @@ fn token_count(value: u64) -> i64 {
     value.min(i64::MAX as u64) as i64
 }
 
+fn vibe_error_message(error: &anyhow::Error) -> String {
+    let context = error.to_string();
+    let root_cause = error.root_cause().to_string();
+    if context == root_cause {
+        return context;
+    }
+    format!("{context}: {root_cause}")
+}
+
 fn event_payload(event: &ProgramActivationEvent) -> String {
     match serde_json::to_string(event) {
         Ok(value) => value,
@@ -643,6 +712,22 @@ const fn patch_origin(origin: &PatchOrigin) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
+
+    #[test]
+    fn vibe_error_message_keeps_context_and_root_cause_once() {
+        let result = Err::<(), _>(anyhow::anyhow!("Invalid status code 502 Bad Gateway"))
+            .context("ProgramPatchAgent Responses 调用失败: gpt-5.5");
+        let error = match result {
+            Ok(()) => panic!("带上下文的错误必须保持失败状态"),
+            Err(error) => error,
+        };
+
+        assert_eq!(
+            vibe_error_message(&error),
+            "ProgramPatchAgent Responses 调用失败: gpt-5.5: Invalid status code 502 Bad Gateway",
+        );
+    }
 
     #[test]
     fn record_criteria_is_structured_and_bounded() {

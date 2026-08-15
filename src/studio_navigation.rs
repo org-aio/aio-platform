@@ -13,6 +13,7 @@ pub(crate) struct ModelUsageSummary {
     pub(crate) functions: usize,
 }
 
+#[cfg_attr(not(feature = "runtime-ui"), allow(dead_code))]
 impl ModelUsageSummary {
     pub(crate) const fn total(self) -> usize {
         self.model_fields + self.page_layouts + self.page_endpoints + self.functions
@@ -37,8 +38,10 @@ impl ModelUsageSummary {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(not(feature = "runtime-ui"), allow(dead_code))]
 pub(crate) enum StudioTab {
     #[default]
+    Applications,
     Models,
     Pages,
     Functions,
@@ -213,9 +216,7 @@ pub(crate) fn model_usage_summary(
         .pages
         .iter()
         .filter(|page| match &page.renderer {
-            PageRendererDefinition::ConventionFile
-            | PageRendererDefinition::Extension { .. }
-            | PageRendererDefinition::MenuTree => false,
+            PageRendererDefinition::ConventionFile | PageRendererDefinition::MenuTree => false,
             PageRendererDefinition::CrudTable { table } => table.model_id == Some(model_id),
             PageRendererDefinition::TreeTable { tree, table } => {
                 table.model_id == Some(model_id)
@@ -424,8 +425,8 @@ mod tests {
     }
 
     #[test]
-    fn studio_opens_the_model_workspace_by_default() {
-        assert_eq!(StudioTab::default(), StudioTab::Models);
+    fn studio_opens_the_application_workspace_by_default() {
+        assert_eq!(StudioTab::default(), StudioTab::Applications);
     }
 
     #[test]
@@ -710,7 +711,6 @@ mod tests {
                 title: "导出客户".to_owned(),
                 description: "导出客户数据".to_owned(),
                 state: DefinitionState::Known,
-                implementation: crate::EndpointImplementationDefinition::Convention,
                 method: RestMethod::Post,
                 path: "/api/customers/export".to_owned(),
                 inputs: vec![EndpointInputDefinition {

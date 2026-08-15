@@ -120,15 +120,10 @@ pub(super) fn PageDefinitionDialog(
                         PageRendererKind::ConventionFile => {
                             crate::PageRendererDefinition::ConventionFile
                         }
-                        PageRendererKind::Extension => {
-                            status.set(Some("扩展页面必须从 Admin Workbench 新建".to_owned()));
-                            return;
-                        }
                         PageRendererKind::MenuTree => crate::PageRendererDefinition::MenuTree,
                         PageRendererKind::TreeTable | PageRendererKind::CrudTable => {
                             let draft = PageRendererDraft {
                                 kind: PageRendererKind::CrudTable,
-                                extension: None,
                                 table_model_id: table_model_id(),
                                 page_size: page_size(),
                                 tree_model_id: String::new(),

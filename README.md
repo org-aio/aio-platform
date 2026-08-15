@@ -13,8 +13,7 @@ Cargo 工件：`az-studio`
 
 `PageDefinition` 不保存组件树，只保存渲染声明：
 
-- `ConventionFile`：按 `应用标识/页面标识` 匹配 Rudi `ConventionPageProvider`。期望文件固定生成到 `app/src/pages/{application}__{page}.rs`，补完文件并重新构建后生效。
-- `Extension`：保存扩展的 Rust 限定类型、配置协议版本和 JSON 配置，由 `az-dioxus-admin-shell` 的 Rudi 编译器与渲染器消费。
+- `ConventionFile`：按 `应用标识/页面标识` 生成普通 Rust 页面函数。文件只随独立应用生成到 `generated/apps/<application-id>/src/pages`，由同一应用的 `pages.rs` 按页面 `SymbolId` 分发。
 - `TreeTable`：声明树模型、树标题/父级字段、表模型、关联字段、查询字段和显示列，运行时渲染左树右表。
 - `CrudTable`：声明表模型、查询字段、显示列和分页大小，运行时渲染增删改查表格。
 
@@ -26,11 +25,11 @@ Cargo 工件：`az-studio`
 
 设备能力的术语参考 W3C WoT：字段可作为 `Property` 的数据模式，命令和异步通知分别应落在 `Action` 与 `Event`，但 Studio 不把内部的数据库关联和查询表达式伪装成完整 Thing Description。模型可组合绑定租户、创建/更新人、创建/更新时间、逻辑删除、删除人/时间与版本号等审计角色；每个角色都绑定稳定字段 ID，勾选缺失角色时会生成默认字段，取消角色只移除审计语义而不删除已有业务数据。
 
-`PageDefinition.endpoints` 保存页面作为前端消费者声明的自定义 REST 接口。REST 方法与相对路径就是接口身份，不再重复保存接口标识；显示名称可省略，空值时从路径末段推导。`CrudTable` 与 `TreeTable` 的查询、新增、修改、删除、导入、导出接口由编译器从布局和模型推导，不重复持久化；每条编译后接口只保留实际使用的 Rudi Provider 路由指令。自定义接口可以由 Vibe Agent 根据一次性的中文需求生成方法、相对路径、Path/Query/Header/Body 入参和响应 `data` 字段，需求文本不进入接口元数据，运行时由 Rudi `RestFormPageProvider` 渲染并发起请求。
+`PageDefinition.endpoints` 保存页面作为前端消费者声明的自定义 REST 接口。REST 方法与相对路径就是路由身份；稳定 `SymbolId` 连接生成 Controller 与业务契约。`CrudTable` 与 `TreeTable` 的查询、新增、修改、删除、导入、导出接口由编译器从布局和模型推导，不重复持久化。自定义接口可以由 Vibe Agent 生成方法、相对路径、Path/Query/Header/Body 入参和响应 `data` 字段；`BusinessModuleManager` 将它们生成到 `lib/biz/<application-id>`，运行时表单直接解释接口元数据。
 
-本插件不实现资产、IoT、SSH 等领域能力；这些插件只保留类型化 API 或 Capability，业务页面统一由 Studio 配置。正式程序只在 PostgreSQL 中保存，不持久化 Dioxus `Element`、SQL、HTML、CSS 或 JavaScript。约定文件是显式代码扩展点，不是页面配置真源。
+本插件不实现资产、IoT、SSH 等领域能力；业务页面统一由 Studio 配置，领域实现位于 `lib/biz`。正式程序只在 PostgreSQL 中保存，不持久化 Dioxus `Element`、SQL、HTML、CSS 或 JavaScript。约定文件是显式代码扩展点，不是页面配置真源。
 
-Studio 的基础交互控件统一消费固定 Git 提交的 `az-ui-components`。该 crate 的源码位于独立 [`dioxus-admin-workbench`](https://github.com/zjarlin/dioxus-admin-workbench) 仓库的 `crates/ui/components`，AIO 不保留本地副本、转发层或 CSS；组件主题、布局与控件样式全部随 crate 依赖自动加载。完整对象 Form 只由明确操作打开 Dialog，不常驻表格或页面内容流。完整网页开发约定见仓库 Skill `.agents/skills/aio-dioxus-web`。
+Studio 的发布应用壳和基础交互控件统一消费 submodule 中的 `az-dioxus-admin-shell` 与 `az-ui-components`。源码位于独立 [`dioxus-admin-workbench`](https://github.com/zjarlin/dioxus-admin-workbench) 仓库，AIO 只保留 `ProgramImage` 适配和业务回调，不保留壳层、组件、转发层或 CSS；主题、布局与控件样式全部随 crate 依赖自动加载。完整对象 Form 只由明确操作打开 Dialog，不常驻表格或页面内容流。完整网页开发约定见仓库 Skill `.agents/skills/aio-dioxus-web`。
 
 ```bash
 cargo test -p az-studio

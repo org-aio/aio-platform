@@ -15,7 +15,7 @@ use crate::{CompiledModel, FormStateExtractionResponse, ValueType};
 const DEFAULT_API_BASE: &str = "https://api.openai.com/v1";
 const DEFAULT_MODEL: &str = "gpt-5.5";
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct FormStateExtractor {
     config: Option<FormStateAgentConfig>,
 }

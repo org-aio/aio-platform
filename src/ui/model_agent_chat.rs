@@ -66,7 +66,7 @@ pub(super) fn ModelAgentChat(
                     };
                     let path = format!("/api/studio/program/vibe-runs/{}", run.session_id);
                     for _ in 0..120 {
-                        TimeoutFuture::new(1_000).await;
+                        crate::browser_http::sleep_ms(1_000).await;
                         match get_api::<VibeSessionSnapshot>(&api_base_url, &path).await {
                             Ok(session) if session.status == "succeeded" => {
                                 generation.with_mut(|value| *value = value.saturating_add(1));
@@ -76,7 +76,8 @@ pub(super) fn ModelAgentChat(
                                 return;
                             }
                             Ok(session) if session.status == "failed" => {
-                                append_agent_result(messages, "修改失败，请调整要求后重试");
+                                let failure = vibe_failure_message(&session.diagnostics);
+                                append_agent_result(messages, &failure);
                                 status.set(Some("Agent 修改失败".to_owned()));
                                 busy.set(false);
                                 return;
@@ -104,4 +105,41 @@ fn append_agent_result(mut messages: Signal<Vec<AgentChatMessage>>, content: &st
     messages.with_mut(|items| {
         items.push(AgentChatMessage::agent(message_id, content));
     });
+}
+
+fn vibe_failure_message(diagnostics: &Value) -> String {
+    diagnostics
+        .as_array()
+        .and_then(|items| items.last())
+        .and_then(|item| item.get("message"))
+        .and_then(Value::as_str)
+        .map(|message| format!("修改失败：{message}"))
+        .unwrap_or_else(|| "修改失败，请调整要求后重试".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::vibe_failure_message;
+    use serde_json::json;
+
+    #[test]
+    fn displays_latest_vibe_diagnostic() {
+        let diagnostics = json!([
+            {"message": "第一次失败"},
+            {"message": "GraphPatch 缺少 target_id"}
+        ]);
+
+        assert_eq!(
+            vibe_failure_message(&diagnostics),
+            "修改失败：GraphPatch 缺少 target_id",
+        );
+    }
+
+    #[test]
+    fn falls_back_when_vibe_diagnostic_is_missing() {
+        assert_eq!(
+            vibe_failure_message(&json!([])),
+            "修改失败，请调整要求后重试",
+        );
+    }
 }

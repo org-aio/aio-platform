@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    any::{Any, TypeId},
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+};
 
 use crate::{CapabilityCatalog as ProgramCapabilityCatalog, CapabilityContract};
 use anyhow::{Result, bail};
@@ -6,7 +10,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 #[async_trait]
-pub trait CapabilityProvider: Send + Sync {
+pub trait CapabilityProvider: Any + Send + Sync {
     fn contract(&self) -> CapabilityContract;
 
     async fn execute(&self, operation: &str, input: Value) -> Result<Value>;
@@ -24,7 +28,12 @@ impl CapabilityCatalog {
     pub fn new(providers: Vec<DynCapabilityProvider>) -> Result<Self> {
         let mut indexed = BTreeMap::new();
         let mut contracts = BTreeMap::new();
+        let mut provider_types = HashSet::<TypeId>::new();
         for provider in providers {
+            let type_id = provider.as_ref().type_id();
+            if !provider_types.insert(type_id) {
+                bail!("Capability Provider 类型重复: {type_id:?}");
+            }
             let contract = provider.contract();
             if contract.canonical_id.trim().is_empty() {
                 bail!("Capability canonical_id 不能为空");

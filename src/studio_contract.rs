@@ -1,7 +1,33 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{CapabilityCatalog, ProgramDefinition};
+use crate::{ApplicationTarget, CapabilityCatalog, ProgramDefinition};
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ApplicationSourceFile {
+    pub path: String,
+    pub content: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ApplicationBundle {
+    pub application_id: String,
+    pub title: String,
+    pub revision_id: String,
+    pub content_hash: String,
+    pub targets: Vec<ApplicationTarget>,
+    pub files: Vec<ApplicationSourceFile>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ApplicationGenerationResult {
+    pub application_id: String,
+    pub path: String,
+    pub revision_id: String,
+    pub content_hash: String,
+    pub targets: Vec<ApplicationTarget>,
+    pub files: Vec<String>,
+}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StudioCatalog {
@@ -21,6 +47,7 @@ impl Default for StudioPageParams {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub struct StudioPage<T> {
     pub d: Vec<T>,
     pub t: u64,
@@ -68,6 +95,7 @@ pub struct VibeSessionSnapshot {
     pub base_version: i64,
     pub status: String,
     pub final_revision_id: Option<String>,
+    pub diagnostics: Value,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
 }
@@ -94,12 +122,6 @@ pub struct VibeRunRequest {
 pub struct VibeRunAccepted {
     pub session_id: String,
     pub status: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ConventionFileResult {
-    pub path: String,
-    pub created: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

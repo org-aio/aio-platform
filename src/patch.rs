@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    EndpointImplementationDefinition, FieldDefinition, FunctionDefinition, FunctionNode, GraphEdge,
+    ApplicationTarget, FieldDefinition, FunctionDefinition, FunctionNode, GraphEdge,
     MenuDefinition, ModelAuditDefinition, ModelDefinition, ModelIndexDefinition,
     ModelPrimaryKeyDefinition, ModelQueryDefinition, ModelValidationDefinition, PageDefinition,
     PageEndpointDefinition, PermissionDefinition, PortDefinition, ProgramDefinition,
@@ -131,6 +131,7 @@ impl GraphEntity {
 #[serde(tag = "kind", content = "name", rename_all = "snake_case")]
 pub enum EditableProperty {
     Title,
+    ApplicationTargets,
     RoutePath,
     RoutePermissions,
     Icon,
@@ -211,17 +212,13 @@ impl ProgramDefinition {
                 ensure_studio_insertable(entity)?;
                 self.insert_entity(*parent_id, *collection, *index, entity.clone())
             }
-            GraphPatch::Delete { target_id } => {
-                self.ensure_studio_owned_target(*target_id)?;
-                self.delete_entity(*target_id)
-            }
+            GraphPatch::Delete { target_id } => self.delete_entity(*target_id),
             GraphPatch::Move {
                 target_id,
                 parent_id,
                 collection,
                 index,
             } => {
-                self.ensure_studio_owned_target(*target_id)?;
                 let entity = self.take_entity(*target_id)?;
                 self.insert_entity(*parent_id, *collection, *index, entity)
             }
@@ -234,25 +231,12 @@ impl ProgramDefinition {
                 target_id,
                 name,
                 title,
-            } => {
-                self.ensure_studio_mutable_target(*target_id)?;
-                if self.pages.iter().any(|page| {
-                    page.id == *target_id
-                        && page.name != *name
-                        && page.endpoints.iter().any(endpoint_is_native)
-                }) {
-                    return Err(native_contract_patch_error());
-                }
-                self.rename(*target_id, name, title.as_deref())
-            }
+            } => self.rename(*target_id, name, title.as_deref()),
             GraphPatch::SetProperty {
                 target_id,
                 property,
                 value,
-            } => {
-                self.ensure_studio_mutable_target(*target_id)?;
-                self.set_property(*target_id, property, value)
-            }
+            } => self.set_property(*target_id, property, value),
             GraphPatch::Connect { function_id, edge } => {
                 let function = self
                     .functions
@@ -295,33 +279,6 @@ impl ProgramDefinition {
                 remove_by_id(&mut function.graph.edges, *edge_id, |value| value.id).map(|_| ())
             }
         }
-    }
-
-    fn ensure_studio_owned_target(&self, target_id: SymbolId) -> Result<(), PatchError> {
-        for page in &self.pages {
-            if page.id == target_id && page.endpoints.iter().any(endpoint_is_native) {
-                return Err(native_contract_patch_error());
-            }
-            if page
-                .endpoints
-                .iter()
-                .any(|endpoint| endpoint.id == target_id && endpoint_is_native(endpoint))
-            {
-                return Err(native_contract_patch_error());
-            }
-        }
-        Ok(())
-    }
-
-    fn ensure_studio_mutable_target(&self, target_id: SymbolId) -> Result<(), PatchError> {
-        if self.pages.iter().any(|page| {
-            page.endpoints
-                .iter()
-                .any(|endpoint| endpoint.id == target_id && endpoint_is_native(endpoint))
-        }) {
-            return Err(native_contract_patch_error());
-        }
-        Ok(())
     }
 
     fn insert_entity(
@@ -627,6 +584,23 @@ impl ProgramDefinition {
         value: &Value,
     ) -> Result<(), PatchError> {
         match property {
+            EditableProperty::ApplicationTargets => {
+                if target_id != self.id {
+                    return Err(PatchError::TargetNotFound(target_id));
+                }
+                let targets =
+                    serde_json::from_value::<std::collections::BTreeSet<ApplicationTarget>>(
+                        value.clone(),
+                    )
+                    .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
+                if targets.is_empty() {
+                    return Err(PatchError::InvalidValue(
+                        "应用至少需要一个客户端发布目标".to_owned(),
+                    ));
+                }
+                self.application_targets = targets;
+                Ok(())
+            }
             EditableProperty::RoutePath => {
                 let route = self
                     .routes
@@ -728,18 +702,12 @@ impl ProgramDefinition {
                     .flat_map(|page| &mut page.endpoints)
                     .find(|endpoint| endpoint.id == target_id)
                     .ok_or(PatchError::TargetNotFound(target_id))?;
-                if endpoint_is_native(endpoint) {
-                    return Err(native_contract_patch_error());
-                }
                 let replacement = serde_json::from_value::<PageEndpointDefinition>(value.clone())
                     .map_err(|error| PatchError::InvalidValue(error.to_string()))?;
                 if replacement.id != target_id {
                     return Err(PatchError::InvalidValue(
                         "页面接口更新不能改变 SymbolId".to_owned(),
                     ));
-                }
-                if endpoint_is_native(&replacement) {
-                    return Err(native_contract_patch_error());
                 }
                 *endpoint = replacement;
                 Ok(())
@@ -1107,26 +1075,7 @@ fn ensure_studio_insertable(entity: &GraphEntity) -> Result<(), PatchError> {
             "id 是系统主键字段，不能作为普通字段插入".to_owned(),
         ));
     }
-    let contains_native_contract = match entity {
-        GraphEntity::Page(page) => page.endpoints.iter().any(endpoint_is_native),
-        GraphEntity::PageEndpoint(endpoint) => endpoint_is_native(endpoint),
-        _ => false,
-    };
-    if contains_native_contract {
-        return Err(native_contract_patch_error());
-    }
     Ok(())
-}
-
-fn endpoint_is_native(endpoint: &PageEndpointDefinition) -> bool {
-    matches!(
-        endpoint.implementation,
-        EndpointImplementationDefinition::Native { .. }
-    )
-}
-
-fn native_contract_patch_error() -> PatchError {
-    PatchError::InvalidValue("原生接口元数据由插件声明维护，只能编辑约定契约".to_owned())
 }
 
 fn json_string(value: &Value) -> Result<String, PatchError> {
@@ -1603,7 +1552,6 @@ mod tests {
             title: "归档资产".to_owned(),
             description: "归档指定资产".to_owned(),
             state: crate::DefinitionState::Known,
-            implementation: crate::EndpointImplementationDefinition::Convention,
             method: RestMethod::Post,
             path: "/api/assets/archive".to_owned(),
             inputs: Vec::new(),
@@ -1625,64 +1573,6 @@ mod tests {
             value: serde_json::to_value(updated.clone())?,
         })?;
         assert_eq!(program.pages[0].endpoints, vec![updated]);
-        Ok(())
-    }
-
-    #[test]
-    fn native_endpoint_and_owning_page_are_read_only_for_graph_patch() -> anyhow::Result<()> {
-        let mut program = ProgramDefinition::empty("inventory", "资产");
-        let page_id = SymbolId::new();
-        let endpoint_id = SymbolId::new();
-        let endpoint = PageEndpointDefinition {
-            id: endpoint_id,
-            title: "资产列表".to_owned(),
-            description: "由资产插件提供".to_owned(),
-            state: crate::DefinitionState::Known,
-            implementation: crate::EndpointImplementationDefinition::Native {
-                plugin_id: "asset-hub".to_owned(),
-            },
-            method: RestMethod::Get,
-            path: "/api/asset-hub/assets".to_owned(),
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-        };
-        program.pages.push(PageDefinition {
-            id: page_id,
-            name: "assets".to_owned(),
-            title: "资产".to_owned(),
-            state: crate::DefinitionState::Known,
-            renderer: PageRendererDefinition::ConventionFile,
-            endpoints: vec![endpoint.clone()],
-        });
-        let original = program.clone();
-
-        let endpoint_error = program
-            .apply_patch(&GraphPatch::Delete {
-                target_id: endpoint_id,
-            })
-            .err()
-            .ok_or_else(|| anyhow::anyhow!("删除原生接口必须失败"))?;
-        assert!(endpoint_error.to_string().contains("插件声明维护"));
-        assert_eq!(program, original);
-
-        let page_error = program
-            .apply_patch(&GraphPatch::Delete { target_id: page_id })
-            .err()
-            .ok_or_else(|| anyhow::anyhow!("删除原生接口页面必须失败"))?;
-        assert!(page_error.to_string().contains("插件声明维护"));
-        assert_eq!(program, original);
-
-        let insert_error = program
-            .apply_patch(&GraphPatch::Insert {
-                parent_id: page_id,
-                collection: ChildCollection::PageEndpoints,
-                index: 1,
-                entity: GraphEntity::PageEndpoint(endpoint),
-            })
-            .err()
-            .ok_or_else(|| anyhow::anyhow!("GraphPatch 不能伪造原生接口"))?;
-        assert!(insert_error.to_string().contains("只能编辑约定契约"));
-        assert_eq!(program, original);
         Ok(())
     }
 

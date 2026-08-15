@@ -1,6 +1,6 @@
 use std::env;
 
-use crate::{CapabilityCatalog, GraphPatchBatch, PatchOrigin, ProgramDefinition};
+use crate::{CapabilityCatalog, GraphPatch, GraphPatchBatch, PatchOrigin, ProgramDefinition};
 use anyhow::{Context, Result, bail};
 use rig::providers::openai;
 use schemars::JsonSchema;
@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 const DEFAULT_API_BASE: &str = "https://api.openai.com/v1";
 const DEFAULT_MODEL: &str = "gpt-5.5";
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ProgramPatchAgent {
     config: Option<AgentConfig>,
 }
@@ -32,7 +32,7 @@ pub struct GeneratedProgramPatch {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 struct PatchAgentResponse {
-    batch: Value,
+    patches: Vec<Value>,
 }
 
 impl ProgramPatchAgent {
@@ -97,11 +97,12 @@ impl ProgramPatchAgent {
             .extract_with_usage(&input)
             .await
             .with_context(|| format!("ProgramPatchAgent Responses 调用失败: {model}"))?;
-        reject_forbidden_patch_keys(&response.data.batch)?;
-        let mut batch = serde_json::from_value::<GraphPatchBatch>(response.data.batch)
-            .context("ProgramPatchAgent 返回值不是 GraphPatchBatch")?;
-        batch.base_version = base_version;
-        batch.origin = PatchOrigin::Vibe;
+        let patches = parse_agent_patches(response.data.patches)?;
+        let batch = GraphPatchBatch {
+            base_version,
+            patches,
+            origin: PatchOrigin::Vibe,
+        };
         Ok(GeneratedProgramPatch {
             batch,
             model: model.to_owned(),
@@ -129,7 +130,7 @@ fn agent_input(
 }
 
 fn agent_contract() -> &'static str {
-    r#"你是 AIO ProgramPatchAgent。你只能返回一个对象：{"batch": GraphPatchBatch JSON}。
+    r#"你是 AIO ProgramPatchAgent。你只能返回一个对象：{"patches": GraphPatch JSON 数组}。
 不得返回或生成 Rust、SQL、HTML、CSS、JavaScript、Rhai、文件路径、外部 URL 或解释文本。
 只能使用输入中的稳定 SymbolId、页面渲染声明、模型字段、Capability canonical_id 和强类型 GraphPatch。
 新声明必须分配合法 UUID。PageEndpointDefinition 只能使用本应用以 / 开头的相对 REST 路径，
@@ -142,8 +143,14 @@ fn agent_contract() -> &'static str {
 "outputs":[{"id":"新 UUID","name":"snake_case","title":"中文说明","value_type":{"kind":"text"}}]}}}。
 模型主键只能通过 SetProperty 的 model_primary_key 修改，value 为
 {"generation":"uuid"} 或 {"generation":"auto_increment"}；不得把 id 插入普通字段集合。
-不要修改 base_version 和 origin，它们会由服务端覆盖。页面只能选择 convention_file、tree_table 或 crud_table。
+不要返回 base_version 和 origin，它们由服务端填写。页面只能选择 convention_file、tree_table 或 crud_table。
 若 previous_diagnostics 非空，修复这些诊断并保留用户原始意图。"#
+}
+
+fn parse_agent_patches(values: Vec<Value>) -> Result<Vec<GraphPatch>> {
+    reject_forbidden_patch_keys(&Value::Array(values.clone()))?;
+    serde_json::from_value(Value::Array(values))
+        .context("ProgramPatchAgent 返回值不是 GraphPatch 数组")
 }
 
 fn reject_forbidden_patch_keys(value: &Value) -> Result<()> {
@@ -198,10 +205,44 @@ fn normalize_api_base(value: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SymbolId;
 
     #[test]
     fn rejects_source_bearing_agent_output() {
-        let value = json!({"batch": {"patches": [{"source_text": "fn main() {}"}]}});
+        let value = json!({"patches": [{"source_text": "fn main() {}"}]});
         assert!(reject_forbidden_patch_keys(&value).is_err());
+    }
+
+    #[test]
+    fn builds_batch_from_agent_patches_without_transport_fields() {
+        let target_id = SymbolId::new();
+        let result = parse_agent_patches(vec![json!({
+            "kind": "delete",
+            "target_id": target_id,
+        })]);
+        let patches = match result {
+            Ok(patches) => patches,
+            Err(error) => panic!("合法 GraphPatch 应当能够解析: {error:#}"),
+        };
+        let batch = GraphPatchBatch {
+            base_version: 42,
+            patches,
+            origin: PatchOrigin::Vibe,
+        };
+
+        assert_eq!(batch.base_version, 42);
+        assert_eq!(batch.origin, PatchOrigin::Vibe);
+        assert_eq!(batch.patches, vec![GraphPatch::Delete { target_id }],);
+    }
+
+    #[test]
+    fn reports_invalid_patch_shape_with_serde_cause() {
+        let result = parse_agent_patches(vec![json!({"kind": "delete"})]);
+        let error = match result {
+            Ok(_) => panic!("缺少 target_id 的 GraphPatch 必须失败"),
+            Err(error) => error,
+        };
+
+        assert!(format!("{error:#}").contains("missing field `target_id`"));
     }
 }

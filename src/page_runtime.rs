@@ -1,25 +1,20 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::Result;
 use dioxus::prelude::*;
 use icons::{
     ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Eye, Pencil, Play, Plus, RefreshCw,
     Search, Sparkles, Trash2, X,
 };
-use rudi::Context as RudiContext;
 use serde_json::{Map, Value};
 
 use crate::{
     CompiledModel, CompiledPage, CompiledPageEndpoint, CompiledPageRenderer, CompiledTable,
-    CompiledTree, CrudTablePageProvider, EndpointInputLocation, FieldRelation,
-    FormStateExtractionRequest, FormStateExtractionResponse, MenuActionAccess, MenuRowActions,
-    PageEndpointSource, ProgramImage, ProgramMenuTreePageProvider, RestFormPageProvider,
-    RestMethod, RuntimeRecordCriteria, RuntimeRecordFilter, RuntimeRecordFilterOperator,
-    RuntimeRecordInput, RuntimeRecordPage, RuntimeRecordSort, RuntimeRecordSortDirection,
-    RuntimeRecordView, SymbolId, TreeTablePageProvider, ValueType,
+    CompiledTree, EndpointInputLocation, FieldRelation, FormStateExtractionRequest,
+    FormStateExtractionResponse, MenuActionAccess, MenuRowActions, PageEndpointSource,
+    ProgramImage, RestMethod, RuntimeRecordCriteria, RuntimeRecordFilter,
+    RuntimeRecordFilterOperator, RuntimeRecordInput, RuntimeRecordPage, RuntimeRecordSort,
+    RuntimeRecordSortDirection, RuntimeRecordView, SymbolId, ValueType,
     browser_http::{api_url, delete_api, get_api, patch_api, post_api},
     runtime_record_form::{
         record_payload_from_state, relation_form_state_value, relation_record_label,
@@ -53,203 +48,6 @@ pub struct BuiltInPageContext {
     pub page: CompiledPage,
     pub row_actions: MenuRowActions,
 }
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct PageEndpointFormContext {
-    pub api_base_url: String,
-    pub endpoint: CompiledPageEndpoint,
-}
-
-pub trait PageEndpointProvider: Send + Sync + std::fmt::Debug {
-    fn key(&self) -> &'static str;
-
-    fn render(&self, context: PageEndpointFormContext) -> Element;
-}
-
-pub type DynPageEndpointProvider = Arc<dyn PageEndpointProvider>;
-
-#[derive(Clone, Debug, Default)]
-pub struct PageEndpointIndex {
-    providers: BTreeMap<String, DynPageEndpointProvider>,
-}
-
-impl PageEndpointIndex {
-    pub fn from_context(context: &mut RudiContext) -> Result<Self> {
-        let provider_names = context
-            .get_providers_by_type::<DynPageEndpointProvider>()
-            .into_iter()
-            .map(|provider| provider.definition().key.name.to_string())
-            .collect::<Vec<_>>();
-        let mut providers = BTreeMap::new();
-        for provider_name in provider_names {
-            let provider = context
-                .resolve_option_with_name::<DynPageEndpointProvider>(provider_name.clone())
-                .with_context(|| format!("无法解析页面接口 Provider: {provider_name}"))?;
-            ensure!(
-                provider.key() == provider_name,
-                "页面接口的 Rudi name 与 Provider key 不一致: {provider_name} != {}",
-                provider.key()
-            );
-            if providers.insert(provider_name.clone(), provider).is_some() {
-                bail!("页面接口 Provider 重复: {provider_name}");
-            }
-        }
-        Ok(Self { providers })
-    }
-
-    pub fn render(&self, provider_key: &str, context: PageEndpointFormContext) -> Option<Element> {
-        self.providers
-            .get(provider_key)
-            .map(|provider| provider.render(context))
-    }
-}
-
-impl PageEndpointProvider for RestFormPageProvider {
-    fn key(&self) -> &'static str {
-        std::any::type_name::<Self>()
-    }
-
-    fn render(&self, context: PageEndpointFormContext) -> Element {
-        rsx! {
-            RestEndpointForm {
-                api_base_url: context.api_base_url,
-                endpoint: context.endpoint,
-            }
-        }
-    }
-}
-
-#[rudi::Singleton(name = std::any::type_name::<RestFormPageProvider>())]
-fn rest_form_page_provider() -> DynPageEndpointProvider {
-    Arc::new(RestFormPageProvider)
-}
-
-fn load_page_endpoint_index() -> Result<Arc<PageEndpointIndex>, String> {
-    let mut context = RudiContext::auto_register();
-    PageEndpointIndex::from_context(&mut context)
-        .map(Arc::new)
-        .map_err(|error| error.to_string())
-}
-
-pub trait BuiltInPageProvider: Send + Sync + std::fmt::Debug {
-    fn key(&self) -> &'static str;
-
-    fn render(&self, context: BuiltInPageContext) -> Element;
-}
-
-pub type DynBuiltInPageProvider = Arc<dyn BuiltInPageProvider>;
-
-#[derive(Clone, Debug, Default)]
-pub struct BuiltInPageIndex {
-    providers: BTreeMap<String, DynBuiltInPageProvider>,
-}
-
-impl BuiltInPageIndex {
-    pub fn from_context(context: &mut RudiContext) -> Result<Self> {
-        let provider_names = context
-            .get_providers_by_type::<DynBuiltInPageProvider>()
-            .into_iter()
-            .map(|provider| provider.definition().key.name.to_string())
-            .collect::<Vec<_>>();
-        let mut providers = BTreeMap::new();
-        for provider_name in provider_names {
-            let provider = context
-                .resolve_option_with_name::<DynBuiltInPageProvider>(provider_name.clone())
-                .with_context(|| format!("无法解析内置页面 Provider: {provider_name}"))?;
-            ensure!(
-                provider.key() == provider_name,
-                "内置页面的 Rudi name 与 Provider key 不一致: {provider_name} != {}",
-                provider.key()
-            );
-            if providers.insert(provider_name.clone(), provider).is_some() {
-                bail!("内置页面 Provider 重复: {provider_name}");
-            }
-        }
-        Ok(Self { providers })
-    }
-
-    pub fn render(&self, provider_key: &str, context: BuiltInPageContext) -> Option<Element> {
-        self.providers
-            .get(provider_key)
-            .map(|provider| provider.render(context))
-    }
-}
-
-impl BuiltInPageProvider for CrudTablePageProvider {
-    fn key(&self) -> &'static str {
-        std::any::type_name::<Self>()
-    }
-
-    fn render(&self, context: BuiltInPageContext) -> Element {
-        render_built_in_page(context)
-    }
-}
-
-impl BuiltInPageProvider for TreeTablePageProvider {
-    fn key(&self) -> &'static str {
-        std::any::type_name::<Self>()
-    }
-
-    fn render(&self, context: BuiltInPageContext) -> Element {
-        render_built_in_page(context)
-    }
-}
-
-impl BuiltInPageProvider for ProgramMenuTreePageProvider {
-    fn key(&self) -> &'static str {
-        std::any::type_name::<Self>()
-    }
-
-    fn render(&self, context: BuiltInPageContext) -> Element {
-        rsx! {
-            crate::ui::ProgramMenuTreePage {
-                api_base_url: context.api_base_url,
-                title: context.page.title,
-            }
-        }
-    }
-}
-
-#[rudi::Singleton(name = std::any::type_name::<CrudTablePageProvider>())]
-fn crud_table_page_provider() -> DynBuiltInPageProvider {
-    Arc::new(CrudTablePageProvider)
-}
-
-#[rudi::Singleton(name = std::any::type_name::<TreeTablePageProvider>())]
-fn tree_table_page_provider() -> DynBuiltInPageProvider {
-    Arc::new(TreeTablePageProvider)
-}
-
-#[rudi::Singleton(name = std::any::type_name::<ProgramMenuTreePageProvider>())]
-fn program_menu_tree_page_provider() -> DynBuiltInPageProvider {
-    Arc::new(ProgramMenuTreePageProvider)
-}
-
-fn render_built_in_page(context: BuiltInPageContext) -> Element {
-    rsx! {
-        BuiltInPage {
-            api_base_url: context.api_base_url,
-            image: context.image,
-            page: context.page,
-            row_actions: context.row_actions,
-        }
-    }
-}
-
-pub trait ConventionPageProvider: Send + Sync + std::fmt::Debug {
-    fn key(&self) -> &'static str;
-
-    fn simple_name(&self) -> &'static str {
-        let qualified_name = self.key();
-        qualified_name
-            .rsplit_once("::")
-            .map_or(qualified_name, |(_, simple_name)| simple_name)
-    }
-
-    fn render(&self, context: ConventionPageContext) -> Element;
-}
-
-pub type DynConventionPageProvider = Arc<dyn ConventionPageProvider>;
 
 #[component]
 pub fn EndpointWorkbench(context: ConventionPageContext) -> Element {
@@ -352,43 +150,6 @@ fn EndpointResultPanel(
     }
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct ConventionPageIndex {
-    providers: BTreeMap<String, DynConventionPageProvider>,
-}
-
-impl ConventionPageIndex {
-    pub fn from_context(context: &mut RudiContext) -> Result<Self> {
-        let provider_names = context
-            .get_providers_by_type::<DynConventionPageProvider>()
-            .into_iter()
-            .map(|provider| provider.definition().key.name.to_string())
-            .collect::<Vec<_>>();
-        let mut providers = BTreeMap::new();
-        for provider_name in provider_names {
-            let provider = context
-                .resolve_option_with_name::<DynConventionPageProvider>(provider_name.clone())
-                .with_context(|| format!("无法解析约定页面 Provider: {provider_name}"))?;
-            ensure!(
-                provider.key() == provider_name,
-                "约定页面的 Rudi name 与 Provider key 不一致: {provider_name} != {}",
-                provider.key()
-            );
-            let simple_name = provider.simple_name().to_owned();
-            if providers.insert(simple_name.clone(), provider).is_some() {
-                bail!("约定页面模块名重复: {simple_name}");
-            }
-        }
-        Ok(Self { providers })
-    }
-
-    pub fn render(&self, module_name: &str, context: ConventionPageContext) -> Option<Element> {
-        self.providers
-            .get(module_name)
-            .map(|provider| provider.render(context))
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 enum RecordDialog {
     Create,
@@ -409,7 +170,7 @@ pub fn BuiltInPage(
     let (table, tree) = match &page.renderer {
         CompiledPageRenderer::TreeTable { tree, table, .. } => (table.clone(), Some(tree.clone())),
         CompiledPageRenderer::CrudTable { table, .. } => (table.clone(), None),
-        CompiledPageRenderer::ConventionFile { .. } | CompiledPageRenderer::Extension { .. } => {
+        CompiledPageRenderer::ConventionFile { .. } => {
             return render_runtime_error("内置页面收到了约定文件渲染计划");
         }
         CompiledPageRenderer::MenuTree { .. } => {
@@ -746,7 +507,6 @@ fn RuntimeEndpointDialog(
     endpoint: CompiledPageEndpoint,
     on_close: EventHandler<()>,
 ) -> Element {
-    let endpoint_forms = use_hook(load_page_endpoint_index);
     rsx! {
         Dialog {
             class: "aio-runtime-dialog aio-runtime-dialog--endpoint",
@@ -772,17 +532,9 @@ fn RuntimeEndpointDialog(
                     X { class: "size-4" }
                 }
             }
-            match &endpoint_forms {
-                Ok(index) => index
-                    .render(
-                        &endpoint.route_instruction.provider_key,
-                        PageEndpointFormContext {
-                            api_base_url,
-                            endpoint: endpoint.clone(),
-                        },
-                    )
-                    .unwrap_or_else(|| render_runtime_error("页面接口 Provider 未注册")),
-                Err(error) => render_runtime_error(error),
+            RestEndpointForm {
+                api_base_url,
+                endpoint: endpoint.clone(),
             }
         }
     }
@@ -915,31 +667,10 @@ async fn send_rest_endpoint_request(
         path.push_str(&query.join("&"));
     }
     let url = api_url(api_base_url, &path);
-    let mut request = match endpoint.method {
-        RestMethod::Get => gloo_net::http::Request::get(&url),
-        RestMethod::Post => gloo_net::http::Request::post(&url),
-        RestMethod::Put => gloo_net::http::Request::put(&url),
-        RestMethod::Patch => gloo_net::http::Request::patch(&url),
-        RestMethod::Delete => gloo_net::http::Request::delete(&url),
-    };
-    for (name, value) in headers {
-        request = request.header(&name, &value);
-    }
-    let response = if body.is_empty() {
-        request.send().await
-    } else {
-        request
-            .json(&Value::Object(body))
-            .map_err(|error| format!("请求体序列化失败: {error}"))?
-            .send()
-            .await
-    }
-    .map_err(|error| format!("{} {url} 失败: {error}", endpoint.method.as_str()))?;
-    let status = response.status();
-    let text = response
-        .text()
-        .await
-        .map_err(|error| format!("读取响应失败: {error}"))?;
+    let body = (!body.is_empty()).then_some(Value::Object(body));
+    let (status, text) =
+        crate::browser_http::send_http(endpoint.method.as_str(), &url, &headers, body.as_ref())
+            .await?;
     if !(200..300).contains(&status) {
         return Err(format!("HTTP {status}: {text}"));
     }
@@ -1209,59 +940,70 @@ fn RuntimeRecordField(
         .get(name)
         .cloned()
         .map_or_else(String::new, |value| value);
+    let field_class = if model.field_relations.contains_key(&slot)
+        || matches!(
+            value_type,
+            ValueType::Object { .. } | ValueType::List { .. }
+        ) {
+        "aio-runtime-record-form__field aio-runtime-record-form__field--wide"
+    } else {
+        "aio-runtime-record-form__field"
+    };
     rsx! {
-        label { r#for: "{input_id}", "{title}" }
-        if let Some(relation) = model.field_relations.get(&slot) {
-            if let Some(target_model) = image.models.get(&relation.target_model_id) {
-                RuntimeRelationField {
-                    api_base_url,
-                    relation: relation.clone(),
-                    target_model: target_model.clone(),
-                    input_id: input_id.clone(),
-                    field_name: name.clone(),
-                    field_title: title.clone(),
-                    required,
+        div { class: field_class,
+            label { r#for: "{input_id}", "{title}" }
+            if let Some(relation) = model.field_relations.get(&slot) {
+                if let Some(target_model) = image.models.get(&relation.target_model_id) {
+                    RuntimeRelationField {
+                        api_base_url,
+                        relation: relation.clone(),
+                        target_model: target_model.clone(),
+                        input_id: input_id.clone(),
+                        field_name: name.clone(),
+                        field_title: title.clone(),
+                        required,
+                        disabled,
+                        form_state,
+                    }
+                } else {
+                    div { class: "aio-runtime-relation-state is-error", role: "alert",
+                        "关联模型未进入运行时 Image"
+                    }
+                }
+            } else if matches!(value_type, ValueType::Boolean) {
+                Checkbox {
+                    id: input_id.clone(),
+                    name: "{name}",
                     disabled,
-                    form_state,
+                    checked: Some(checkbox_state(matches!(value.as_str(), "true" | "on" | "1"))),
+                    on_checked_change: {
+                        let name = name.clone();
+                        move |checked| form_state.with_mut(|state| {
+                            state.insert(name.clone(), checkbox_is_checked(checked).to_string());
+                        })
+                    },
                 }
             } else {
-                div { class: "aio-runtime-relation-state is-error", role: "alert",
-                    "关联模型未进入运行时 Image"
+                Input {
+                    id: input_id.clone(),
+                    class: "aio-input",
+                    name: "{name}",
+                    r#type: field_input_type(value_type),
+                    required,
+                    readonly: disabled,
+                    placeholder: options.placeholder.as_deref().map_or("", |value| value),
+                    value,
+                    oninput: {
+                        let name = name.clone();
+                        move |event: FormEvent| form_state.with_mut(|state| {
+                            state.insert(name.clone(), event.value());
+                        })
+                    },
                 }
             }
-        } else if matches!(value_type, ValueType::Boolean) {
-            Checkbox {
-                id: input_id.clone(),
-                name: "{name}",
-                disabled,
-                checked: Some(checkbox_state(matches!(value.as_str(), "true" | "on" | "1"))),
-                on_checked_change: {
-                    let name = name.clone();
-                    move |checked| form_state.with_mut(|state| {
-                        state.insert(name.clone(), checkbox_is_checked(checked).to_string());
-                    })
-                },
+            if let Some(help_text) = options.help_text.as_deref() {
+                small { "{help_text}" }
             }
-        } else {
-            Input {
-                id: input_id.clone(),
-                class: "aio-input",
-                name: "{name}",
-                r#type: field_input_type(value_type),
-                required,
-                readonly: disabled,
-                placeholder: options.placeholder.as_deref().map_or("", |value| value),
-                value,
-                oninput: {
-                    let name = name.clone();
-                    move |event: FormEvent| form_state.with_mut(|state| {
-                        state.insert(name.clone(), event.value());
-                    })
-                },
-            }
-        }
-        if let Some(help_text) = options.help_text.as_deref() {
-            small { "{help_text}" }
         }
     }
 }

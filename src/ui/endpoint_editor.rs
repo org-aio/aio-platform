@@ -508,7 +508,7 @@ pub(super) fn generate_endpoint_with_ai(
             "只为页面 {page_title}（SymbolId: {page_id}）新增一个自定义 REST 接口。\
              必须使用 GraphPatch::Insert，parent_id 为该页面，collection 为 page_endpoints，\
              entity 为 page_endpoint。根据中文需求生成可选中文显示名、HTTP 方法、本应用相对路径、\
-             详细 description、完整 inputs 和 outputs，并固定生成 implementation={{\"kind\":\"convention\"}}；\
+             详细 description、完整 inputs 和 outputs；\
              REST 路径就是接口标识，不得新增 name 或 intent 字段。\
              路径参数必须在 path 中使用同名花括号。中文需求只用于本次生成：{intent}"
         );
@@ -530,7 +530,7 @@ pub(super) fn generate_endpoint_with_ai(
             }
         }
         for _ in 0..60 {
-            TimeoutFuture::new(1_000).await;
+            crate::browser_http::sleep_ms(1_000).await;
             match get_api::<DraftSnapshot>(&api_base_url, "/api/studio/program/draft").await {
                 Ok(draft) if draft.version > version => {
                     generation.with_mut(|value| *value = value.saturating_add(1));
@@ -587,10 +587,4 @@ pub(super) fn method_class(method: RestMethod) -> &'static str {
         RestMethod::Put | RestMethod::Patch => "aio-http-method aio-http-method--write",
         RestMethod::Delete => "aio-http-method aio-http-method--delete",
     }
-}
-
-pub(super) fn short_provider_key(provider_key: &str) -> &str {
-    provider_key
-        .rsplit_once("::")
-        .map_or(provider_key, |(_, name)| name)
 }

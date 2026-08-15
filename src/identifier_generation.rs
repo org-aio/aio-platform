@@ -1,11 +1,97 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use az_admin_shell_core::identifier_from_title;
+use convert_case::{Case, Casing};
+use deunicode::deunicode;
+use pinyin::ToPinyin;
 
 use crate::{
     EndpointInputLocation, FunctionNode, PageEndpointDefinition, SymbolId,
     endpoint_identifier_is_valid,
 };
+
+pub(crate) fn identifier_from_title(title: &str) -> String {
+    let transliterated = title
+        .chars()
+        .map(|character| {
+            character.to_pinyin().map_or_else(
+                || character.to_string(),
+                |pinyin| format!(" {} ", pinyin.plain()),
+            )
+        })
+        .collect::<String>();
+    let normalized = deunicode(&transliterated).to_case(Case::Snake);
+    let normalized = normalized
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || *character == '_')
+        .collect::<String>();
+    let normalized = normalized.trim_matches('_');
+    if normalized.is_empty() {
+        return String::new();
+    }
+    if normalized.starts_with(|character: char| character.is_ascii_digit())
+        || is_rust_keyword(normalized)
+    {
+        return format!("item_{normalized}");
+    }
+    normalized.to_owned()
+}
+
+fn is_rust_keyword(value: &str) -> bool {
+    matches!(
+        value,
+        "as" | "async"
+            | "await"
+            | "break"
+            | "const"
+            | "continue"
+            | "crate"
+            | "dyn"
+            | "else"
+            | "enum"
+            | "extern"
+            | "false"
+            | "fn"
+            | "for"
+            | "if"
+            | "impl"
+            | "in"
+            | "let"
+            | "loop"
+            | "match"
+            | "mod"
+            | "move"
+            | "mut"
+            | "pub"
+            | "ref"
+            | "return"
+            | "self"
+            | "Self"
+            | "static"
+            | "struct"
+            | "super"
+            | "trait"
+            | "true"
+            | "type"
+            | "union"
+            | "unsafe"
+            | "use"
+            | "where"
+            | "while"
+            | "abstract"
+            | "become"
+            | "box"
+            | "do"
+            | "final"
+            | "macro"
+            | "override"
+            | "priv"
+            | "typeof"
+            | "unsized"
+            | "virtual"
+            | "yield"
+            | "try"
+    )
+}
 
 pub(crate) fn unique_identifier_from_title<'a>(
     title: &str,
@@ -178,7 +264,6 @@ mod tests {
             title: String::new(),
             description: String::new(),
             state: DefinitionState::Known,
-            implementation: crate::EndpointImplementationDefinition::Convention,
             method: crate::RestMethod::Get,
             path: "/users/{userId}/orders/{order_id}".to_owned(),
             inputs: vec![
@@ -221,7 +306,6 @@ mod tests {
             title: String::new(),
             description: String::new(),
             state: DefinitionState::Known,
-            implementation: crate::EndpointImplementationDefinition::Convention,
             method: crate::RestMethod::Post,
             path: "/users/{userId}".to_owned(),
             inputs: vec![
