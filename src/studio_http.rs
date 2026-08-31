@@ -12,6 +12,7 @@ use crate::{
     program_runtime::{ProgramActivationEvent, ProgramRuntime},
     program_store::DraftVersionConflict,
 };
+use anyhow::Context as _;
 use axum::{
     Json, Router,
     extract::State,
@@ -232,9 +233,7 @@ async fn patch_draft(
             return Err(ApiError::bad_request(format!("{error:#}")));
         }
     };
-    state
-        .business_modules
-        .reconcile(&draft.definition)
+    reconcile_generated_sources(&state.business_modules, &draft.definition)
         .map_err(ApiError::from)?;
     runtime.schedule_publish(origin).await;
     Ok(ok_json(draft))
@@ -334,9 +333,7 @@ async fn rollback_revision(
         .await
         .map_err(ApiError::from)?;
     let draft = runtime.store().draft().await.map_err(ApiError::from)?;
-    state
-        .business_modules
-        .reconcile(&draft.definition)
+    reconcile_generated_sources(&state.business_modules, &draft.definition)
         .map_err(ApiError::from)?;
     runtime
         .activate_existing_revision(&revision.id)
@@ -620,7 +617,7 @@ async fn run_vibe_agent(
                     origin: PatchOrigin::Vibe,
                 };
                 let draft = runtime.store().patch_draft(&batch).await?;
-                business_modules.reconcile(&draft.definition)?;
+                reconcile_generated_sources(&business_modules, &draft.definition)?;
                 let image = runtime.publish_latest("vibe").await?;
                 runtime
                     .store()
@@ -647,7 +644,7 @@ async fn run_vibe_agent(
                 origin: PatchOrigin::Vibe,
             })
             .await?;
-        business_modules.reconcile(&draft.definition)?;
+        reconcile_generated_sources(&business_modules, &draft.definition)?;
     }
     runtime
         .store()
@@ -683,6 +680,18 @@ async fn record_vibe_gate(
 
 fn token_count(value: u64) -> i64 {
     value.min(i64::MAX as u64) as i64
+}
+
+fn reconcile_generated_sources(
+    business_modules: &BusinessModuleManager,
+    definition: &ProgramDefinition,
+) -> anyhow::Result<()> {
+    business_modules
+        .reconcile(definition)
+        .context("同步业务模块生成源码失败")?;
+    ApplicationWorkspace::repository()
+        .reconcile_page_sources(definition)
+        .context("同步生成应用页面源码失败")
 }
 
 fn vibe_error_message(error: &anyhow::Error) -> String {

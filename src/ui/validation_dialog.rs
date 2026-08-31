@@ -137,7 +137,7 @@ pub(super) fn ValidationEditorDialog(
                             parent_id: model_id,
                             collection: ChildCollection::ModelValidations,
                             index: validation_count,
-                            entity: GraphEntity::ModelValidation(definition),
+                            entity: Box::new(GraphEntity::ModelValidation(definition)),
                         }]
                     };
                     submit_patches(
@@ -152,42 +152,48 @@ pub(super) fn ValidationEditorDialog(
                 },
                 label {
                     span { "校验规则" }
-                    select {
+                    Select {
                         class: "aio-input",
                         aria_label: "模型校验规则",
                         value: kind(),
-                        onchange: move |event: FormEvent| kind.set(event.value()),
-                        option { value: "required_when_present", "条件必填" }
-                        option { value: "fields_required_together", "联合必填" }
-                        option { value: "at_least_one_required", "至少一个必填" }
+                        options: vec![
+                            SelectItem::new("required_when_present", "条件必填"),
+                            SelectItem::new("fields_required_together", "联合必填"),
+                            SelectItem::new("at_least_one_required", "至少一个必填"),
+                        ],
+                        on_value_change: move |value: String| kind.set(value),
                     }
                 }
                 if is_conditional {
                     div { class: "aio-definition-dialog__grid",
                         label {
                             span { "必填字段" }
-                            select {
+                            Select {
                                 class: "aio-input",
                                 aria_label: "条件必填字段",
                                 value: field_id(),
-                                onchange: move |event: FormEvent| field_id.set(event.value()),
-                                option { value: "", "选择字段" }
-                                for field in &fields {
-                                    option { value: "{field.id}", "{field.title} · {field.name}" }
-                                }
+                                options: std::iter::once(SelectItem::new("", "选择字段"))
+                                    .chain(fields.iter().map(|field| SelectItem::new(
+                                        field.id.to_string(),
+                                        format!("{} · {}", field.title, field.name),
+                                    )))
+                                    .collect(),
+                                on_value_change: move |value: String| field_id.set(value),
                             }
                         }
                         label {
                             span { "条件字段" }
-                            select {
+                            Select {
                                 class: "aio-input",
                                 aria_label: "触发必填的条件字段",
                                 value: when_field_id(),
-                                onchange: move |event: FormEvent| when_field_id.set(event.value()),
-                                option { value: "", "选择字段" }
-                                for field in &fields {
-                                    option { value: "{field.id}", "{field.title} · {field.name}" }
-                                }
+                                options: std::iter::once(SelectItem::new("", "选择字段"))
+                                    .chain(fields.iter().map(|field| SelectItem::new(
+                                        field.id.to_string(),
+                                        format!("{} · {}", field.title, field.name),
+                                    )))
+                                    .collect(),
+                                on_value_change: move |value: String| when_field_id.set(value),
                             }
                         }
                     }

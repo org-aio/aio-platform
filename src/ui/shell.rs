@@ -12,8 +12,10 @@ pub fn StudioPage(api_base_url: String, published_scene: Option<SymbolId>) -> El
     let draft_api = api_base_url.clone();
     let draft = use_resource(move || {
         let api_base_url = draft_api.clone();
-        let _generation = draft_generation();
-        async move { get_api::<DraftSnapshot>(&api_base_url, "/api/studio/program/draft").await }
+        async move {
+            let _generation = draft_generation();
+            get_api::<DraftSnapshot>(&api_base_url, "/api/studio/program/draft").await
+        }
     });
     use_effect(move || {
         if let Some(Ok(draft)) = draft.read().as_ref() {
@@ -190,8 +192,10 @@ pub(crate) fn ProgramMenuTreePage(api_base_url: String, title: String) -> Elemen
     let draft_api = api_base_url.clone();
     let draft = use_resource(move || {
         let api_base_url = draft_api.clone();
-        let _generation = generation();
-        async move { get_api::<DraftSnapshot>(&api_base_url, "/api/studio/program/draft").await }
+        async move {
+            let _generation = generation();
+            get_api::<DraftSnapshot>(&api_base_url, "/api/studio/program/draft").await
+        }
     });
     use_effect(move || {
         if let Some(Ok(draft)) = draft.read().as_ref() {
@@ -199,6 +203,7 @@ pub(crate) fn ProgramMenuTreePage(api_base_url: String, title: String) -> Elemen
                 .definition
                 .menus
                 .iter()
+                .filter(|scene| scene.enabled)
                 .map(|scene| scene.id)
                 .collect::<Vec<_>>();
             let next = preferred_draft_scene_id(&scene_ids, selected_scene(), pending_scene());
@@ -211,7 +216,15 @@ pub(crate) fn ProgramMenuTreePage(api_base_url: String, title: String) -> Elemen
     let scenes = draft_snapshot
         .as_ref()
         .and_then(|result| result.as_ref().ok())
-        .map(|draft| draft.definition.menus.clone())
+        .map(|draft| {
+            draft
+                .definition
+                .menus
+                .iter()
+                .filter(|scene| scene.enabled)
+                .cloned()
+                .collect::<Vec<_>>()
+        })
         .unwrap_or_default();
 
     rsx! {
@@ -303,12 +316,13 @@ pub(crate) fn AdminPageEditor(
     settings_open: Signal<bool>,
 ) -> Element {
     let settings_tab = use_signal(PageSettingsTab::default);
-    let mut deleting_menu = use_signal(|| None::<SymbolId>);
     let draft_api = api_base_url.clone();
     let draft = use_resource(move || {
         let api_base_url = draft_api.clone();
-        let _generation = generation();
-        async move { get_api::<DraftSnapshot>(&api_base_url, "/api/studio/program/draft").await }
+        async move {
+            let _generation = generation();
+            get_api::<DraftSnapshot>(&api_base_url, "/api/studio/program/draft").await
+        }
     });
     let Some(result) = draft.read().as_ref().cloned() else {
         return empty_panel("正在加载页面设置");
@@ -326,12 +340,9 @@ pub(crate) fn AdminPageEditor(
     else {
         return empty_panel("当前页面不在 Draft 中");
     };
-    let menu_row = menu_id.and_then(|menu_id| {
+    let navigation_menu = menu_id.and_then(|menu_id| {
         find_menu_table_row(&draft.definition.menus, draft.definition.id, menu_id)
-    });
-    let delete_action = menu_row.as_ref().map(|row| {
-        let menu_id = row.menu.id;
-        Callback::new(move |()| deleting_menu.set(Some(menu_id)))
+            .map(|row| row.menu)
     });
     rsx! {
         PageRendererSettings {
@@ -345,24 +356,8 @@ pub(crate) fn AdminPageEditor(
             status,
             settings_tab,
             settings_open,
-            on_delete_menu: delete_action,
+            navigation_menu,
             draft: draft.clone(),
-        }
-        if deleting_menu().is_some()
-            && let Some(row) = menu_row
-        {
-            MenuDeleteDialog {
-                row,
-                menus: draft.definition.menus.clone(),
-                routes: draft.definition.routes.clone(),
-                api_base_url,
-                program_id: draft.program_id,
-                version: draft.version,
-                generation,
-                status,
-                deleting_menu,
-                on_deleted: move |_| settings_open.set(false),
-            }
         }
     }
 }
@@ -379,8 +374,10 @@ pub(crate) fn AdminMenuCreator(
     let draft_api = api_base_url.clone();
     let draft = use_resource(move || {
         let api_base_url = draft_api.clone();
-        let _generation = generation();
-        async move { get_api::<DraftSnapshot>(&api_base_url, "/api/studio/program/draft").await }
+        async move {
+            let _generation = generation();
+            get_api::<DraftSnapshot>(&api_base_url, "/api/studio/program/draft").await
+        }
     });
     let Some(result) = draft.read().as_ref().cloned() else {
         return empty_panel("正在加载 Program 定义");
@@ -464,19 +461,19 @@ pub(crate) fn AdminMenuCreator(
                             parent_id: draft.definition.id,
                             collection: ChildCollection::Pages,
                             index: page_count,
-                            entity: GraphEntity::Page(page),
+                            entity: Box::new(GraphEntity::Page(page)),
                         },
                         GraphPatch::Insert {
                             parent_id: draft.definition.id,
                             collection: ChildCollection::Routes,
                             index: draft.definition.routes.len(),
-                            entity: GraphEntity::Route(route),
+                            entity: Box::new(GraphEntity::Route(route)),
                         },
                         GraphPatch::Insert {
                             parent_id: scene_id,
                             collection: ChildCollection::MenuChildren,
                             index: child_count,
-                            entity: GraphEntity::Menu(menu),
+                            entity: Box::new(GraphEntity::Menu(menu)),
                         },
                     ],
                     generation,
@@ -531,8 +528,10 @@ pub(crate) fn AdminSceneCreator(
     let draft_api = api_base_url.clone();
     let draft = use_resource(move || {
         let api_base_url = draft_api.clone();
-        let _generation = generation();
-        async move { get_api::<DraftSnapshot>(&api_base_url, "/api/studio/program/draft").await }
+        async move {
+            let _generation = generation();
+            get_api::<DraftSnapshot>(&api_base_url, "/api/studio/program/draft").await
+        }
     });
     let Some(result) = draft.read().as_ref().cloned() else {
         return empty_panel("正在加载 Program 定义");
@@ -596,7 +595,7 @@ pub(crate) fn AdminSceneCreator(
                         parent_id: draft.definition.id,
                         collection: ChildCollection::Menus,
                         index: scene_count,
-                        entity: GraphEntity::Menu(scene),
+                        entity: Box::new(GraphEntity::Menu(scene)),
                     }],
                     generation,
                     status,

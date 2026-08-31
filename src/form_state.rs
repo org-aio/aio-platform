@@ -85,7 +85,7 @@ impl FormStateExtractor {
         };
         let client = openai::Client::builder()
             .api_key(&config.api_key)
-            .base_url(&versioned_api_base(&config.api_base))
+            .base_url(versioned_api_base(&config.api_base))
             .build()
             .context("创建 formState OpenAI client 失败")?
             .completions_api();

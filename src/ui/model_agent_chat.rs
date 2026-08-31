@@ -22,7 +22,7 @@ pub(super) fn ModelAgentChat(
             busy: busy(),
             placeholder: "例如：增加手机号字段，并设为可查询",
             empty_text: "直接描述对 {model_title} 的修改",
-            on_value_change: move |value| prompt.set(value),
+            on_value_change: move |value: String| prompt.set(value),
             on_submit: move |request: String| {
                 let request = request.trim().to_owned();
                 if request.is_empty() || busy() {

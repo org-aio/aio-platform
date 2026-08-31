@@ -57,25 +57,27 @@ fn existing_or_new_audit_field(
         parent_id: model.id,
         collection: ChildCollection::Fields,
         index: model.fields.len(),
-        entity: GraphEntity::Field(audit_field_definition(kind, field_id)),
+        entity: Box::new(GraphEntity::Field(audit_field_definition(kind, field_id))),
     });
     Ok(field_id)
 }
 
 fn audit_field_definition(kind: AuditFieldKind, id: SymbolId) -> FieldDefinition {
-    let mut options = FieldOptions::default();
-    options.form_visible = false;
-    options.form_editable = false;
-    options.excel_import = false;
-    options.ai_extract = false;
-    options.filterable = matches!(kind, AuditFieldKind::TenantId | AuditFieldKind::Deleted);
-    options.sortable = matches!(
-        kind,
-        AuditFieldKind::CreatedAt
-            | AuditFieldKind::UpdatedAt
-            | AuditFieldKind::DeletedAt
-            | AuditFieldKind::Version
-    );
+    let options = FieldOptions {
+        form_visible: false,
+        form_editable: false,
+        excel_import: false,
+        ai_extract: false,
+        filterable: matches!(kind, AuditFieldKind::TenantId | AuditFieldKind::Deleted),
+        sortable: matches!(
+            kind,
+            AuditFieldKind::CreatedAt
+                | AuditFieldKind::UpdatedAt
+                | AuditFieldKind::DeletedAt
+                | AuditFieldKind::Version
+        ),
+        ..FieldOptions::default()
+    };
     FieldDefinition {
         id,
         name: kind.default_name().to_owned(),

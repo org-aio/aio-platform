@@ -111,7 +111,7 @@ pub(super) fn FunctionDefinitionDialog(
                         parent_id: root_id,
                         collection: ChildCollection::Functions,
                         index: function_count,
-                        entity: GraphEntity::Function(function),
+                        entity: Box::new(GraphEntity::Function(function)),
                     }]
                 };
                 submit_patches(
@@ -287,7 +287,7 @@ pub(super) fn FunctionPortDialog(
                         parent_id: function.id,
                         collection,
                         index: insert_index,
-                        entity: GraphEntity::Port(port),
+                        entity: Box::new(GraphEntity::Port(port)),
                     }
                 };
                 submit_patches(
@@ -303,30 +303,28 @@ pub(super) fn FunctionPortDialog(
                 div { class: "aio-definition-dialog__grid",
                     label {
                         span { "值类型" }
-                        select {
+                        Select {
                             class: "aio-input",
                             aria_label: "端口值类型",
                             value: type_key(),
-                            onchange: move |event: FormEvent| type_key.set(event.value()),
-                            {function_port_type_options(&type_key())}
+                            options: function_port_type_options(&type_key()),
+                            on_value_change: move |value: String| type_key.set(value),
                         }
                     }
                     if matches!(type_key().as_str(), "object" | "optional_object" | "list_object") {
                         label {
                             span { "对象模型" }
-                            select {
+                            Select {
                                 class: "aio-input",
                                 aria_label: "端口对象模型",
                                 value: model_id(),
-                                onchange: move |event: FormEvent| model_id.set(event.value()),
-                                option { value: "", selected: model_id().is_empty(), "选择模型" }
-                                for model in &models {
-                                    option {
-                                        value: "{model.id}",
-                                        selected: model_id() == model.id.to_string(),
-                                        "{model.title} · {model.name}"
-                                    }
-                                }
+                                options: std::iter::once(SelectItem::new("", "选择模型"))
+                                    .chain(models.iter().map(|model| SelectItem::new(
+                                        model.id.to_string(),
+                                        format!("{} · {}", model.title, model.name),
+                                    )))
+                                    .collect(),
+                                on_value_change: move |value: String| model_id.set(value),
                             }
                         }
                     }
@@ -349,22 +347,23 @@ pub(super) fn FunctionPortDialog(
     }
 }
 
-pub(super) fn function_port_type_options(current_key: &str) -> Element {
-    rsx! {
-        option { value: "text", selected: current_key == "text", "文本" }
-        option { value: "integer", selected: current_key == "integer", "整数" }
-        option { value: "decimal", selected: current_key == "decimal", "小数" }
-        option { value: "boolean", selected: current_key == "boolean", "布尔" }
-        option { value: "timestamp_ms", selected: current_key == "timestamp_ms", "时间" }
-        option { value: "file", selected: current_key == "file", "文件" }
-        option { value: "any", selected: current_key == "any", "任意结构" }
-        option { value: "object", selected: current_key == "object", "对象" }
-        option { value: "optional_object", selected: current_key == "optional_object", "可选对象" }
-        option { value: "list_object", selected: current_key == "list_object", "对象列表" }
-        if current_key == "preserve" {
-            option { value: "preserve", selected: true, "保持现有复杂类型" }
-        }
+pub(super) fn function_port_type_options(current_key: &str) -> Vec<SelectItem> {
+    let mut options = vec![
+        SelectItem::new("text", "文本"),
+        SelectItem::new("integer", "整数"),
+        SelectItem::new("decimal", "小数"),
+        SelectItem::new("boolean", "布尔"),
+        SelectItem::new("timestamp_ms", "时间"),
+        SelectItem::new("file", "文件"),
+        SelectItem::new("any", "任意结构"),
+        SelectItem::new("object", "对象"),
+        SelectItem::new("optional_object", "可选对象"),
+        SelectItem::new("list_object", "对象列表"),
+    ];
+    if current_key == "preserve" {
+        options.push(SelectItem::new("preserve", "保持现有复杂类型"));
     }
+    options
 }
 
 pub(super) fn function_port_type_key(value_type: &ValueType) -> &'static str {

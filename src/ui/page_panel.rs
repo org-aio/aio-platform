@@ -47,6 +47,8 @@ pub(super) fn PagesPanel(
     let menu_references = current_page_id.map_or(0, |page_id| {
         page_menu_reference_count(&draft.definition.menus, page_id)
     });
+    let navigation_menu =
+        current_page_id.and_then(|page_id| unique_menu_for_page(&draft.definition.menus, page_id));
     let metadata_json = current_page
         .as_ref()
         .map(serde_json::to_string_pretty)
@@ -303,6 +305,7 @@ pub(super) fn PagesPanel(
                             status,
                             settings_tab,
                             settings_open,
+                            navigation_menu: navigation_menu.clone(),
                             draft: draft.clone(),
                         }
                     }

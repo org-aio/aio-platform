@@ -331,7 +331,7 @@ pub(super) fn ModelEditorDialog(
                             parent_id: root_id,
                             collection: ChildCollection::Models,
                             index: model_count,
-                            entity: GraphEntity::Model(definition),
+                            entity: Box::new(GraphEntity::Model(definition)),
                         }]
                     };
                     submit_patches(

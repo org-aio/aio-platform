@@ -13,8 +13,10 @@ pub(crate) fn AdminApplicationTitleEditor(
     let draft_api = api_base_url.clone();
     let draft = use_resource(move || {
         let api_base_url = draft_api.clone();
-        let _generation = generation();
-        async move { get_api::<DraftSnapshot>(&api_base_url, "/api/studio/program/draft").await }
+        async move {
+            let _generation = generation();
+            get_api::<DraftSnapshot>(&api_base_url, "/api/studio/program/draft").await
+        }
     });
     let Some(result) = draft.read().as_ref().cloned() else {
         return title_editor_state("正在加载应用定义", editor_open);
@@ -105,8 +107,10 @@ pub(crate) fn AdminMenuDeleteDialog(
     let draft_api = api_base_url.clone();
     let draft = use_resource(move || {
         let api_base_url = draft_api.clone();
-        let _generation = generation();
-        async move { get_api::<DraftSnapshot>(&api_base_url, "/api/studio/program/draft").await }
+        async move {
+            let _generation = generation();
+            get_api::<DraftSnapshot>(&api_base_url, "/api/studio/program/draft").await
+        }
     });
     let Some(result) = draft.read().as_ref().cloned() else {
         return menu_delete_state("正在加载菜单定义", deleting_menu);

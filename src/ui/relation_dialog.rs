@@ -160,44 +160,45 @@ pub(super) fn RelationEditorDialog(
                 },
                 label {
                     span { "关联基数" }
-                    select {
+                    Select {
                         class: "aio-input",
                         aria_label: "关联基数",
                         value: kind(),
-                        onchange: move |event: FormEvent| kind.set(event.value()),
-                        option { value: "one_to_one", "一对一" }
-                        option { value: "many_to_one", "多对一" }
-                        option { value: "one_to_many", "一对多" }
-                        option { value: "many_to_many", "多对多" }
+                        options: relation_kind_select_items(),
+                        on_value_change: move |value: String| kind.set(value),
                     }
                 }
                 label {
                     span { "关联模型" }
-                    select {
+                    Select {
                         class: "aio-input",
                         aria_label: "关联模型",
                         value: target_model(),
-                        onchange: move |event: FormEvent| {
-                            target_model.set(event.value());
+                        options: std::iter::once(SelectItem::new("", "选择模型"))
+                            .chain(all_models.iter().map(|model| SelectItem::new(
+                                model.id.to_string(),
+                                format!("{} · {}", model.title, model.name),
+                            )))
+                            .collect(),
+                        on_value_change: move |value: String| {
+                            target_model.set(value);
                             target_field.set(String::new());
                         },
-                        option { value: "", "选择模型" }
-                        for model in &all_models {
-                            option { value: "{model.id}", "{model.title} · {model.name}" }
-                        }
                     }
                 }
                 label {
                     span { "对端字段" }
-                    select {
+                    Select {
                         class: "aio-input",
                         aria_label: "关联对端字段",
                         value: target_field(),
-                        onchange: move |event: FormEvent| target_field.set(event.value()),
-                        option { value: "", "选择字段" }
-                        for target in &target_fields {
-                            option { value: "{target.id}", "{target.title} · {target.name}" }
-                        }
+                        options: std::iter::once(SelectItem::new("", "选择字段"))
+                            .chain(target_fields.iter().map(|field| SelectItem::new(
+                                field.id.to_string(),
+                                format!("{} · {}", field.title, field.name),
+                            )))
+                            .collect(),
+                        on_value_change: move |value: String| target_field.set(value),
                     }
                 }
                 footer { class: "aio-definition-dialog__actions aio-definition-dialog__actions--split",

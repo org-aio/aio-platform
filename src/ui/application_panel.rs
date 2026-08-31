@@ -175,13 +175,16 @@ pub(super) fn ApplicationPanel(
                         div { class: "grid gap-4 pt-4 lg:grid-cols-[18rem_minmax(0,1fr)]",
                             label {
                                 span { "文件" }
-                                select {
+                                Select {
                                     class: "aio-input",
                                     value: selected_file(),
-                                    onchange: move |event: FormEvent| selected_file.set(event.value()),
-                                    for file in bundle.files {
-                                        option { value: "{file.path}", "{file.path}" }
-                                    }
+                                    aria_label: "生成预览文件",
+                                    options: bundle
+                                        .files
+                                        .iter()
+                                        .map(|file| SelectItem::new(&file.path, &file.path))
+                                        .collect(),
+                                    on_value_change: move |value: String| selected_file.set(value),
                                 }
                             }
                             pre { class: "max-h-[34rem] overflow-auto border p-4 text-xs",

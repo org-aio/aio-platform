@@ -83,15 +83,21 @@ pub(super) fn MenuEditorDialog(
         selected_parent_count.saturating_add(1).max(1)
     };
     let selected_permissions = initial_menu.required_permissions.clone();
-    let detail_access = menu_action_value(&initial_menu.row_actions.detail);
-    let edit_access = menu_action_value(&initial_menu.row_actions.edit);
-    let delete_access = menu_action_value(&initial_menu.row_actions.delete);
+    let initial_detail_access = menu_action_value(&initial_menu.row_actions.detail);
+    let initial_edit_access = menu_action_value(&initial_menu.row_actions.edit);
+    let initial_delete_access = menu_action_value(&initial_menu.row_actions.delete);
+    let detail_access = use_signal(move || initial_detail_access);
+    let edit_access = use_signal(move || initial_edit_access);
+    let delete_access = use_signal(move || initial_delete_access);
     let initial_name = initial_menu.name.clone();
     let initial_title = initial_menu.title.clone();
+    let initial_icon_value = initial_menu.icon.clone().unwrap_or_default();
+    let initial_row_actions = initial_menu.row_actions.clone();
     let initial_icon =
         resolved_navigation_icon(initial_menu.icon.as_deref(), &initial_menu.name).to_owned();
     let mut selected_icon = use_signal(move || initial_icon);
     let initial_enabled = initial_menu.enabled;
+    let page_navigation_managed = editing && initial_menu.page_id.is_some();
     let submit_current_page_id = current_page_id.clone();
     let submit_permissions = permissions.clone();
     let close_editor = use_callback(move |_: ()| editor_target.set(None));
@@ -107,8 +113,22 @@ pub(super) fn MenuEditorDialog(
             },
             header { class: "aio-definition-dialog__header",
                 div {
-                    DialogTitle { if editing { "编辑菜单" } else { "新建菜单" } }
-                    DialogDescription { "配置导航层级、页面入口和行操作授权" }
+                    DialogTitle {
+                        if page_navigation_managed {
+                            "调整菜单挂载"
+                        } else if editing {
+                            "编辑菜单"
+                        } else {
+                            "新建菜单"
+                        }
+                    }
+                    DialogDescription {
+                        if page_navigation_managed {
+                            "配置导航层级、排序和页面绑定"
+                        } else {
+                            "配置导航层级、页面入口和行操作授权"
+                        }
+                    }
                 }
                 Button {
                     r#type: "button",
@@ -122,7 +142,11 @@ pub(super) fn MenuEditorDialog(
             }
             form { class: "aio-definition-dialog__form", onsubmit: move |event| {
                 event.prevent_default();
-                let title = form_text(&event, "title").trim().to_owned();
+                let title = if page_navigation_managed {
+                    initial_title.clone()
+                } else {
+                    form_text(&event, "title").trim().to_owned()
+                };
                 if title.is_empty() {
                     status.set(Some("菜单名称不能为空".to_owned()));
                     return;
@@ -140,22 +164,43 @@ pub(super) fn MenuEditorDialog(
                     status.set(Some(format!("菜单标识已存在: {name}")));
                     return;
                 }
-                let icon = form_text(&event, "icon").trim().to_owned();
+                let icon = if page_navigation_managed {
+                    initial_icon_value.clone()
+                } else {
+                    form_text(&event, "icon").trim().to_owned()
+                };
                 let page_id = selected_page();
-                let path = form_text(&event, "path").trim().to_owned();
-                if page_id == submit_current_page_id
+                let path = if page_navigation_managed {
+                    route_path.clone()
+                } else {
+                    form_text(&event, "path").trim().to_owned()
+                };
+                if !page_navigation_managed
+                    && page_id == submit_current_page_id
                     && route_id.is_some()
                     && let Err(error) = validate_route_path(&path)
                 {
                     status.set(Some(error.to_string()));
                     return;
                 }
-                let enabled = !form_text(&event, "menu_enabled").is_empty();
-                let required_permissions = menu_permissions_from_form(&event, &submit_permissions);
-                let row_actions = crate::MenuRowActions {
-                    detail: menu_action_from_form(&event, "detail_access"),
-                    edit: menu_action_from_form(&event, "edit_access"),
-                    delete: menu_action_from_form(&event, "delete_access"),
+                let enabled = if page_navigation_managed {
+                    initial_enabled
+                } else {
+                    !form_text(&event, "menu_enabled").is_empty()
+                };
+                let required_permissions = if page_navigation_managed {
+                    selected_permissions.clone()
+                } else {
+                    menu_permissions_from_form(&event, &submit_permissions)
+                };
+                let row_actions = if page_navigation_managed {
+                    initial_row_actions.clone()
+                } else {
+                    crate::MenuRowActions {
+                        detail: menu_action_from_form(&event, "detail_access"),
+                        edit: menu_action_from_form(&event, "edit_access"),
+                        delete: menu_action_from_form(&event, "delete_access"),
+                    }
                 };
                 let row_actions_value = match serde_json::to_value(row_actions.clone()) {
                     Ok(value) => value,
@@ -187,7 +232,7 @@ pub(super) fn MenuEditorDialog(
                             parent_id,
                             collection: ChildCollection::MenuChildren,
                             index: requested_position,
-                            entity: GraphEntity::Menu(menu),
+                            entity: Box::new(GraphEntity::Menu(menu)),
                         }]
                     }
                     MenuEditorMode::Edit {
@@ -196,22 +241,7 @@ pub(super) fn MenuEditorDialog(
                         position,
                         ..
                     } => {
-                        let mut patches = vec![
-                            GraphPatch::Rename {
-                                target_id: menu_id,
-                                name,
-                                title: Some(title),
-                            },
-                            GraphPatch::SetProperty {
-                                target_id: menu_id,
-                                property: crate::EditableProperty::Icon,
-                                value: if icon.is_empty() {
-                                    serde_json::Value::Null
-                                } else {
-                                    serde_json::Value::String(icon)
-                                },
-                            },
-                            GraphPatch::SetProperty {
+                        let mut patches = vec![GraphPatch::SetProperty {
                                 target_id: menu_id,
                                 property: crate::EditableProperty::MenuPage,
                                 value: if page_id.is_empty() {
@@ -219,8 +249,24 @@ pub(super) fn MenuEditorDialog(
                                 } else {
                                     serde_json::Value::String(page_id.clone())
                                 },
-                            },
-                            GraphPatch::SetProperty {
+                            }];
+                        if !page_navigation_managed {
+                            patches.extend([
+                                GraphPatch::Rename {
+                                    target_id: menu_id,
+                                    name,
+                                    title: Some(title),
+                                },
+                                GraphPatch::SetProperty {
+                                    target_id: menu_id,
+                                    property: crate::EditableProperty::Icon,
+                                    value: if icon.is_empty() {
+                                        serde_json::Value::Null
+                                    } else {
+                                        serde_json::Value::String(icon)
+                                    },
+                                },
+                                GraphPatch::SetProperty {
                                 target_id: menu_id,
                                 property: crate::EditableProperty::MenuEnabled,
                                 value: serde_json::Value::Bool(enabled),
@@ -234,9 +280,11 @@ pub(super) fn MenuEditorDialog(
                                 target_id: menu_id,
                                 property: crate::EditableProperty::MenuRowActions,
                                 value: row_actions_value,
-                            },
-                        ];
-                        if page_id == submit_current_page_id
+                                },
+                            ]);
+                        }
+                        if !page_navigation_managed
+                            && page_id == submit_current_page_id
                             && let Some(route_id) = route_id
                         {
                             patches.push(GraphPatch::SetProperty {
@@ -276,34 +324,36 @@ pub(super) fn MenuEditorDialog(
                 );
                 close_editor.call(());
             },
-                div { class: "aio-definition-dialog__grid aio-definition-dialog__grid--three",
-                    label {
-                        span { "菜单名称" }
-                        Input {
-                            class: "aio-input",
-                            name: "title",
-                            aria_label: "菜单名称",
-                            placeholder: "例如 订单管理",
-                            value: initial_title,
+                if !page_navigation_managed {
+                    div { class: "aio-definition-dialog__grid aio-definition-dialog__grid--three",
+                        label {
+                            span { "菜单名称" }
+                            Input {
+                                class: "aio-input",
+                                name: "title",
+                                aria_label: "菜单名称",
+                                placeholder: "例如 订单管理",
+                                value: initial_title.clone(),
+                            }
                         }
-                    }
-                    div {
-                        class: "aio-definition-dialog__wide-field",
-                        span { "图标" }
-                        NavigationIconPicker {
-                            name: "icon",
-                            aria_label: "菜单图标",
-                            value: selected_icon,
-                            on_value_change: move |value| selected_icon.set(value),
+                        div {
+                            class: "aio-definition-dialog__wide-field",
+                            span { "图标" }
+                            NavigationIconPicker {
+                                name: "icon",
+                                aria_label: "菜单图标",
+                                value: selected_icon,
+                                on_value_change: move |value: String| selected_icon.set(value),
+                            }
                         }
-                    }
-                    label { class: "aio-definition-dialog__checkbox-field",
-                        Checkbox {
-                            name: "menu_enabled",
-                            default_checked: checkbox_state(initial_enabled),
-                            aria_label: "启用菜单",
+                        label { class: "aio-definition-dialog__checkbox-field",
+                            Checkbox {
+                                name: "menu_enabled",
+                                default_checked: checkbox_state(initial_enabled),
+                                aria_label: "启用菜单",
+                            }
+                            span { "启用菜单" }
                         }
-                        span { "启用菜单" }
                     }
                 }
                 section { class: "aio-definition-dialog__section",
@@ -312,18 +362,15 @@ pub(super) fn MenuEditorDialog(
                         if editing && !root_scene {
                             label {
                                 span { "父级菜单" }
-                                select {
+                                Select {
                                     class: "aio-input",
                                     aria_label: "父级菜单",
                                     value: selected_parent(),
-                                    onchange: move |event: FormEvent| selected_parent.set(event.value()),
-                                    for parent in &parent_options {
-                                        option {
-                                            value: "{parent.id}",
-                                            selected: selected_parent() == parent.id.to_string(),
-                                            {menu_parent_option_label(parent)}
-                                        }
-                                    }
+                                    options: parent_options.iter().map(|parent| SelectItem::new(
+                                        parent.id.to_string(),
+                                        menu_parent_option_label(parent),
+                                    )).collect(),
+                                    on_value_change: move |value: String| selected_parent.set(value),
                                 }
                             }
                         }
@@ -341,62 +388,64 @@ pub(super) fn MenuEditorDialog(
                         }
                         label {
                             span { "页面" }
-                            select {
+                            Select {
                                 class: "aio-input",
                                 aria_label: "菜单页面",
                                 value: selected_page(),
-                                onchange: move |event: FormEvent| selected_page.set(event.value()),
-                                option { value: "", selected: selected_page().is_empty(), "无页面（目录）" }
-                                for page in &pages {
-                                    option {
-                                        value: "{page.id}",
-                                        selected: selected_page() == page.id.to_string(),
-                                        "{page.title} · {page.name}"
-                                    }
-                                }
+                                options: std::iter::once(SelectItem::new("", "无页面（目录）"))
+                                    .chain(pages.iter().map(|page| SelectItem::new(
+                                        page.id.to_string(),
+                                        format!("{} · {}", page.title, page.name),
+                                    )))
+                                    .collect(),
+                                on_value_change: move |value: String| selected_page.set(value),
                             }
                         }
-                        label {
-                            span { "路由" }
-                            Input {
-                                class: "aio-input",
-                                name: "path",
-                                aria_label: "菜单路由",
-                                value: route_path,
-                                disabled: route_id.is_none() || selected_page() != current_page_id,
-                                placeholder: "目录节点没有路由",
-                            }
-                        }
-                    }
-                }
-                section { class: "aio-definition-dialog__section",
-                    h3 { "菜单访问权限" }
-                    if permissions.is_empty() {
-                        p { class: "aio-definition-dialog__empty-state", "暂无权限定义" }
-                    } else {
-                        div { class: "aio-definition-dialog__choice-list",
-                            for permission in &permissions {
-                                label {
-                                    Checkbox {
-                                        name: "{menu_permission_input_name(permission.id)}",
-                                        default_checked: checkbox_state(selected_permissions.contains(&permission.id)),
-                                        aria_label: "菜单需要权限 {permission.title}",
-                                    }
-                                    span {
-                                        strong { "{permission.title}" }
-                                        code { "{permission.name}" }
-                                    }
+                        if !page_navigation_managed {
+                            label {
+                                span { "路由" }
+                                Input {
+                                    class: "aio-input",
+                                    name: "path",
+                                    aria_label: "菜单路由",
+                                    value: route_path.clone(),
+                                    disabled: route_id.is_none() || selected_page() != current_page_id,
+                                    placeholder: "目录节点没有路由",
                                 }
                             }
                         }
                     }
                 }
-                section { class: "aio-definition-dialog__section",
-                    h3 { "行操作权限" }
-                    div { class: "aio-definition-dialog__grid aio-definition-dialog__grid--three",
-                        {menu_action_select("详情权限", "detail_access", &detail_access, &permissions)}
-                        {menu_action_select("编辑权限", "edit_access", &edit_access, &permissions)}
-                        {menu_action_select("删除权限", "delete_access", &delete_access, &permissions)}
+                if !page_navigation_managed {
+                    section { class: "aio-definition-dialog__section",
+                        h3 { "菜单访问权限" }
+                        if permissions.is_empty() {
+                            p { class: "aio-definition-dialog__empty-state", "暂无权限定义" }
+                        } else {
+                            div { class: "aio-definition-dialog__choice-list",
+                                for permission in &permissions {
+                                    label {
+                                        Checkbox {
+                                            name: "{menu_permission_input_name(permission.id)}",
+                                            default_checked: checkbox_state(selected_permissions.contains(&permission.id)),
+                                            aria_label: "菜单需要权限 {permission.title}",
+                                        }
+                                        span {
+                                            strong { "{permission.title}" }
+                                            code { "{permission.name}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    section { class: "aio-definition-dialog__section",
+                        h3 { "行操作权限" }
+                        div { class: "aio-definition-dialog__grid aio-definition-dialog__grid--three",
+                            {menu_action_select("详情权限", "detail_access", detail_access, &permissions)}
+                            {menu_action_select("编辑权限", "edit_access", edit_access, &permissions)}
+                            {menu_action_select("删除权限", "delete_access", delete_access, &permissions)}
+                        }
                     }
                 }
                 footer { class: "aio-definition-dialog__actions",
@@ -409,7 +458,13 @@ pub(super) fn MenuEditorDialog(
                     Button {
                         r#type: "submit",
                         icons::Save { class: "size-4" }
-                        if editing { "保存菜单" } else { "创建菜单" }
+                        if page_navigation_managed {
+                            "保存挂载"
+                        } else if editing {
+                            "保存菜单"
+                        } else {
+                            "创建菜单"
+                        }
                     }
                 }
             }
@@ -623,22 +678,28 @@ pub(super) fn menu_action_from_form(event: &FormEvent, name: &str) -> crate::Men
 pub(super) fn menu_action_select(
     title: &'static str,
     name: &'static str,
-    selected: &str,
+    mut selected: Signal<String>,
     permissions: &[PermissionDefinition],
 ) -> Element {
     rsx! {
         label {
             span { "{title}" }
-            select { name, class: "aio-input", aria_label: "{title}",
-                option { value: "hidden", selected: selected == "hidden", "不显示" }
-                option { value: "public", selected: selected == "public", "公开" }
-                for permission in permissions {
-                    option {
-                        value: "permission:{permission.id}",
-                        selected: selected == format!("permission:{}", permission.id),
-                        "{permission.name} · {permission.title}"
-                    }
-                }
+            Select {
+                name,
+                class: "aio-input",
+                aria_label: "{title}",
+                value: selected(),
+                options: [
+                    SelectItem::new("hidden", "不显示"),
+                    SelectItem::new("public", "公开"),
+                ]
+                .into_iter()
+                .chain(permissions.iter().map(|permission| SelectItem::new(
+                    format!("permission:{}", permission.id),
+                    format!("{} · {}", permission.name, permission.title),
+                )))
+                .collect(),
+                on_value_change: move |value: String| selected.set(value),
             }
         }
     }

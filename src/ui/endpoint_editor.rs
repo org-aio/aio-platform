@@ -40,15 +40,16 @@ pub(super) fn EndpointEditor(
         },
             header { class: "aio-endpoint-editor__header",
                 div { class: "aio-endpoint-request-line",
-                    select {
+                    Select {
                         class: "aio-input aio-endpoint-method",
                         aria_label: "HTTP 方法",
-                        onchange: move |event: FormEvent| {
+                        value: endpoint.method.as_str(),
+                        options: rest_method_options(),
+                        on_value_change: move |value: String| {
                             draft.with_mut(|endpoint| {
-                                endpoint.method = rest_method_from_key(&event.value());
+                                endpoint.method = rest_method_from_key(&value);
                             });
                         },
-                        {rest_method_options(endpoint.method)}
                     }
                     Input {
                         class: "aio-input aio-endpoint-path",
@@ -262,11 +263,13 @@ pub(super) fn endpoint_input_draft_cell(
             }
         },
         "location" => rsx! {
-            select {
+            Select {
                 class: "aio-input aio-endpoint-parameter-input",
                 aria_label: "入参位置",
-                onchange: move |event: FormEvent| {
-                    let location = endpoint_location_from_key(&event.value());
+                value: endpoint_location_key(input.location),
+                options: endpoint_location_options(),
+                on_value_change: move |value: String| {
+                    let location = endpoint_location_from_key(&value);
                     let path_name = (location == EndpointInputLocation::Path).then(|| {
                         next_endpoint_path_parameter_name(
                             &path(),
@@ -285,20 +288,20 @@ pub(super) fn endpoint_input_draft_cell(
                         }
                     });
                 },
-                {endpoint_location_options(input.location)}
             }
         },
         "type" => {
             let current_type = input.value_type.clone();
             let selected = editable_value_type_key(&current_type).to_owned();
             rsx! {
-                select {
+                Select {
                     class: "aio-input aio-endpoint-parameter-input",
                     aria_label: "入参类型",
-                    onchange: move |event: FormEvent| update_endpoint_input(&mut draft, input_id, |input| {
-                        input.value_type = editable_value_type_from_key(&event.value(), &current_type);
+                    value: selected,
+                    options: editable_value_type_options(&input.value_type),
+                    on_value_change: move |value: String| update_endpoint_input(&mut draft, input_id, |input| {
+                        input.value_type = editable_value_type_from_key(&value, &current_type);
                     }),
-                    {editable_value_type_options(&input.value_type, selected)}
                 }
             }
         }
@@ -372,13 +375,14 @@ pub(super) fn endpoint_output_draft_cell(
             let current_type = output.value_type.clone();
             let selected = editable_value_type_key(&current_type).to_owned();
             rsx! {
-                select {
+                Select {
                     class: "aio-input aio-endpoint-parameter-input",
                     aria_label: "响应字段类型",
-                    onchange: move |event: FormEvent| update_endpoint_output(&mut draft, output_id, |output| {
-                        output.value_type = editable_value_type_from_key(&event.value(), &current_type);
+                    value: selected,
+                    options: editable_value_type_options(&output.value_type),
+                    on_value_change: move |value: String| update_endpoint_output(&mut draft, output_id, |output| {
+                        output.value_type = editable_value_type_from_key(&value, &current_type);
                     }),
-                    {editable_value_type_options(&output.value_type, selected)}
                 }
             }
         }
@@ -466,7 +470,7 @@ pub(super) fn submit_endpoint_definition(
             parent_id: page_id,
             collection: ChildCollection::PageEndpoints,
             index,
-            entity: GraphEntity::PageEndpoint(endpoint),
+            entity: Box::new(GraphEntity::PageEndpoint(endpoint)),
         },
         EndpointEditorMode::Edit => {
             let endpoint_id = endpoint.id;
@@ -544,12 +548,17 @@ pub(super) fn generate_endpoint_with_ai(
     });
 }
 
-pub(super) fn rest_method_options(selected: RestMethod) -> Element {
-    rsx! {
-        for method in [RestMethod::Get, RestMethod::Post, RestMethod::Put, RestMethod::Patch, RestMethod::Delete] {
-            option { value: method.as_str(), selected: method == selected, "{method.as_str()}" }
-        }
-    }
+pub(super) fn rest_method_options() -> Vec<SelectItem> {
+    [
+        RestMethod::Get,
+        RestMethod::Post,
+        RestMethod::Put,
+        RestMethod::Patch,
+        RestMethod::Delete,
+    ]
+    .into_iter()
+    .map(|method| SelectItem::new(method.as_str(), method.as_str()))
+    .collect()
 }
 
 pub(super) fn rest_method_from_key(value: &str) -> RestMethod {
@@ -562,12 +571,21 @@ pub(super) fn rest_method_from_key(value: &str) -> RestMethod {
     }
 }
 
-pub(super) fn endpoint_location_options(selected: EndpointInputLocation) -> Element {
-    rsx! {
-        option { value: "path", selected: selected == EndpointInputLocation::Path, "Path" }
-        option { value: "query", selected: selected == EndpointInputLocation::Query, "Query" }
-        option { value: "header", selected: selected == EndpointInputLocation::Header, "Header" }
-        option { value: "body", selected: selected == EndpointInputLocation::Body, "Body" }
+pub(super) fn endpoint_location_options() -> Vec<SelectItem> {
+    vec![
+        SelectItem::new("path", "Path"),
+        SelectItem::new("query", "Query"),
+        SelectItem::new("header", "Header"),
+        SelectItem::new("body", "Body"),
+    ]
+}
+
+pub(super) const fn endpoint_location_key(value: EndpointInputLocation) -> &'static str {
+    match value {
+        EndpointInputLocation::Path => "path",
+        EndpointInputLocation::Query => "query",
+        EndpointInputLocation::Header => "header",
+        EndpointInputLocation::Body => "body",
     }
 }
 

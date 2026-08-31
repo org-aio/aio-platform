@@ -349,7 +349,7 @@ pub(super) fn PermissionEditorDialog(
                             parent_id: root_id,
                             collection: ChildCollection::Permissions,
                             index,
-                            entity: GraphEntity::Permission(permission),
+                            entity: Box::new(GraphEntity::Permission(permission)),
                         }]
                     }
                     PermissionEditorMode::Edit => vec![

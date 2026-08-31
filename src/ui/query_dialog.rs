@@ -170,7 +170,7 @@ pub(super) fn QueryEditorDialog(
                             parent_id: model_id,
                             collection: ChildCollection::ModelQueries,
                             index: query_count,
-                            entity: GraphEntity::ModelQuery(definition),
+                            entity: Box::new(GraphEntity::ModelQuery(definition)),
                         }]
                     };
                     submit_patches(
@@ -205,7 +205,7 @@ pub(super) fn QueryEditorDialog(
                                     SelectItem::new("all", "全部满足"),
                                     SelectItem::new("any", "任一满足"),
                                 ],
-                                on_value_change: move |value| conjunction.set(value),
+                                on_value_change: move |value: String| conjunction.set(value),
                             }
                         }
                     }
@@ -321,7 +321,7 @@ pub(super) fn QueryConditionEditorRow(
                                     format!("{} · {}", field.title, field.name),
                                 )))
                                 .collect(),
-                            on_value_change: move |value| conditions.with_mut(|items| {
+                            on_value_change: move |value: String| conditions.with_mut(|items| {
                                 if let Some(QueryConditionDraft::Field { field_id, parameter, .. }) = items.get_mut(index) {
                                     let next_parameter = fields
                                         .iter()
@@ -341,7 +341,7 @@ pub(super) fn QueryConditionEditorRow(
                             value: operator,
                             placement: SelectPlacement::Top,
                             options: query_operator_select_items(),
-                            on_value_change: move |value| conditions.with_mut(|items| {
+                            on_value_change: move |value: String| conditions.with_mut(|items| {
                                 if let Some(QueryConditionDraft::Field { operator, .. }) = items.get_mut(index) {
                                     *operator = value;
                                 }
@@ -362,7 +362,7 @@ pub(super) fn QueryConditionEditorRow(
                                     format!("{} · {}", field.title, field.name),
                                 )))
                                 .collect(),
-                            on_value_change: move |value| conditions.with_mut(|items| {
+                            on_value_change: move |value: String| conditions.with_mut(|items| {
                                 if let Some(QueryConditionDraft::Relation {
                                     relation_field_id,
                                     target_field_id,
@@ -388,7 +388,7 @@ pub(super) fn QueryConditionEditorRow(
                                     format!("{} · {}", field.title, field.name),
                                 )))
                                 .collect(),
-                            on_value_change: move |value| conditions.with_mut(|items| {
+                            on_value_change: move |value: String| conditions.with_mut(|items| {
                                 if let Some(QueryConditionDraft::Relation {
                                     relation_field_id,
                                     target_field_id,
@@ -419,7 +419,7 @@ pub(super) fn QueryConditionEditorRow(
                             value: operator,
                             placement: SelectPlacement::Top,
                             options: query_operator_select_items(),
-                            on_value_change: move |value| conditions.with_mut(|items| {
+                            on_value_change: move |value: String| conditions.with_mut(|items| {
                                 if let Some(QueryConditionDraft::Relation { operator, .. }) = items.get_mut(index) {
                                     *operator = value;
                                 }

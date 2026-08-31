@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     fs,
     io::ErrorKind,
     path::{Component, Path, PathBuf},
@@ -6,7 +7,6 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
-use serde::Serialize;
 use uuid::Uuid;
 
 use crate::{
@@ -47,14 +47,6 @@ impl ApplicationCompiler {
             source_file("Dioxus.toml", dioxus_toml(&package_name, &definition.title)),
             source_file("src/main.rs", main_source()),
             source_file("src/pages.rs", convention_pages_source(definition)),
-            source_file(
-                "program-definition.json",
-                pretty_json(definition).context("序列化 ProgramDefinition 失败")?,
-            ),
-            source_file(
-                "program-image.json",
-                pretty_json(image).context("序列化 ProgramImage 失败")?,
-            ),
             source_file(".env.example", env_example()),
             source_file("Dockerfile", dockerfile(&package_name)),
             source_file(
@@ -159,6 +151,85 @@ impl ApplicationWorkspace {
             files: bundle.files.iter().map(|file| file.path.clone()).collect(),
         })
     }
+
+    /// 已生成应用存在时，同步页面分发源码并清理不再属于定义的页面文件。
+    pub fn reconcile_page_sources(&self, definition: &ProgramDefinition) -> Result<()> {
+        validate_application_id(&definition.name)?;
+        let generated_apps_dir = self.root.join("generated/apps");
+        let application_dir = generated_apps_dir.join(&definition.name);
+        ensure_direct_child(&generated_apps_dir, &application_dir)?;
+        if !application_dir.exists() {
+            return Ok(());
+        }
+        ensure!(
+            application_dir.join(GENERATED_MARKER).is_file(),
+            "拒绝清理未带 {} 标记的目录: {}",
+            GENERATED_MARKER,
+            application_dir.display()
+        );
+
+        let page_sources = definition
+            .pages
+            .iter()
+            .filter(|page| matches!(page.renderer, PageRendererDefinition::ConventionFile))
+            .map(|page| {
+                let relative_path = convention_page_path(&definition.name, &page.name);
+                let file_name = Path::new(&relative_path)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .context("生成页面源码文件名无效")?
+                    .to_owned();
+                Ok((file_name, convention_page_source(page)))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        let pages_dir = application_dir.join("src/pages");
+        fs::create_dir_all(&pages_dir).context("创建生成应用页面目录失败")?;
+        remove_stale_page_sources(&pages_dir, &page_sources)?;
+        for (file_name, source) in &page_sources {
+            let path = pages_dir.join(file_name);
+            ensure!(
+                path.parent() == Some(pages_dir.as_path()),
+                "生成页面源码越界"
+            );
+            fs::write(&path, source)
+                .with_context(|| format!("写入生成页面源码失败: {}", path.display()))?;
+        }
+
+        let dispatcher_path = application_dir.join("src/pages.rs");
+        fs::write(&dispatcher_path, convention_pages_source(definition))
+            .with_context(|| format!("写入生成页面分发源码失败: {}", dispatcher_path.display()))?;
+        Ok(())
+    }
+}
+
+fn remove_stale_page_sources(pages_dir: &Path, expected: &BTreeMap<String, String>) -> Result<()> {
+    for entry in fs::read_dir(pages_dir).context("读取生成应用页面目录失败")? {
+        let entry = entry.context("读取生成应用页面目录项失败")?;
+        if !entry
+            .file_type()
+            .context("读取生成应用页面目录项类型失败")?
+            .is_file()
+        {
+            continue;
+        }
+        let file_name = entry.file_name().to_string_lossy().into_owned();
+        if entry
+            .path()
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("rs")
+        {
+            continue;
+        }
+        if expected.contains_key(&file_name) {
+            continue;
+        }
+        let path = entry.path();
+        ensure!(path.parent() == Some(pages_dir), "失效生成页面源码越界");
+        fs::remove_file(&path)
+            .with_context(|| format!("删除失效生成页面源码失败: {}", path.display()))?;
+    }
+    Ok(())
 }
 
 fn format_bundle_rust_sources(root: &Path, files: &[ApplicationSourceFile]) -> Result<()> {
@@ -204,12 +275,6 @@ fn source_file(path: impl Into<String>, content: impl Into<String>) -> Applicati
         path: path.into(),
         content: content.into(),
     }
-}
-
-fn pretty_json(value: &impl Serialize) -> Result<String> {
-    let mut output = serde_json::to_string_pretty(value)?;
-    output.push('\n');
-    Ok(output)
 }
 
 fn validate_application_id(value: &str) -> Result<()> {
@@ -425,7 +490,10 @@ docker build -f generated/apps/{application_id}/Dockerfile -t {package_name} .
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ApplicationTarget, CapabilityCatalog, ImageTarget, ProgramCompiler};
+    use crate::{
+        ApplicationTarget, CapabilityCatalog, DefinitionState, ImageTarget, PageDefinition,
+        ProgramCompiler, SymbolId,
+    };
 
     #[test]
     fn compiler_emits_stable_cross_platform_project() -> Result<()> {
@@ -517,6 +585,69 @@ mod tests {
 
         assert!(!application_dir.join("src/pages/removed.rs").exists());
         assert!(application_dir.join("src/pages/current.rs").is_file());
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn deleting_page_reconciles_generated_application_sources() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("aio-app-pages-{}", Uuid::new_v4()));
+        let application_dir = root.join("generated/apps/example-app");
+        let pages_dir = application_dir.join("src/pages");
+        fs::create_dir_all(&pages_dir)?;
+        fs::write(application_dir.join(GENERATED_MARKER), "generated")?;
+        fs::write(pages_dir.join("example_app_removed.rs"), "stale")?;
+        fs::write(pages_dir.join("README.md"), "保留")?;
+        fs::write(application_dir.join("src/pages.rs"), "stale")?;
+
+        let mut definition = ProgramDefinition::empty("example-app", "示例应用");
+        definition.pages.push(PageDefinition {
+            id: SymbolId::new(),
+            name: "orders".to_owned(),
+            title: "订单".to_owned(),
+            state: DefinitionState::Known,
+            renderer: PageRendererDefinition::ConventionFile,
+            endpoints: Vec::new(),
+        });
+        let workspace = ApplicationWorkspace::new(root.clone());
+        workspace.reconcile_page_sources(&definition)?;
+
+        let orders_source = pages_dir.join("example_app_orders.rs");
+        assert!(!pages_dir.join("example_app_removed.rs").exists());
+        assert!(pages_dir.join("README.md").is_file());
+        assert!(orders_source.is_file());
+        assert!(
+            fs::read_to_string(application_dir.join("src/pages.rs"))?
+                .contains("mod example_app_orders;")
+        );
+
+        definition.pages.clear();
+        workspace.reconcile_page_sources(&definition)?;
+
+        assert!(!orders_source.exists());
+        assert!(
+            !fs::read_to_string(application_dir.join("src/pages.rs"))?
+                .contains("example_app_orders")
+        );
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn page_source_reconcile_refuses_unmarked_application_directory() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("aio-app-unmarked-{}", Uuid::new_v4()));
+        let application_dir = root.join("generated/apps/example-app");
+        fs::create_dir_all(application_dir.join("src/pages"))?;
+        fs::write(
+            application_dir.join("src/pages/hand_written.rs"),
+            "pub fn hand_written() {}\n",
+        )?;
+
+        let definition = ProgramDefinition::empty("example-app", "示例应用");
+        let result = ApplicationWorkspace::new(root.clone()).reconcile_page_sources(&definition);
+
+        assert!(result.is_err());
+        assert!(application_dir.join("src/pages/hand_written.rs").is_file());
         fs::remove_dir_all(root)?;
         Ok(())
     }

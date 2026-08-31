@@ -20,32 +20,59 @@ pub(super) fn model_field_columns() -> Vec<DataTableColumn> {
             "字段",
             vec![
                 DataTableColumn::leaf("title", "显示标题")
-                    .width(168)
+                    .width(180)
+                    .editable()
                     .fixed(DataTableFixed::Left),
-                DataTableColumn::leaf("name", "字段标识").width(168),
+                DataTableColumn::leaf("name", "字段标识").width(156),
             ],
         ),
         DataTableColumn::group(
             "schema",
             "数据结构",
             vec![
-                DataTableColumn::leaf("type", "类型").width(112),
+                DataTableColumn::leaf("type", "类型").width(120).editable(),
                 DataTableColumn::leaf("required", "必填")
                     .width(72)
                     .align(DataTableAlign::Center),
-                DataTableColumn::leaf("relation", "关联").width(196),
             ],
         ),
         DataTableColumn::group(
-            "behavior",
-            "页面与数据能力",
+            "visibility",
+            "页面可见性",
             vec![
-                DataTableColumn::leaf("capabilities", "启用能力").width(280),
-                DataTableColumn::leaf("validation", "字段校验").width(180),
+                DataTableColumn::leaf("list_visible", "列表")
+                    .width(72)
+                    .align(DataTableAlign::Center),
+                DataTableColumn::leaf("detail_visible", "详情")
+                    .width(72)
+                    .align(DataTableAlign::Center),
+                DataTableColumn::leaf("form_visible", "表单")
+                    .width(72)
+                    .align(DataTableAlign::Center),
+                DataTableColumn::leaf("form_editable", "可编辑")
+                    .width(72)
+                    .align(DataTableAlign::Center),
             ],
         ),
+        DataTableColumn::group(
+            "data_behavior",
+            "数据能力",
+            vec![
+                DataTableColumn::leaf("filterable", "查询")
+                    .width(72)
+                    .align(DataTableAlign::Center),
+                DataTableColumn::leaf("sortable", "排序")
+                    .width(72)
+                    .align(DataTableAlign::Center),
+                DataTableColumn::leaf("unique", "唯一")
+                    .width(72)
+                    .align(DataTableAlign::Center),
+            ],
+        ),
+        DataTableColumn::leaf("relation", "关联").width(190),
+        DataTableColumn::leaf("validation", "校验").width(140),
         DataTableColumn::leaf("actions", "操作")
-            .width(120)
+            .width(136)
             .align(DataTableAlign::End)
             .fixed(DataTableFixed::Right),
     ]
@@ -66,6 +93,8 @@ pub(super) fn ModelFieldsTable(
     let models_for_cells = all_models.clone();
     let rows = model_field_rows(&model);
     let model_for_cells = model.clone();
+    let inline_api_base_url = api_base_url.clone();
+    let inline_program_id = program_id.clone();
     rsx! {
         DataTable::<ModelFieldRow> {
             class: "aio-model-data-table",
@@ -73,8 +102,17 @@ pub(super) fn ModelFieldsTable(
             rows,
             columns: model_field_columns(),
             max_height: "100%",
+            edit_trigger: DataTableEditTrigger::Click,
             empty_text: "暂无字段，请使用右上角新建字段".to_owned(),
             row_key: model_field_row_key,
+            can_edit: |cell: DataTableCellContext<ModelFieldRow>| match cell.row {
+                ModelFieldRow::Field(field) => match cell.column.key.as_str() {
+                    "title" => true,
+                    "type" => field.relation.is_none(),
+                    _ => false,
+                },
+                ModelFieldRow::PrimaryKey { .. } | ModelFieldRow::Audit { .. } => false,
+            },
             row_tone: |row: ModelFieldRow| if matches!(
                 row,
                 ModelFieldRow::PrimaryKey { .. } | ModelFieldRow::Audit { .. }
@@ -96,6 +134,16 @@ pub(super) fn ModelFieldsTable(
                     editor,
                     deleting,
                 )
+            },
+            render_editor: move |edit: DataTableEditContext<ModelFieldRow>| rsx! {
+                ModelFieldInlineCellEditor {
+                    edit,
+                    api_base_url: inline_api_base_url.clone(),
+                    program_id: inline_program_id.clone(),
+                    version,
+                    generation,
+                    status,
+                }
             },
         }
     }
@@ -143,17 +191,17 @@ pub(super) fn model_field_cell(
         "type" => rsx! {
             Badge { variant: BadgeVariant::Outline, "{value_type_label(&field.value_type)}" }
         },
-        "required" => rsx! {
-            if field.required {
-                Badge { "是" }
-            } else {
-                span { class: "aio-model-table__muted", "否" }
-            }
-        },
+        "required" | "list_visible" | "detail_visible" | "form_visible" | "form_editable"
+        | "filterable" | "sortable" | "unique" => model_field_toggle_cell(
+            field,
+            &cell.column.key,
+            api_base_url,
+            program_id,
+            version,
+            generation,
+            status,
+        ),
         "relation" => model_field_relation_cell(&field, &all_models),
-        "capabilities" => rsx! {
-            span { class: "aio-model-table__summary", "{field_capability_summary(&field.options)}" }
-        },
         "validation" => rsx! {
             span { class: "aio-model-table__summary", "{field_validation_summary(&field.options.validation)}" }
         },
@@ -166,13 +214,13 @@ pub(super) fn model_field_cell(
                         r#type: "button",
                         size: ButtonSize::IconSm,
                         variant: ButtonVariant::Ghost,
-                        title: "编辑字段",
-                        aria_label: "编辑字段 {field.name}",
+                        title: "字段高级设置",
+                        aria_label: "字段高级设置 {field.name}",
                         onclick: move |event: MouseEvent| {
                             event.stop_propagation();
                             editor.set(Some(ModelEditorTarget::EditField(field_id)));
                         },
-                        icons::Pencil { class: "size-4" }
+                        icons::Settings { class: "size-4" }
                     }
                     Button {
                         r#type: "button",
@@ -318,9 +366,11 @@ pub(super) fn model_primary_key_cell(
                 },
             }
         },
-        "required" => rsx! { Badge { "是" } },
+        "required" | "list_visible" | "detail_visible" | "filterable" | "sortable" | "unique" => {
+            model_readonly_toggle(true, "主键字段系统能力")
+        }
+        "form_visible" | "form_editable" => model_readonly_toggle(false, "主键字段不参与表单"),
         "relation" => rsx! { span { class: "aio-model-table__muted", "系统主键" } },
-        "capabilities" => rsx! { span { class: "aio-model-table__summary", "列表 · 详情" } },
         "validation" => rsx! {
             span { class: "aio-model-table__summary", "数据库生成 · 唯一" }
         },
@@ -354,13 +404,14 @@ pub(super) fn model_audit_field_cell(
         "type" => rsx! {
             Badge { variant: BadgeVariant::Outline, "{value_type_label(&kind.default_value_type())}" }
         },
-        "required" => rsx! { span { class: "aio-model-table__muted", "否" } },
+        "required" | "list_visible" | "detail_visible" | "form_visible" | "form_editable"
+        | "filterable" | "sortable" | "unique" => model_readonly_toggle(
+            field
+                .as_ref()
+                .is_some_and(|field| field_toggle_value(field, column)),
+            "审计字段系统能力",
+        ),
         "relation" => rsx! { span { class: "aio-model-table__muted", "系统维护" } },
-        "capabilities" => rsx! {
-            span { class: "aio-model-table__summary",
-                if enabled { "已启用审计语义" } else { "未启用" }
-            }
-        },
         "validation" => rsx! {
             span { class: "aio-model-table__summary",
                 if field.is_some() { "字段已就绪" } else { "启用时自动创建" }
@@ -419,36 +470,6 @@ pub(super) fn model_field_relation_cell(
     }
 }
 
-pub(super) fn field_capability_summary(options: &crate::FieldOptions) -> String {
-    let mut labels = Vec::new();
-    if options.list_visible {
-        labels.push("列表");
-    }
-    if options.detail_visible {
-        labels.push("详情");
-    }
-    if options.form_visible {
-        labels.push("表单");
-    }
-    if options.filterable {
-        labels.push("查询");
-    }
-    if options.sortable {
-        labels.push("排序");
-    }
-    if options.unique {
-        labels.push("唯一");
-    }
-    if options.ai_extract {
-        labels.push("AI 提取");
-    }
-    if labels.is_empty() {
-        "未启用".to_owned()
-    } else {
-        labels.join(" · ")
-    }
-}
-
 pub(super) fn field_validation_summary(validation: &crate::FieldValidation) -> String {
     let mut labels = Vec::new();
     if validation.min_length.is_some() || validation.max_length.is_some() {
@@ -470,6 +491,16 @@ pub(super) fn field_validation_summary(validation: &crate::FieldValidation) -> S
         "无".to_owned()
     } else {
         labels.join(" · ")
+    }
+}
+
+fn model_readonly_toggle(checked: bool, aria_label: &'static str) -> Element {
+    rsx! {
+        Checkbox {
+            checked: Some(checkbox_state(checked)),
+            disabled: true,
+            aria_label,
+        }
     }
 }
 

@@ -161,13 +161,13 @@ pub(super) fn PageDefinitionDialog(
                             parent_id: root_id,
                             collection: ChildCollection::Pages,
                             index: page_count,
-                            entity: GraphEntity::Page(page),
+                            entity: Box::new(GraphEntity::Page(page)),
                         },
                         GraphPatch::Insert {
                             parent_id: root_id,
                             collection: ChildCollection::Routes,
                             index: route_count,
-                            entity: GraphEntity::Route(route),
+                            entity: Box::new(GraphEntity::Route(route)),
                         },
                     ]
                 };
@@ -212,45 +212,28 @@ pub(super) fn PageDefinitionDialog(
                         div { class: "aio-definition-dialog__grid",
                             label {
                                 span { "页面类型" }
-                                select {
+                                Select {
                                     class: "aio-input",
                                     aria_label: "页面初始类型",
-                                    onchange: move |event: FormEvent| {
-                                        renderer_kind.set(PageRendererKind::from_key(&event.value()));
+                                    value: page_renderer_kind_key(renderer_kind()),
+                                    options: page_initial_renderer_options(!models.is_empty()),
+                                    on_value_change: move |value: String| {
+                                        renderer_kind.set(PageRendererKind::from_key(&value));
                                     },
-                                    option {
-                                        value: "convention_file",
-                                        selected: renderer_kind() == PageRendererKind::ConventionFile,
-                                        "约定文件"
-                                    }
-                                    option {
-                                        value: "menu_tree",
-                                        selected: renderer_kind() == PageRendererKind::MenuTree,
-                                        "程序菜单树"
-                                    }
-                                    if !models.is_empty() {
-                                        option {
-                                            value: "crud_table",
-                                            selected: renderer_kind() == PageRendererKind::CrudTable,
-                                            "增删改查表格"
-                                        }
-                                    }
                                 }
                             }
                             if renderer_kind() == PageRendererKind::CrudTable {
                                 label {
                                     span { "数据模型" }
-                                    select {
+                                    Select {
                                         class: "aio-input",
                                         aria_label: "页面初始模型",
-                                        onchange: move |event: FormEvent| table_model_id.set(event.value()),
-                                        for model in &models {
-                                            option {
-                                                value: "{model.id}",
-                                                selected: table_model_id() == model.id.to_string(),
-                                                "{model.title} · {model.name}"
-                                            }
-                                        }
+                                        value: table_model_id(),
+                                        options: models.iter().map(|model| SelectItem::new(
+                                            model.id.to_string(),
+                                            format!("{} · {}", model.title, model.name),
+                                        )).collect(),
+                                        on_value_change: move |value: String| table_model_id.set(value),
                                     }
                                 }
                                 label {
@@ -285,6 +268,17 @@ pub(super) fn PageDefinitionDialog(
             }
         }
     }
+}
+
+fn page_initial_renderer_options(has_models: bool) -> Vec<SelectItem> {
+    let mut options = vec![
+        SelectItem::new("convention_file", "约定文件"),
+        SelectItem::new("menu_tree", "程序菜单树"),
+    ];
+    if has_models {
+        options.push(SelectItem::new("crud_table", "增删改查表格"));
+    }
+    options
 }
 
 pub(super) fn route_permission_input_name(permission_id: SymbolId) -> String {
@@ -416,7 +410,7 @@ pub(super) fn PageRouteDialog(
                         parent_id: root_id,
                         collection: ChildCollection::Routes,
                         index: route_count,
-                        entity: GraphEntity::Route(route),
+                        entity: Box::new(GraphEntity::Route(route)),
                     }]
                 };
                 submit_patches(

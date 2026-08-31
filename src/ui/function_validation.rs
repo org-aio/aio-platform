@@ -41,12 +41,15 @@ pub(super) fn validate_form_fields(
                     class: "aio-function-node-editor-row aio-function-node-editor-row--validation",
                     label {
                         span { "校验字段" }
-                        select {
+                        Select {
                             class: "aio-input",
                             aria_label: "校验字段 {index}",
                             value: "{validation_rule.field_id}",
-                            onchange: move |event: FormEvent| {
-                                let Ok(field_id) = SymbolId::parse(&event.value()) else {
+                            options: field_options.iter().map(|(id, label)| {
+                                SelectItem::new(id.to_string(), label)
+                            }).collect(),
+                            on_value_change: move |value: String| {
+                                let Ok(field_id) = SymbolId::parse(&value) else {
                                     return;
                                 };
                                 draft.with_mut(|node| {
@@ -57,23 +60,17 @@ pub(super) fn validate_form_fields(
                                     }
                                 });
                             },
-                            for (option_id, label) in &field_options {
-                                option {
-                                    value: "{option_id}",
-                                    selected: *option_id == validation_rule.field_id,
-                                    "{label}"
-                                }
-                            }
                         }
                     }
                     label {
                         span { "规则类型" }
-                        select {
+                        Select {
                             class: "aio-input",
                             aria_label: "校验规则类型 {index}",
                             value: validation_rule_kind_key(&validation_rule.rule),
-                            onchange: move |event: FormEvent| {
-                                let next_rule = default_validation_rule_kind(&event.value());
+                            options: validation_rule_kind_options(),
+                            on_value_change: move |value: String| {
+                                let next_rule = default_validation_rule_kind(&value);
                                 draft.with_mut(|node| {
                                     if let FunctionNodeKind::ValidateForm { rules } = &mut node.kind
                                         && let Some(rule) = rules.get_mut(index)
@@ -82,7 +79,6 @@ pub(super) fn validate_form_fields(
                                     }
                                 });
                             },
-                            {validation_rule_kind_options(validation_rule_kind_key(&validation_rule.rule))}
                         }
                     }
                     {validation_rule_parameter_editor(index, validation_rule.rule.clone(), draft)}
@@ -148,15 +144,15 @@ pub(super) fn default_validation_rule_kind(key: &str) -> ValidationRuleKind {
     }
 }
 
-pub(super) fn validation_rule_kind_options(current_key: &str) -> Element {
-    rsx! {
-        option { value: "required", selected: current_key == "required", "必填" }
-        option { value: "min_length", selected: current_key == "min_length", "最小长度" }
-        option { value: "max_length", selected: current_key == "max_length", "最大长度" }
-        option { value: "minimum", selected: current_key == "minimum", "最小值" }
-        option { value: "maximum", selected: current_key == "maximum", "最大值" }
-        option { value: "pattern", selected: current_key == "pattern", "命名模式" }
-    }
+pub(super) fn validation_rule_kind_options() -> Vec<SelectItem> {
+    vec![
+        SelectItem::new("required", "必填"),
+        SelectItem::new("min_length", "最小长度"),
+        SelectItem::new("max_length", "最大长度"),
+        SelectItem::new("minimum", "最小值"),
+        SelectItem::new("maximum", "最大值"),
+        SelectItem::new("pattern", "命名模式"),
+    ]
 }
 
 pub(super) fn validation_rule_parameter_editor(
@@ -364,16 +360,16 @@ pub(super) fn compare_operator_from_key(key: &str) -> CompareOperator {
     }
 }
 
-pub(super) fn compare_operator_options(current: CompareOperator) -> Element {
-    rsx! {
-        option { value: "equal", selected: current == CompareOperator::Equal, "等于" }
-        option { value: "not_equal", selected: current == CompareOperator::NotEqual, "不等于" }
-        option { value: "greater", selected: current == CompareOperator::Greater, "大于" }
-        option { value: "greater_or_equal", selected: current == CompareOperator::GreaterOrEqual, "大于等于" }
-        option { value: "less", selected: current == CompareOperator::Less, "小于" }
-        option { value: "less_or_equal", selected: current == CompareOperator::LessOrEqual, "小于等于" }
-        option { value: "contains", selected: current == CompareOperator::Contains, "包含" }
-    }
+pub(super) fn compare_operator_options() -> Vec<SelectItem> {
+    vec![
+        SelectItem::new("equal", "等于"),
+        SelectItem::new("not_equal", "不等于"),
+        SelectItem::new("greater", "大于"),
+        SelectItem::new("greater_or_equal", "大于等于"),
+        SelectItem::new("less", "小于"),
+        SelectItem::new("less_or_equal", "小于等于"),
+        SelectItem::new("contains", "包含"),
+    ]
 }
 
 pub(super) fn boolean_operator_key(operator: BooleanOperator) -> &'static str {
@@ -392,12 +388,12 @@ pub(super) fn boolean_operator_from_key(key: &str) -> BooleanOperator {
     }
 }
 
-pub(super) fn boolean_operator_options(current: BooleanOperator) -> Element {
-    rsx! {
-        option { value: "and", selected: current == BooleanOperator::And, "并且" }
-        option { value: "or", selected: current == BooleanOperator::Or, "或者" }
-        option { value: "not", selected: current == BooleanOperator::Not, "取反" }
-    }
+pub(super) fn boolean_operator_options() -> Vec<SelectItem> {
+    vec![
+        SelectItem::new("and", "并且"),
+        SelectItem::new("or", "或者"),
+        SelectItem::new("not", "取反"),
+    ]
 }
 
 pub(super) fn math_operator_key(operator: MathOperator) -> &'static str {
@@ -420,14 +416,14 @@ pub(super) fn math_operator_from_key(key: &str) -> MathOperator {
     }
 }
 
-pub(super) fn math_operator_options(current: MathOperator) -> Element {
-    rsx! {
-        option { value: "add", selected: current == MathOperator::Add, "加" }
-        option { value: "subtract", selected: current == MathOperator::Subtract, "减" }
-        option { value: "multiply", selected: current == MathOperator::Multiply, "乘" }
-        option { value: "divide", selected: current == MathOperator::Divide, "除" }
-        option { value: "remainder", selected: current == MathOperator::Remainder, "取余" }
-    }
+pub(super) fn math_operator_options() -> Vec<SelectItem> {
+    vec![
+        SelectItem::new("add", "加"),
+        SelectItem::new("subtract", "减"),
+        SelectItem::new("multiply", "乘"),
+        SelectItem::new("divide", "除"),
+        SelectItem::new("remainder", "取余"),
+    ]
 }
 
 pub(super) fn notification_level_key(level: NotificationLevel) -> &'static str {
@@ -448,11 +444,11 @@ pub(super) fn notification_level_from_key(key: &str) -> NotificationLevel {
     }
 }
 
-pub(super) fn notification_level_options(current: NotificationLevel) -> Element {
-    rsx! {
-        option { value: "info", selected: current == NotificationLevel::Info, "信息" }
-        option { value: "success", selected: current == NotificationLevel::Success, "成功" }
-        option { value: "warning", selected: current == NotificationLevel::Warning, "警告" }
-        option { value: "error", selected: current == NotificationLevel::Error, "错误" }
-    }
+pub(super) fn notification_level_options() -> Vec<SelectItem> {
+    vec![
+        SelectItem::new("info", "信息"),
+        SelectItem::new("success", "成功"),
+        SelectItem::new("warning", "警告"),
+        SelectItem::new("error", "错误"),
+    ]
 }

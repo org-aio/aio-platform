@@ -83,7 +83,7 @@ pub(super) fn IndexEditorDialog(
                             parent_id: model_id,
                             collection: ChildCollection::ModelIndexes,
                             index: index_count,
-                            entity: GraphEntity::ModelIndex(definition),
+                            entity: Box::new(GraphEntity::ModelIndex(definition)),
                         }]
                     };
                     submit_patches(
@@ -146,23 +146,23 @@ pub(super) fn IndexEditorDialog(
     }
 }
 
-pub(super) fn editable_value_type_options(current: &ValueType, selected: String) -> Element {
-    rsx! {
-        option { value: "text", selected: selected == "text", "文本" }
-        option { value: "integer", selected: selected == "integer", "整数" }
-        option { value: "decimal", selected: selected == "decimal", "小数" }
-        option { value: "boolean", selected: selected == "boolean", "布尔" }
-        option { value: "timestamp_ms", selected: selected == "timestamp_ms", "时间" }
-        option { value: "file", selected: selected == "file", "文件" }
-        option { value: "any", selected: selected == "any", "任意结构" }
-        if editable_value_type_key(current) == "preserve" {
-            option {
-                value: "preserve",
-                selected: selected == "preserve",
-                "{value_type_label(current)}（保持定义）"
-            }
-        }
+pub(super) fn editable_value_type_options(current: &ValueType) -> Vec<SelectItem> {
+    let mut options = vec![
+        SelectItem::new("text", "文本"),
+        SelectItem::new("integer", "整数"),
+        SelectItem::new("decimal", "小数"),
+        SelectItem::new("boolean", "布尔"),
+        SelectItem::new("timestamp_ms", "时间"),
+        SelectItem::new("file", "文件"),
+        SelectItem::new("any", "任意结构"),
+    ];
+    if editable_value_type_key(current) == "preserve" {
+        options.push(SelectItem::new(
+            "preserve",
+            format!("{}（保持定义）", value_type_label(current)),
+        ));
     }
+    options
 }
 
 pub(super) fn editable_value_type_key(value_type: &ValueType) -> &'static str {

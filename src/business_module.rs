@@ -4,14 +4,28 @@ use std::{
     fs,
     io::ErrorKind,
     path::{Path, PathBuf},
-    process::Command,
 };
 
 use anyhow::{Context, Result, bail, ensure};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::{PageDefinition, PageEndpointDefinition, ProgramDefinition, RestMethod};
 
+#[path = "business_module_source_format.rs"]
+mod business_module_source_format;
+use business_module_source_format::write_rust_source_if_changed;
+
 const GENERATED_MARKER: &str = ".aio-generated";
+const SERVICE_STUB_MANIFEST: &str = "src/generated/service-stubs.json";
+const SERVICE_STUB_COMMENT: &str =
+    "// AIO 根据元数据生成的 Service 骨架；内容修改后自动转为人工所有。\n";
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct ServiceStubManifest {
+    #[serde(default)]
+    files: BTreeMap<String, String>,
+}
 
 /// 将低代码接口契约同步为业务 Service 和生成 Controller。
 #[derive(Clone, Debug)]
@@ -24,6 +38,7 @@ pub struct BusinessModuleSyncResult {
     pub business_module: String,
     pub generated_files: Vec<String>,
     pub created_service_implementations: Vec<String>,
+    changed_rust_sources: BTreeSet<String>,
 }
 
 impl BusinessModuleManager {
@@ -58,11 +73,10 @@ impl BusinessModuleManager {
             .context("创建业务模块 generated 目录失败")?;
         fs::create_dir_all(module_dir.join("src/service"))
             .context("创建业务模块 service 目录失败")?;
-        fs::write(
-            module_dir.join(GENERATED_MARKER),
-            format!("application = {}\n", definition.name),
-        )
-        .context("写入业务模块生成标记失败")?;
+        write_if_changed(
+            &module_dir.join(GENERATED_MARKER),
+            format!("application = {}\n", definition.name).as_bytes(),
+        )?;
 
         let pages = definition
             .pages
@@ -98,6 +112,17 @@ impl BusinessModuleManager {
             .map(|page| rust_identifier(&page.name))
             .collect::<BTreeSet<_>>();
         remove_stale_generated_pages(&module_dir, &expected_page_modules)?;
+        let expected_service_paths = expected_page_modules
+            .iter()
+            .map(|module_name| format!("src/service/{module_name}.rs"))
+            .collect::<BTreeSet<_>>();
+        let mut service_stub_manifest = load_service_stub_manifest(&module_dir)?;
+        remove_stale_service_stubs(
+            &module_dir,
+            &expected_service_paths,
+            &mut service_stub_manifest,
+        )?;
+        let mut owned_service_stubs = BTreeSet::new();
         for page in pages {
             let module_name = rust_identifier(&page.name);
             let page_dir = format!("src/generated/{module_name}");
@@ -121,51 +146,155 @@ impl BusinessModuleManager {
             )?;
             remove_stale_generated_page_files(&module_dir, &page_dir)?;
 
-            let implementation_path = module_dir.join(format!("src/service/{module_name}.rs"));
-            if !implementation_path.exists() {
-                fs::write(&implementation_path, service_implementation_source(page)).with_context(
-                    || {
-                        format!(
-                            "创建业务 Service 实现失败: {}",
-                            implementation_path.display()
-                        )
-                    },
-                )?;
+            let implementation_relative = format!("src/service/{module_name}.rs");
+            let implementation_path = module_dir.join(&implementation_relative);
+            let implementation_source = service_implementation_source(page);
+            let implementation_exists = implementation_path.exists();
+            if generated_service_stub_is_owned(
+                &implementation_path,
+                &implementation_relative,
+                &implementation_source,
+                &mut service_stub_manifest,
+            )? {
+                if write_rust_source_if_changed(&implementation_path, &implementation_source)? {
+                    result
+                        .changed_rust_sources
+                        .insert(implementation_relative.clone());
+                }
+                owned_service_stubs.insert(implementation_relative.clone());
+            }
+            if !implementation_exists {
                 result
                     .created_service_implementations
-                    .push(format!("src/service/{module_name}.rs"));
+                    .push(implementation_relative);
             }
         }
-        format_rust_sources(&module_dir, &result)?;
+        update_service_stub_manifest(
+            &module_dir,
+            &owned_service_stubs,
+            &mut service_stub_manifest,
+        )?;
+        write_service_stub_manifest(&module_dir, &service_stub_manifest)?;
+        result
+            .generated_files
+            .push(SERVICE_STUB_MANIFEST.to_owned());
         result.generated_files.sort();
         result.created_service_implementations.sort();
         Ok(result)
     }
 }
 
-fn format_rust_sources(module_dir: &Path, result: &BusinessModuleSyncResult) -> Result<()> {
-    let paths = result
-        .generated_files
-        .iter()
-        .chain(&result.created_service_implementations)
-        .filter(|path| path.ends_with(".rs"))
-        .map(|path| module_dir.join(path))
-        .collect::<Vec<_>>();
-    if paths.is_empty() {
-        return Ok(());
+fn load_service_stub_manifest(module_dir: &Path) -> Result<ServiceStubManifest> {
+    let path = module_dir.join(SERVICE_STUB_MANIFEST);
+    if !path.is_file() {
+        return Ok(ServiceStubManifest::default());
     }
-    let status = match Command::new("rustfmt")
-        .arg("--edition")
-        .arg("2024")
-        .args(&paths)
-        .status()
-    {
-        Ok(status) => status,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error).context("启动 rustfmt 失败"),
-    };
-    ensure!(status.success(), "rustfmt 格式化业务模块失败");
+    serde_json::from_slice(
+        &fs::read(&path)
+            .with_context(|| format!("读取 Service 骨架所有权清单失败: {}", path.display()))?,
+    )
+    .with_context(|| format!("解析 Service 骨架所有权清单失败: {}", path.display()))
+}
+
+fn remove_stale_service_stubs(
+    module_dir: &Path,
+    expected_paths: &BTreeSet<String>,
+    manifest: &mut ServiceStubManifest,
+) -> Result<()> {
+    let stale_paths = manifest
+        .files
+        .keys()
+        .filter(|path| !expected_paths.contains(*path))
+        .cloned()
+        .collect::<Vec<_>>();
+    for relative_path in stale_paths {
+        let path = module_dir.join(&relative_path);
+        ensure!(path.starts_with(module_dir), "Service 骨架路径越出业务模块");
+        if path.is_file() {
+            let source = fs::read(&path)
+                .with_context(|| format!("读取 Service 骨架失败: {}", path.display()))?;
+            let expected_hash = manifest
+                .files
+                .get(&relative_path)
+                .cloned()
+                .unwrap_or_default();
+            if source_hash(&source) == expected_hash {
+                fs::remove_file(&path)
+                    .with_context(|| format!("删除失效 Service 骨架失败: {}", path.display()))?;
+            }
+        }
+        manifest.files.remove(&relative_path);
+    }
     Ok(())
+}
+
+fn generated_service_stub_is_owned(
+    path: &Path,
+    relative_path: &str,
+    generated_source: &str,
+    manifest: &mut ServiceStubManifest,
+) -> Result<bool> {
+    if !path.is_file() {
+        return Ok(true);
+    }
+    let current =
+        fs::read(path).with_context(|| format!("读取业务 Service 实现失败: {}", path.display()))?;
+    if let Some(expected_hash) = manifest.files.get(relative_path) {
+        if source_hash(&current) == *expected_hash {
+            return Ok(true);
+        }
+        manifest.files.remove(relative_path);
+        return Ok(false);
+    }
+    let current = String::from_utf8_lossy(&current);
+    Ok(service_stub_shape(&current) == service_stub_shape(generated_source))
+}
+
+fn update_service_stub_manifest(
+    module_dir: &Path,
+    owned_paths: &BTreeSet<String>,
+    manifest: &mut ServiceStubManifest,
+) -> Result<()> {
+    for relative_path in owned_paths {
+        let path = module_dir.join(relative_path);
+        let source = fs::read(&path)
+            .with_context(|| format!("读取已格式化 Service 骨架失败: {}", path.display()))?;
+        manifest
+            .files
+            .insert(relative_path.clone(), source_hash(&source));
+    }
+    Ok(())
+}
+
+fn write_service_stub_manifest(module_dir: &Path, manifest: &ServiceStubManifest) -> Result<()> {
+    let path = module_dir.join(SERVICE_STUB_MANIFEST);
+    let source =
+        serde_json::to_vec_pretty(manifest).context("序列化 Service 骨架所有权清单失败")?;
+    write_if_changed(&path, &source).map(|_| ())
+}
+
+fn source_hash(source: &[u8]) -> String {
+    hex::encode(Sha256::digest(source))
+}
+
+fn service_stub_shape(source: &str) -> String {
+    let mut shape = source
+        .lines()
+        .filter(|line| !line.starts_with(SERVICE_STUB_COMMENT.trim()))
+        .map(|line| {
+            let line = line.trim();
+            if line.starts_with("bail!(") {
+                return "bail!(...)".to_owned();
+            }
+            line.chars()
+                .filter(|character| !character.is_whitespace())
+                .collect::<String>()
+        })
+        .collect::<String>();
+    while shape.contains(",)") {
+        shape = shape.replace(",)", ")");
+    }
+    shape
 }
 
 fn write_generated(
@@ -180,9 +309,29 @@ fn write_generated(
         fs::create_dir_all(parent)
             .with_context(|| format!("创建生成目录失败: {}", parent.display()))?;
     }
-    fs::write(&path, source).with_context(|| format!("写入生成文件失败: {}", path.display()))?;
+    let changed = if relative_path.ends_with(".rs") {
+        write_rust_source_if_changed(&path, source)?
+    } else {
+        write_if_changed(&path, source.as_bytes())?
+    };
+    if changed && relative_path.ends_with(".rs") {
+        result.changed_rust_sources.insert(relative_path.to_owned());
+    }
     result.generated_files.push(relative_path.to_owned());
     Ok(())
+}
+
+fn write_if_changed(path: &Path, source: &[u8]) -> Result<bool> {
+    match fs::read(path) {
+        Ok(current) if current == source => return Ok(false),
+        Ok(_) => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| format!("读取待生成文件失败: {}", path.display()));
+        }
+    }
+    fs::write(path, source).with_context(|| format!("写入生成文件失败: {}", path.display()))?;
+    Ok(true)
 }
 
 fn remove_stale_generated_pages(module_dir: &Path, expected: &BTreeSet<String>) -> Result<()> {
@@ -268,7 +417,7 @@ fn lib_source() -> String {
 mod generated;
 mod service;
 
-pub use generated::register;
+pub use generated::{ENDPOINT_COUNT, register};
 "#
     .to_owned()
 }
@@ -282,6 +431,11 @@ fn generated_mod_source(pages: &[&PageDefinition]) -> String {
     for module in modules {
         let _ = writeln!(source, "pub(crate) mod {module};");
     }
+    let endpoint_count = pages.iter().map(|page| page.endpoints.len()).sum::<usize>();
+    let _ = writeln!(
+        source,
+        "\npub const ENDPOINT_COUNT: usize = {endpoint_count};"
+    );
     source.push_str("\nuse dill::CatalogBuilder;\n\n");
     source.push_str("pub fn register(builder: &mut CatalogBuilder) {\n");
     for page in pages {
@@ -421,7 +575,7 @@ fn service_implementation_source(page: &PageDefinition) -> String {
     let generated_module = rust_identifier(&page.name);
     let methods = endpoint_methods(page);
     let mut source = format!(
-        "use anyhow::bail;\nuse studio::{{ConventionEndpointFuture, ConventionEndpointRequest}};\n\nuse crate::generated::{generated_module}::contract::{service_name};\n\n"
+        "{SERVICE_STUB_COMMENT}use anyhow::bail;\nuse studio::{{ConventionEndpointFuture, ConventionEndpointRequest}};\n\nuse crate::generated::{generated_module}::contract::{service_name};\n\n"
     );
     source.push_str("#[dill::component]\n");
     let _ = writeln!(source, "#[dill::interface(dyn {service_name})]");
@@ -597,97 +751,5 @@ fn is_rust_keyword(value: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::process;
-
-    use crate::{
-        DefinitionState, PageDefinition, PageEndpointDefinition, PageRendererDefinition, SymbolId,
-    };
-
-    use super::*;
-
-    fn test_root(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "aio-biz-{name}-{}-{}",
-            process::id(),
-            az_plugin_core::timestamp_ms()
-        ))
-    }
-
-    fn definition() -> ProgramDefinition {
-        let mut definition = ProgramDefinition::empty("example-app", "示例应用");
-        definition.pages.push(PageDefinition {
-            id: SymbolId::new(),
-            name: "orders".to_owned(),
-            title: "订单".to_owned(),
-            state: DefinitionState::Known,
-            renderer: PageRendererDefinition::ConventionFile,
-            endpoints: vec![PageEndpointDefinition {
-                id: SymbolId::new(),
-                title: "提交订单".to_owned(),
-                description: String::new(),
-                state: DefinitionState::Known,
-                method: RestMethod::Post,
-                path: "/api/orders/submit".to_owned(),
-                inputs: Vec::new(),
-                outputs: Vec::new(),
-            }],
-        });
-        definition
-    }
-
-    #[test]
-    fn generates_service_and_controller_without_string_plugin_identity() -> Result<()> {
-        let root = test_root("layout");
-        let manager = BusinessModuleManager::new(root.clone());
-        let result = manager.reconcile(&definition())?;
-        let module = root.join("lib/biz/example-app");
-        let controller = fs::read_to_string(module.join("src/generated/orders/controller.rs"))?;
-        let contract = fs::read_to_string(module.join("src/generated/orders/contract.rs"))?;
-
-        assert!(controller.contains("ConventionEndpointProvider"));
-        assert!(controller.contains("#[dill::component]"));
-        assert!(controller.contains("#[derive(derive_more::Debug)]"));
-        assert!(controller.contains("#[debug(skip)]"));
-        assert!(controller.contains("self.service.post_submit(request)"));
-        assert!(!controller.contains("fn key"));
-        assert!(!controller.contains("fn name"));
-        assert!(!controller.contains("module_path!"));
-        assert!(contract.contains("trait OrdersService"));
-        assert!(!contract.contains("std::fmt::Debug"));
-        assert!(!contract.contains("Debug + Send + Sync"));
-        assert_eq!(result.created_service_implementations.len(), 1);
-
-        let implementation = module.join("src/service/orders.rs");
-        fs::write(&implementation, "// 人工实现\n")?;
-        let stale_generated_service = module.join("src/generated/orders/service.rs");
-        fs::write(&stale_generated_service, "// 失效生成文件\n")?;
-        manager.reconcile(&definition())?;
-        assert_eq!(fs::read_to_string(implementation)?, "// 人工实现\n");
-        assert!(!stale_generated_service.exists());
-        fs::remove_dir_all(root)?;
-        Ok(())
-    }
-
-    #[test]
-    fn removes_generated_page_when_endpoint_metadata_is_deleted() -> Result<()> {
-        let root = test_root("metadata-deletion");
-        let manager = BusinessModuleManager::new(root.clone());
-        let mut definition = definition();
-        manager.reconcile(&definition)?;
-
-        let module = root.join("lib/biz/example-app");
-        let generated_page = module.join("src/generated/orders");
-        let service_implementation = module.join("src/service/orders.rs");
-        assert!(generated_page.is_dir());
-        assert!(service_implementation.is_file());
-
-        definition.pages[0].endpoints.clear();
-        manager.reconcile(&definition)?;
-
-        assert!(!generated_page.exists());
-        assert!(service_implementation.is_file());
-        fs::remove_dir_all(root)?;
-        Ok(())
-    }
-}
+#[path = "business_module_tests.rs"]
+mod tests;

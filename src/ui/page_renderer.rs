@@ -4,7 +4,59 @@ use super::*;
 pub(super) enum PageSettingsTab {
     #[default]
     Layout,
+    Navigation,
     Endpoints,
+}
+
+pub(super) fn page_renderer_kind_options(include_data_pages: bool) -> Vec<SelectItem> {
+    let mut options = vec![
+        SelectItem::new("convention_file", "约定文件渲染"),
+        SelectItem::new("menu_tree", "内置 · 程序菜单树"),
+    ];
+    if include_data_pages {
+        options.extend([
+            SelectItem::new("tree_table", "内置 · 左树右表"),
+            SelectItem::new("crud_table", "内置 · 增删改查表格"),
+        ]);
+    }
+    options
+}
+
+pub(super) const fn page_renderer_kind_key(kind: PageRendererKind) -> &'static str {
+    match kind {
+        PageRendererKind::ConventionFile => "convention_file",
+        PageRendererKind::MenuTree => "menu_tree",
+        PageRendererKind::TreeTable => "tree_table",
+        PageRendererKind::CrudTable => "crud_table",
+    }
+}
+
+pub(super) fn model_select_items_with_placeholder(
+    models: &[ModelDefinition],
+    placeholder: &str,
+) -> Vec<SelectItem> {
+    std::iter::once(SelectItem::new("", placeholder))
+        .chain(models.iter().map(|model| {
+            SelectItem::new(
+                model.id.to_string(),
+                format!("{} · {}", model.title, model.name),
+            )
+        }))
+        .collect()
+}
+
+fn field_select_items_with_placeholder(
+    fields: &[FieldDefinition],
+    placeholder: &str,
+) -> Vec<SelectItem> {
+    std::iter::once(SelectItem::new("", placeholder))
+        .chain(fields.iter().map(|field| {
+            SelectItem::new(
+                field.id.to_string(),
+                format!("{} · {}", field.title, field.name),
+            )
+        }))
+        .collect()
 }
 
 #[component]
@@ -18,7 +70,7 @@ pub(super) fn PageRendererSettings(
     status: Signal<Option<String>>,
     mut settings_tab: Signal<PageSettingsTab>,
     mut settings_open: Signal<bool>,
-    on_delete_menu: Option<Callback<()>>,
+    navigation_menu: Option<MenuDefinition>,
     draft: DraftSnapshot,
 ) -> Element {
     let page_id = page.id;
@@ -77,18 +129,6 @@ pub(super) fn PageRendererSettings(
                     if let Some(message) = status() {
                         Badge { variant: BadgeVariant::Outline, "{message}" }
                     }
-                    if let Some(delete_menu) = on_delete_menu {
-                        Button {
-                            r#type: "button",
-                            size: ButtonSize::Sm,
-                            variant: ButtonVariant::Destructive,
-                            title: "删除当前菜单",
-                            aria_label: "删除当前菜单",
-                            onclick: move |_| delete_menu.call(()),
-                            icons::Trash2 { class: "size-4" }
-                            "删除菜单"
-                        }
-                    }
                     Button {
                         size: ButtonSize::IconSm,
                         variant: ButtonVariant::Ghost,
@@ -100,6 +140,22 @@ pub(super) fn PageRendererSettings(
                 }
             }
             nav { class: "aio-page-settings__tabs", aria_label: "页面设置视图",
+                Button {
+                    size: ButtonSize::Sm,
+                    variant: if settings_tab() == PageSettingsTab::Navigation {
+                        ButtonVariant::Secondary
+                    } else {
+                        ButtonVariant::Ghost
+                    },
+                    disabled: navigation_menu.is_none(),
+                    title: if navigation_menu.is_some() {
+                        "页面导航配置"
+                    } else {
+                        "当前页面没有唯一的菜单挂载"
+                    },
+                    onclick: move |_| settings_tab.set(PageSettingsTab::Navigation),
+                    "导航"
+                }
                 Button {
                     size: ButtonSize::Sm,
                     variant: if settings_tab() == PageSettingsTab::Layout {
@@ -160,35 +216,17 @@ pub(super) fn PageRendererSettings(
                             }
                             div { class: "aio-page-layout-form__fields",
                                 label { r#for: "page-renderer-kind", "渲染方式" }
-                                select {
+                                Select {
                                     id: "page-renderer-kind",
                                     name: "renderer_kind",
                                     class: "aio-input",
-                                    onchange: move |event: FormEvent| {
+                                    value: page_renderer_kind_key(layout.kind),
+                                    options: page_renderer_kind_options(true),
+                                    on_value_change: move |value: String| {
                                         layout_draft.with_mut(|draft| {
-                                            draft.kind = PageRendererKind::from_key(&event.value());
+                                            draft.kind = PageRendererKind::from_key(&value);
                                         });
                                     },
-                                    option {
-                                        value: "convention_file",
-                                        selected: layout.kind == PageRendererKind::ConventionFile,
-                                        "约定文件渲染"
-                                    }
-                                    option {
-                                        value: "menu_tree",
-                                        selected: layout.kind == PageRendererKind::MenuTree,
-                                        "内置 · 程序菜单树"
-                                    }
-                                    option {
-                                        value: "tree_table",
-                                        selected: layout.kind == PageRendererKind::TreeTable,
-                                        "内置 · 左树右表"
-                                    }
-                                    option {
-                                        value: "crud_table",
-                                        selected: layout.kind == PageRendererKind::CrudTable,
-                                        "内置 · 增删改查表格"
-                                    }
                                 }
                                 if let Some(suggested) = suggested_layout.clone()
                                     && layout != suggested
@@ -208,28 +246,18 @@ pub(super) fn PageRendererSettings(
                                     && layout.kind != PageRendererKind::MenuTree
                                 {
                                     label { r#for: "table-model", "表格模型" }
-                                    select {
+                                    Select {
                                         id: "table-model",
                                         name: "table_model_id",
                                         class: "aio-input",
-                                        onchange: move |event: FormEvent| {
+                                        value: layout.table_model_id.clone(),
+                                        options: model_select_items_with_placeholder(&models, "选择模型"),
+                                        on_value_change: move |value: String| {
                                             layout_draft.with_mut(|draft| {
-                                                draft.table_model_id = event.value();
+                                                draft.table_model_id = value;
                                                 draft.table_relation_field_id.clear();
                                             });
                                         },
-                                        option {
-                                            value: "",
-                                            selected: layout.table_model_id.is_empty(),
-                                            "选择模型"
-                                        }
-                                        for model in &models {
-                                            option {
-                                                value: "{model.id}",
-                                                selected: layout.table_model_id == model.id.to_string(),
-                                                "{model.title} · {model.name}"
-                                            }
-                                        }
                                     }
                                     label { r#for: "page-size", "每页条数" }
                                     Input {
@@ -247,92 +275,52 @@ pub(super) fn PageRendererSettings(
                                 }
                                 if layout.kind == PageRendererKind::TreeTable {
                                     label { r#for: "tree-model", "树模型" }
-                                    select {
+                                    Select {
                                         id: "tree-model",
                                         name: "tree_model_id",
                                         class: "aio-input",
-                                        onchange: move |event: FormEvent| {
+                                        value: layout.tree_model_id.clone(),
+                                        options: model_select_items_with_placeholder(&models, "选择树模型"),
+                                        on_value_change: move |value: String| {
                                             layout_draft.with_mut(|draft| {
-                                                draft.tree_model_id = event.value();
+                                                draft.tree_model_id = value;
                                                 draft.tree_label_field_id.clear();
                                                 draft.tree_parent_field_id.clear();
                                             });
                                         },
-                                        option {
-                                            value: "",
-                                            selected: layout.tree_model_id.is_empty(),
-                                            "选择树模型"
-                                        }
-                                        for model in &models {
-                                            option {
-                                                value: "{model.id}",
-                                                selected: layout.tree_model_id == model.id.to_string(),
-                                                "{model.title} · {model.name}"
-                                            }
-                                        }
                                     }
                                     label { r#for: "tree-label-field", "树标题字段" }
-                                    select {
+                                    Select {
                                         id: "tree-label-field",
                                         name: "tree_label_field_id",
                                         class: "aio-input",
-                                        onchange: move |event: FormEvent| {
-                                            layout_draft.with_mut(|draft| draft.tree_label_field_id = event.value());
+                                        value: layout.tree_label_field_id.clone(),
+                                        options: field_select_items_with_placeholder(tree_fields, "选择字段"),
+                                        on_value_change: move |value: String| {
+                                            layout_draft.with_mut(|draft| draft.tree_label_field_id = value);
                                         },
-                                        option {
-                                            value: "",
-                                            selected: layout.tree_label_field_id.is_empty(),
-                                            "选择字段"
-                                        }
-                                        for field in tree_fields {
-                                            option {
-                                                value: "{field.id}",
-                                                selected: layout.tree_label_field_id == field.id.to_string(),
-                                                "{field.title} · {field.name}"
-                                            }
-                                        }
                                     }
                                     label { r#for: "tree-parent-field", "树父级字段" }
-                                    select {
+                                    Select {
                                         id: "tree-parent-field",
                                         name: "tree_parent_field_id",
                                         class: "aio-input",
-                                        onchange: move |event: FormEvent| {
-                                            layout_draft.with_mut(|draft| draft.tree_parent_field_id = event.value());
+                                        value: layout.tree_parent_field_id.clone(),
+                                        options: field_select_items_with_placeholder(tree_fields, "无父级字段"),
+                                        on_value_change: move |value: String| {
+                                            layout_draft.with_mut(|draft| draft.tree_parent_field_id = value);
                                         },
-                                        option {
-                                            value: "",
-                                            selected: layout.tree_parent_field_id.is_empty(),
-                                            "无父级字段"
-                                        }
-                                        for field in tree_fields {
-                                            option {
-                                                value: "{field.id}",
-                                                selected: layout.tree_parent_field_id == field.id.to_string(),
-                                                "{field.title} · {field.name}"
-                                            }
-                                        }
                                     }
                                     label { r#for: "table-relation-field", "表关联字段" }
-                                    select {
+                                    Select {
                                         id: "table-relation-field",
                                         name: "table_relation_field_id",
                                         class: "aio-input",
-                                        onchange: move |event: FormEvent| {
-                                            layout_draft.with_mut(|draft| draft.table_relation_field_id = event.value());
+                                        value: layout.table_relation_field_id.clone(),
+                                        options: field_select_items_with_placeholder(table_fields, "选择字段"),
+                                        on_value_change: move |value: String| {
+                                            layout_draft.with_mut(|draft| draft.table_relation_field_id = value);
                                         },
-                                        option {
-                                            value: "",
-                                            selected: layout.table_relation_field_id.is_empty(),
-                                            "选择字段"
-                                        }
-                                        for field in table_fields {
-                                            option {
-                                                value: "{field.id}",
-                                                selected: layout.table_relation_field_id == field.id.to_string(),
-                                                "{field.title} · {field.name}"
-                                            }
-                                        }
                                     }
                                 }
                             }
@@ -418,6 +406,25 @@ pub(super) fn PageRendererSettings(
                     }
                     Button { r#type: "submit", disabled: !layout_valid, "保存设置" }
                 }
+                }
+            } else if settings_tab() == PageSettingsTab::Navigation
+                && let Some(menu) = navigation_menu.clone()
+            {
+                PageNavigationSettings {
+                    menu,
+                    route: draft
+                        .definition
+                        .routes
+                        .iter()
+                        .find(|route| route.page_id == page_id)
+                        .cloned(),
+                    permissions: draft.definition.permissions.clone(),
+                    api_base_url: api_base_url.clone(),
+                    program_id: program_id.clone(),
+                    version,
+                    generation,
+                    status,
+                    settings_open,
                 }
             } else {
                 div { class: "aio-page-settings__functions",

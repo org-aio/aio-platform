@@ -205,7 +205,7 @@ pub(super) fn FieldEditorDialog(
                             parent_id: model_id,
                             collection: ChildCollection::Fields,
                             index: field_count,
-                            entity: GraphEntity::Field(next),
+                            entity: Box::new(GraphEntity::Field(next)),
                         }]
                     };
                     if let Some(previous) = &previous_relation
@@ -271,7 +271,7 @@ pub(super) fn FieldEditorDialog(
                                 aria_label: "字段类型",
                                 value: field_type(),
                                 options: field_value_type_select_items(&draft().value_type),
-                                on_value_change: move |value| {
+                                on_value_change: move |value: String| {
                                     field_type.set(value);
                                 },
                             }
@@ -296,7 +296,7 @@ pub(super) fn FieldEditorDialog(
                                 aria_label: "关联基数",
                                 value: relation_kind(),
                                 options: relation_kind_select_items(),
-                                on_value_change: move |value| relation_kind.set(value),
+                                on_value_change: move |value: String| relation_kind.set(value),
                             }
                         }
                         label {
@@ -310,7 +310,7 @@ pub(super) fn FieldEditorDialog(
                                         format!("{} · {}", model.title, model.name),
                                     )))
                                     .collect(),
-                                on_value_change: move |value| {
+                                on_value_change: move |value: String| {
                                     target_model.set(value);
                                     target_field.set(String::new());
                                 },
@@ -327,7 +327,7 @@ pub(super) fn FieldEditorDialog(
                                         format!("{} · {}", field.title, field.name),
                                     )))
                                     .collect(),
-                                on_value_change: move |value| target_field.set(value),
+                                on_value_change: move |value: String| target_field.set(value),
                             }
                         }
                     }

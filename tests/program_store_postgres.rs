@@ -41,7 +41,7 @@ async fn program_store_enforces_versions_revisions_cache_and_activation() -> any
                     parent_id: initial.definition.id,
                     collection: az_studio::ChildCollection::Models,
                     index: 0,
-                    entity: GraphEntity::Model(ModelDefinition {
+                    entity: Box::new(GraphEntity::Model(ModelDefinition {
                         id: model_id,
                         name: model_name.clone(),
                         title: "程序模型".to_owned(),
@@ -70,7 +70,7 @@ async fn program_store_enforces_versions_revisions_cache_and_activation() -> any
                         queries: Vec::new(),
                         validations: Vec::new(),
                         audit: az_studio::ModelAuditDefinition::default(),
-                    }),
+                    })),
                 },
             ],
         })

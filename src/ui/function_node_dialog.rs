@@ -47,6 +47,7 @@ pub(super) fn FunctionNodeDialog(
     let option_models = models.clone();
     let option_routes = routes.clone();
     let option_functions = functions.clone();
+    let option_capabilities = capabilities.clone();
 
     rsx! {
         Dialog {
@@ -90,7 +91,7 @@ pub(super) fn FunctionNodeDialog(
                         parent_id: function.id,
                         collection: ChildCollection::FunctionNodes,
                         index: node_count,
-                        entity: GraphEntity::FunctionNode(node),
+                        entity: Box::new(GraphEntity::FunctionNode(node)),
                     }
                 };
                 submit_patches(
@@ -106,12 +107,19 @@ pub(super) fn FunctionNodeDialog(
                 div { class: "aio-definition-dialog__grid aio-function-node-dialog__identity",
                     label {
                         span { "节点类型" }
-                        select {
+                        Select {
                             class: "aio-input",
                             aria_label: "节点类型",
                             value: current_kind_key,
-                            onchange: move |event: FormEvent| {
-                                let key = event.value();
+                            options: function_node_kind_options(
+                                node_id,
+                                &function,
+                                &models,
+                                &routes,
+                                &functions,
+                                &capabilities,
+                            ),
+                            on_value_change: move |key: String| {
                                 match default_function_node_kind(
                                     &key,
                                     node_id,
@@ -119,21 +127,12 @@ pub(super) fn FunctionNodeDialog(
                                     &option_models,
                                     &option_routes,
                                     &option_functions,
-                                    &capabilities,
+                                    &option_capabilities,
                                 ) {
                                     Ok(kind) => draft.with_mut(|node| node.kind = kind),
                                     Err(error) => status.set(Some(error)),
                                 }
                             },
-                            {function_node_kind_options(
-                                current_kind_key,
-                                node_id,
-                                &function,
-                                &models,
-                                &routes,
-                                &functions,
-                                &capabilities,
-                            )}
                         }
                     }
                     label {
@@ -250,14 +249,13 @@ pub(super) fn function_node_kind_key(kind: &FunctionNodeKind) -> &'static str {
 }
 
 pub(super) fn function_node_kind_options(
-    current_key: &str,
     current_node_id: SymbolId,
     function: &FunctionDefinition,
     models: &[ModelDefinition],
     routes: &[RouteDefinition],
     functions: &[FunctionDefinition],
     capabilities: &crate::CapabilityCatalog,
-) -> Element {
+) -> Vec<SelectItem> {
     let has_inputs = !function.inputs.is_empty();
     let has_outputs = !function.outputs.is_empty();
     let has_models = !models.is_empty();
@@ -269,37 +267,33 @@ pub(super) fn function_node_kind_options(
         .iter()
         .any(|node| node.id != current_node_id);
     let has_model_fields = models.iter().any(|model| !model.fields.is_empty());
-    rsx! {
-        option { value: "constant", selected: current_key == "constant", "常量" }
-        option { value: "input", selected: current_key == "input", disabled: !has_inputs, "函数输入" }
-        option { value: "output", selected: current_key == "output", disabled: !has_outputs, "函数输出" }
-        option { value: "object", selected: current_key == "object", disabled: !has_reference_nodes || !has_model_fields, "对象" }
-        option { value: "list", selected: current_key == "list", disabled: !has_reference_nodes, "列表" }
-        option { value: "field_access", selected: current_key == "field_access", disabled: !has_reference_nodes || !has_model_fields, "字段读取" }
-        option { value: "format", selected: current_key == "format", "格式化" }
-        option { value: "compare", selected: current_key == "compare", "比较" }
-        option { value: "boolean", selected: current_key == "boolean", "布尔运算" }
-        option { value: "math", selected: current_key == "math", "数学运算" }
-        option { value: "condition", selected: current_key == "condition", "条件分支" }
-        option { value: "for_each", selected: current_key == "for_each", disabled: !has_body_functions, "遍历调用" }
-        option { value: "validate_form", selected: current_key == "validate_form", disabled: !has_model_fields, "表单校验" }
-        option { value: "create_record", selected: current_key == "create_record", disabled: !has_models, "新增记录" }
-        option { value: "read_record", selected: current_key == "read_record", disabled: !has_models, "读取记录" }
-        option { value: "update_record", selected: current_key == "update_record", disabled: !has_models, "更新记录" }
-        option { value: "delete_record", selected: current_key == "delete_record", disabled: !has_models, "删除记录" }
-        option { value: "query_records", selected: current_key == "query_records", disabled: !has_models, "查询记录" }
-        option { value: "navigate", selected: current_key == "navigate", disabled: !has_routes, "页面跳转" }
-        option { value: "confirm", selected: current_key == "confirm", "确认" }
-        option { value: "notify", selected: current_key == "notify", "通知" }
-        option { value: "return", selected: current_key == "return", "返回" }
-        option { value: "fail", selected: current_key == "fail", "失败" }
-        option {
-            value: "capability",
-            selected: current_key == "capability",
-            disabled: capabilities.capabilities.is_empty(),
-            "能力调用"
-        }
-    }
+    vec![
+        SelectItem::new("constant", "常量"),
+        SelectItem::new("input", "函数输入").disabled(!has_inputs),
+        SelectItem::new("output", "函数输出").disabled(!has_outputs),
+        SelectItem::new("object", "对象").disabled(!has_reference_nodes || !has_model_fields),
+        SelectItem::new("list", "列表").disabled(!has_reference_nodes),
+        SelectItem::new("field_access", "字段读取")
+            .disabled(!has_reference_nodes || !has_model_fields),
+        SelectItem::new("format", "格式化"),
+        SelectItem::new("compare", "比较"),
+        SelectItem::new("boolean", "布尔运算"),
+        SelectItem::new("math", "数学运算"),
+        SelectItem::new("condition", "条件分支"),
+        SelectItem::new("for_each", "遍历调用").disabled(!has_body_functions),
+        SelectItem::new("validate_form", "表单校验").disabled(!has_model_fields),
+        SelectItem::new("create_record", "新增记录").disabled(!has_models),
+        SelectItem::new("read_record", "读取记录").disabled(!has_models),
+        SelectItem::new("update_record", "更新记录").disabled(!has_models),
+        SelectItem::new("delete_record", "删除记录").disabled(!has_models),
+        SelectItem::new("query_records", "查询记录").disabled(!has_models),
+        SelectItem::new("navigate", "页面跳转").disabled(!has_routes),
+        SelectItem::new("confirm", "确认"),
+        SelectItem::new("notify", "通知"),
+        SelectItem::new("return", "返回"),
+        SelectItem::new("fail", "失败"),
+        SelectItem::new("capability", "能力调用").disabled(capabilities.capabilities.is_empty()),
+    ]
 }
 
 pub(super) fn default_function_node_kind(

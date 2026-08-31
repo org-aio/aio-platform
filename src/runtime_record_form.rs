@@ -69,7 +69,7 @@ pub(crate) fn relation_form_state_value(kind: RelationKind, ids: Vec<String>) ->
     if kind.is_collection() {
         return Value::Array(ids.into_iter().map(Value::String).collect()).to_string();
     }
-    ids.into_iter().next().map_or_else(String::new, |id| id)
+    ids.into_iter().next().unwrap_or_default()
 }
 
 pub(crate) fn relation_record_label(model: &CompiledModel, record: &RuntimeRecordView) -> String {

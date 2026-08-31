@@ -35,12 +35,13 @@ pub(super) fn function_node_editor_fields(
                     }
                     label {
                         span { "常量类型" }
-                        select {
+                        Select {
                             class: "aio-input",
                             aria_label: "常量类型",
                             value: editable_value_type_key(&value_type),
-                            onchange: move |event: FormEvent| {
-                                let next_type = value_type_from_key(&event.value());
+                            options: editable_value_type_options(&value_type),
+                            on_value_change: move |value: String| {
+                                let next_type = value_type_from_key(&value);
                                 draft.with_mut(|node| {
                                     if let FunctionNodeKind::Constant { value, value_type } = &mut node.kind {
                                         let text = function_constant_text(value);
@@ -49,10 +50,6 @@ pub(super) fn function_node_editor_fields(
                                     }
                                 });
                             },
-                            {editable_value_type_options(
-                                &value_type,
-                                editable_value_type_key(&value_type).to_owned(),
-                            )}
                         }
                     }
                 }
@@ -60,94 +57,88 @@ pub(super) fn function_node_editor_fields(
         }
         FunctionNodeKind::Input { port_id } => rsx! {
             label { "输入端口"
-                select {
+                Select {
                     class: "aio-input",
                     aria_label: "输入端口",
                     value: "{port_id}",
-                    onchange: move |event: FormEvent| {
-                        if let Ok(port_id) = SymbolId::parse(&event.value()) {
+                    options: function.inputs.iter().map(|port| SelectItem::new(
+                        port.id.to_string(),
+                        format!("{} · {}", port.name, value_type_label(&port.value_type)),
+                    )).collect(),
+                    on_value_change: move |value: String| {
+                        if let Ok(port_id) = SymbolId::parse(&value) {
                             draft.with_mut(|node| node.kind = FunctionNodeKind::Input { port_id });
                         }
                     },
-                    for port in &function.inputs {
-                        option {
-                            value: "{port.id}",
-                            selected: port.id == port_id,
-                            "{port.name} · {value_type_label(&port.value_type)}"
-                        }
-                    }
                 }
             }
         },
         FunctionNodeKind::Output { port_id } => rsx! {
             label { "输出端口"
-                select {
+                Select {
                     class: "aio-input",
                     aria_label: "输出端口",
                     value: "{port_id}",
-                    onchange: move |event: FormEvent| {
-                        if let Ok(port_id) = SymbolId::parse(&event.value()) {
+                    options: function.outputs.iter().map(|port| SelectItem::new(
+                        port.id.to_string(),
+                        format!("{} · {}", port.name, value_type_label(&port.value_type)),
+                    )).collect(),
+                    on_value_change: move |value: String| {
+                        if let Ok(port_id) = SymbolId::parse(&value) {
                             draft.with_mut(|node| node.kind = FunctionNodeKind::Output { port_id });
                         }
                     },
-                    for port in &function.outputs {
-                        option {
-                            value: "{port.id}",
-                            selected: port.id == port_id,
-                            "{port.name} · {value_type_label(&port.value_type)}"
-                        }
-                    }
                 }
             }
         },
         FunctionNodeKind::Compare { operator } => rsx! {
             label { "比较操作"
-                select {
+                Select {
                     class: "aio-input",
                     aria_label: "比较操作",
                     value: compare_operator_key(operator),
-                    onchange: move |event: FormEvent| {
+                    options: compare_operator_options(),
+                    on_value_change: move |value: String| {
                         draft.with_mut(|node| {
                             node.kind = FunctionNodeKind::Compare {
-                                operator: compare_operator_from_key(&event.value()),
+                                operator: compare_operator_from_key(&value),
                             };
                         });
                     },
-                    {compare_operator_options(operator)}
                 }
             }
         },
         FunctionNodeKind::Boolean { operator } => rsx! {
             label { "布尔操作"
-                select {
+                Select {
                     class: "aio-input",
                     aria_label: "布尔操作",
                     value: boolean_operator_key(operator),
-                    onchange: move |event: FormEvent| {
+                    options: boolean_operator_options(),
+                    on_value_change: move |value: String| {
                         draft.with_mut(|node| {
                             node.kind = FunctionNodeKind::Boolean {
-                                operator: boolean_operator_from_key(&event.value()),
+                                operator: boolean_operator_from_key(&value),
                             };
                         });
                     },
-                    {boolean_operator_options(operator)}
                 }
             }
         },
         FunctionNodeKind::Math { operator } => rsx! {
             label { "数学操作"
-                select {
+                Select {
                     class: "aio-input",
                     aria_label: "数学操作",
                     value: math_operator_key(operator),
-                    onchange: move |event: FormEvent| {
+                    options: math_operator_options(),
+                    on_value_change: move |value: String| {
                         draft.with_mut(|node| {
                             node.kind = FunctionNodeKind::Math {
-                                operator: math_operator_from_key(&event.value()),
+                                operator: math_operator_from_key(&value),
                             };
                         });
                     },
-                    {math_operator_options(operator)}
                 }
             }
         },
@@ -157,12 +148,18 @@ pub(super) fn function_node_editor_fields(
         } => rsx! {
             div { class: "aio-definition-dialog__grid",
                 label { "函数体"
-                    select {
+                    Select {
                         class: "aio-input",
                         aria_label: "遍历函数体",
                         value: "{body_function_id}",
-                        onchange: move |event: FormEvent| {
-                            if let Ok(body_function_id) = SymbolId::parse(&event.value()) {
+                        options: functions.iter().filter(|item| item.id != function.id).map(|item| {
+                            SelectItem::new(
+                                item.id.to_string(),
+                                format!("{} · {}", item.title, item.name),
+                            )
+                        }).collect(),
+                        on_value_change: move |value: String| {
+                            if let Ok(body_function_id) = SymbolId::parse(&value) {
                                 draft.with_mut(|node| {
                                     if let FunctionNodeKind::ForEach { body_function_id: current, .. } = &mut node.kind {
                                         *current = body_function_id;
@@ -170,13 +167,6 @@ pub(super) fn function_node_editor_fields(
                                 });
                             }
                         },
-                        for item in functions.iter().filter(|item| item.id != function.id) {
-                            option {
-                                value: "{item.id}",
-                                selected: item.id == body_function_id,
-                                "{item.title} · {item.name}"
-                            }
-                        }
                     }
                 }
                 label { "最大项数"
@@ -207,24 +197,18 @@ pub(super) fn function_node_editor_fields(
             let kind_key = function_node_kind_key(&node.kind).to_owned();
             rsx! {
                 label { "数据模型"
-                    select {
+                    Select {
                         class: "aio-input",
                         aria_label: "节点数据模型",
                         value: "{model_id}",
-                        onchange: move |event: FormEvent| {
-                            if let Ok(model_id) = SymbolId::parse(&event.value()) {
+                        options: model_select_items(&models),
+                        on_value_change: move |value: String| {
+                            if let Ok(model_id) = SymbolId::parse(&value) {
                                 draft.with_mut(|node| {
                                     node.kind = function_record_node_kind(&kind_key, model_id);
                                 });
                             }
                         },
-                        for model in &models {
-                            option {
-                                value: "{model.id}",
-                                selected: model.id == model_id,
-                                "{model.title} · {model.name}"
-                            }
-                        }
                     }
                 }
             }
@@ -232,12 +216,13 @@ pub(super) fn function_node_editor_fields(
         FunctionNodeKind::QueryRecords { model_id, limit } => rsx! {
             div { class: "aio-definition-dialog__grid",
                 label { "数据模型"
-                    select {
+                    Select {
                         class: "aio-input",
                         aria_label: "查询数据模型",
                         value: "{model_id}",
-                        onchange: move |event: FormEvent| {
-                            if let Ok(model_id) = SymbolId::parse(&event.value()) {
+                        options: model_select_items(&models),
+                        on_value_change: move |value: String| {
+                            if let Ok(model_id) = SymbolId::parse(&value) {
                                 draft.with_mut(|node| {
                                     if let FunctionNodeKind::QueryRecords { model_id: current, .. } = &mut node.kind {
                                         *current = model_id;
@@ -245,13 +230,6 @@ pub(super) fn function_node_editor_fields(
                                 });
                             }
                         },
-                        for model in &models {
-                            option {
-                                value: "{model.id}",
-                                selected: model.id == model_id,
-                                "{model.title} · {model.name}"
-                            }
-                        }
                     }
                 }
                 label { "最大记录数"
@@ -277,22 +255,19 @@ pub(super) fn function_node_editor_fields(
         },
         FunctionNodeKind::Navigate { route_id } => rsx! {
             label { "目标路由"
-                select {
+                Select {
                     class: "aio-input",
                     aria_label: "节点目标路由",
                     value: "{route_id}",
-                    onchange: move |event: FormEvent| {
-                        if let Ok(route_id) = SymbolId::parse(&event.value()) {
+                    options: routes.iter().map(|route| SelectItem::new(
+                        route.id.to_string(),
+                        format!("{} · {}", route.path, route.name),
+                    )).collect(),
+                    on_value_change: move |value: String| {
+                        if let Ok(route_id) = SymbolId::parse(&value) {
                             draft.with_mut(|node| node.kind = FunctionNodeKind::Navigate { route_id });
                         }
                     },
-                    for route in &routes {
-                        option {
-                            value: "{route.id}",
-                            selected: route.id == route_id,
-                            "{route.path} · {route.name}"
-                        }
-                    }
                 }
             }
         },
@@ -320,18 +295,18 @@ pub(super) fn function_node_editor_fields(
         }
         FunctionNodeKind::Notify { level } => rsx! {
             label { "通知级别"
-                select {
+                Select {
                     class: "aio-input",
                     aria_label: "通知级别",
                     value: notification_level_key(level),
-                    onchange: move |event: FormEvent| {
+                    options: notification_level_options(),
+                    on_value_change: move |value: String| {
                         draft.with_mut(|node| {
                             node.kind = FunctionNodeKind::Notify {
-                                level: notification_level_from_key(&event.value()),
+                                level: notification_level_from_key(&value),
                             };
                         });
                     },
-                    {notification_level_options(level)}
                 }
             }
         },
@@ -376,7 +351,7 @@ pub(super) fn function_node_editor_fields(
                             aria_label: "选择能力",
                             value: capability_id,
                             options: capability_options,
-                            on_value_change: move |next_capability_id| {
+                            on_value_change: move |next_capability_id: String| {
                                 let next_operation = capabilities
                                     .capabilities
                                     .get(&next_capability_id)
@@ -401,7 +376,7 @@ pub(super) fn function_node_editor_fields(
                             aria_label: "选择能力操作",
                             value: operation,
                             options: operation_options,
-                            on_value_change: move |operation| {
+                            on_value_change: move |operation: String| {
                                 draft.with_mut(|node| {
                                     if let FunctionNodeKind::Capability { operation: current, .. } = &mut node.kind {
                                         *current = operation;
@@ -456,12 +431,17 @@ pub(super) fn function_node_editor_fields(
                             class: "aio-function-node-editor-row",
                             label {
                                 span { "目标字段" }
-                                select {
+                                Select {
                                     class: "aio-input",
                                     aria_label: "对象目标字段 {field_id}",
                                     value: "{field_id}",
-                                    onchange: move |event: FormEvent| {
-                                        let Ok(next_field_id) = SymbolId::parse(&event.value()) else {
+                                    options: field_options.iter().map(|(option_id, label)| {
+                                        SelectItem::new(option_id.to_string(), label).disabled(
+                                            *option_id != field_id && fields.contains_key(option_id),
+                                        )
+                                    }).collect(),
+                                    on_value_change: move |value: String| {
+                                        let Ok(next_field_id) = SymbolId::parse(&value) else {
                                             return;
                                         };
                                         draft.with_mut(|node| {
@@ -476,24 +456,17 @@ pub(super) fn function_node_editor_fields(
                                             }
                                         });
                                     },
-                                    for (option_id, label) in &field_options {
-                                        option {
-                                            value: "{option_id}",
-                                            selected: *option_id == field_id,
-                                            disabled: *option_id != field_id && fields.contains_key(option_id),
-                                            "{label}"
-                                        }
-                                    }
                                 }
                             }
                             label {
                                 span { "来源节点" }
-                                select {
+                                Select {
                                     class: "aio-input",
                                     aria_label: "对象来源节点 {field_id}",
                                     value: "{value_node_id}",
-                                    onchange: move |event: FormEvent| {
-                                        let Ok(next_node_id) = SymbolId::parse(&event.value()) else {
+                                    options: symbol_select_items(&reference_nodes),
+                                    on_value_change: move |value: String| {
+                                        let Ok(next_node_id) = SymbolId::parse(&value) else {
                                             return;
                                         };
                                         draft.with_mut(|node| {
@@ -504,9 +477,6 @@ pub(super) fn function_node_editor_fields(
                                             }
                                         });
                                     },
-                                    for (option_id, label) in &reference_nodes {
-                                        option { value: "{option_id}", selected: *option_id == value_node_id, "{label}" }
-                                    }
                                 }
                             }
                             Button {
@@ -563,12 +533,13 @@ pub(super) fn function_node_editor_fields(
                             class: "aio-function-node-editor-row aio-function-node-editor-row--single",
                             label {
                                 span { "元素 {index + 1}" }
-                                select {
+                                Select {
                                     class: "aio-input",
                                     aria_label: "列表元素节点 {index}",
                                     value: "{item_node_id}",
-                                    onchange: move |event: FormEvent| {
-                                        let Ok(next_node_id) = SymbolId::parse(&event.value()) else {
+                                    options: symbol_select_items(&reference_nodes),
+                                    on_value_change: move |value: String| {
+                                        let Ok(next_node_id) = SymbolId::parse(&value) else {
                                             return;
                                         };
                                         draft.with_mut(|node| {
@@ -579,9 +550,6 @@ pub(super) fn function_node_editor_fields(
                                             }
                                         });
                                     },
-                                    for (option_id, label) in &reference_nodes {
-                                        option { value: "{option_id}", selected: *option_id == item_node_id, "{label}" }
-                                    }
                                 }
                             }
                             Button {
@@ -608,12 +576,13 @@ pub(super) fn function_node_editor_fields(
             div { class: "aio-definition-dialog__grid",
                 label {
                     span { "对象节点" }
-                    select {
+                    Select {
                         class: "aio-input",
                         aria_label: "字段读取对象节点",
                         value: "{object}",
-                        onchange: move |event: FormEvent| {
-                            let Ok(object) = SymbolId::parse(&event.value()) else {
+                        options: symbol_select_items(&reference_nodes),
+                        on_value_change: move |value: String| {
+                            let Ok(object) = SymbolId::parse(&value) else {
                                 return;
                             };
                             draft.with_mut(|node| {
@@ -622,19 +591,17 @@ pub(super) fn function_node_editor_fields(
                                 }
                             });
                         },
-                        for (option_id, label) in &reference_nodes {
-                            option { value: "{option_id}", selected: *option_id == object, "{label}" }
-                        }
                     }
                 }
                 label {
                     span { "读取字段" }
-                    select {
+                    Select {
                         class: "aio-input",
                         aria_label: "字段读取目标字段",
                         value: "{field_id}",
-                        onchange: move |event: FormEvent| {
-                            let Ok(field_id) = SymbolId::parse(&event.value()) else {
+                        options: symbol_select_items(&field_options),
+                        on_value_change: move |value: String| {
+                            let Ok(field_id) = SymbolId::parse(&value) else {
                                 return;
                             };
                             draft.with_mut(|node| {
@@ -643,9 +610,6 @@ pub(super) fn function_node_editor_fields(
                                 }
                             });
                         },
-                        for (option_id, label) in &field_options {
-                            option { value: "{option_id}", selected: *option_id == field_id, "{label}" }
-                        }
                     }
                 }
             }
@@ -704,12 +668,13 @@ pub(super) fn function_node_editor_fields(
                                 class: "aio-function-node-editor-row aio-function-node-editor-row--single",
                                 label {
                                     span { "参数 {index}" }
-                                    select {
+                                    Select {
                                         class: "aio-input",
                                         aria_label: "格式化参数节点 {index}",
                                         value: "{value_node_id}",
-                                        onchange: move |event: FormEvent| {
-                                            let Ok(next_node_id) = SymbolId::parse(&event.value()) else {
+                                        options: symbol_select_items(&reference_nodes),
+                                        on_value_change: move |value: String| {
+                                            let Ok(next_node_id) = SymbolId::parse(&value) else {
                                                 return;
                                             };
                                             draft.with_mut(|node| {
@@ -720,9 +685,6 @@ pub(super) fn function_node_editor_fields(
                                                 }
                                             });
                                         },
-                                        for (option_id, label) in &reference_nodes {
-                                            option { value: "{option_id}", selected: *option_id == value_node_id, "{label}" }
-                                        }
                                     }
                                 }
                                 Button {
@@ -753,4 +715,23 @@ pub(super) fn function_node_editor_fields(
             p { class: "aio-definition-dialog__empty-state", "无需附加参数" }
         },
     }
+}
+
+fn symbol_select_items(options: &[(SymbolId, String)]) -> Vec<SelectItem> {
+    options
+        .iter()
+        .map(|(id, label)| SelectItem::new(id.to_string(), label))
+        .collect()
+}
+
+fn model_select_items(models: &[ModelDefinition]) -> Vec<SelectItem> {
+    models
+        .iter()
+        .map(|model| {
+            SelectItem::new(
+                model.id.to_string(),
+                format!("{} · {}", model.title, model.name),
+            )
+        })
+        .collect()
 }

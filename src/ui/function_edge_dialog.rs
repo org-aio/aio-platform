@@ -118,25 +118,27 @@ pub(super) fn FunctionEdgeDialog(
             },
                 div { class: "aio-definition-dialog__grid",
                     label { "起点节点"
-                        select {
+                        Select {
                             class: "aio-input",
                             aria_label: "连线起点节点",
                             value: from_node_id(),
-                            onchange: move |event: FormEvent| from_node_id.set(event.value()),
-                            for node in &function.graph.nodes {
-                                option { value: "{node.id}", "{node.name} · {function_node_kind_title(&node.kind)}" }
-                            }
+                            options: function.graph.nodes.iter().map(|node| SelectItem::new(
+                                node.id.to_string(),
+                                format!("{} · {}", node.name, function_node_kind_title(&node.kind)),
+                            )).collect(),
+                            on_value_change: move |value: String| from_node_id.set(value),
                         }
                     }
                     label { "终点节点"
-                        select {
+                        Select {
                             class: "aio-input",
                             aria_label: "连线终点节点",
                             value: to_node_id(),
-                            onchange: move |event: FormEvent| to_node_id.set(event.value()),
-                            for node in &function.graph.nodes {
-                                option { value: "{node.id}", "{node.name} · {function_node_kind_title(&node.kind)}" }
-                            }
+                            options: function.graph.nodes.iter().map(|node| SelectItem::new(
+                                node.id.to_string(),
+                                format!("{} · {}", node.name, function_node_kind_title(&node.kind)),
+                            )).collect(),
+                            on_value_change: move |value: String| to_node_id.set(value),
                         }
                     }
                 }
