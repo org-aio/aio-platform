@@ -43,7 +43,7 @@ fn generates_service_and_controller_without_string_plugin_identity() -> Result<(
     let result = manager.reconcile(&definition())?;
     let module = root.join("lib/biz/example-app");
     let controller = fs::read_to_string(module.join("src/generated/orders/controller.rs"))?;
-    let contract = fs::read_to_string(module.join("src/generated/orders/contract.rs"))?;
+    let contract = fs::read_to_string(module.join("src/generated/orders/service.rs"))?;
     let manifest = fs::read_to_string(module.join("Cargo.toml"))?;
 
     assert!(controller.contains("ConventionEndpointProvider"));
@@ -57,11 +57,18 @@ fn generates_service_and_controller_without_string_plugin_identity() -> Result<(
     assert!(!manifest.contains("derive_more"));
     assert!(!manifest.contains("serde_json"));
     assert!(contract.contains("trait OrdersService"));
+    assert!(
+        fs::read_to_string(module.join("src/generated/orders/model.rs"))?
+            .contains("EndpointRequest")
+    );
+    assert!(
+        fs::read_to_string(module.join("src/generated/orders/util.rs"))?.contains("endpoint_id")
+    );
     assert!(!contract.contains("std::fmt::Debug"));
     assert!(!contract.contains("Debug + Send + Sync"));
     assert_eq!(result.created_service_implementations.len(), 1);
 
-    let implementation = module.join("src/service/orders.rs");
+    let implementation = module.join("src/generated/orders/service_impl.rs");
     let legacy_implementation = fs::read_to_string(&implementation)?
         .replace(SERVICE_STUB_COMMENT, "")
         .replace("提交订单尚未实现", "旧提示尚未实现");
@@ -75,11 +82,8 @@ fn generates_service_and_controller_without_string_plugin_identity() -> Result<(
     assert!(fs::read_to_string(&implementation)?.starts_with(SERVICE_STUB_COMMENT));
 
     fs::write(&implementation, "// 人工实现\n")?;
-    let stale_generated_service = module.join("src/generated/orders/service.rs");
-    fs::write(&stale_generated_service, "// 失效生成文件\n")?;
     manager.reconcile(&definition())?;
     assert_eq!(fs::read_to_string(implementation)?, "// 人工实现\n");
-    assert!(!stale_generated_service.exists());
     fs::remove_dir_all(root)?;
     Ok(())
 }
@@ -93,7 +97,7 @@ fn removes_generated_page_and_untouched_service_stub_when_metadata_is_deleted() 
 
     let module = root.join("lib/biz/example-app");
     let generated_page = module.join("src/generated/orders");
-    let service_implementation = module.join("src/service/orders.rs");
+    let service_implementation = module.join("src/generated/orders/service_impl.rs");
     assert!(generated_page.is_dir());
     assert!(service_implementation.is_file());
 
@@ -114,7 +118,7 @@ fn preserves_modified_service_implementation_when_metadata_is_deleted() -> Resul
     manager.reconcile(&definition)?;
 
     let module = root.join("lib/biz/example-app");
-    let service_implementation = module.join("src/service/orders.rs");
+    let service_implementation = module.join("src/generated/orders/service_impl.rs");
     fs::write(&service_implementation, "// 人工实现\n")?;
 
     definition.pages[0].endpoints.clear();
@@ -136,7 +140,7 @@ fn repeated_reconcile_does_not_rewrite_unchanged_generated_files() -> Result<()>
     let tracked = [
         module.join(GENERATED_MARKER),
         module.join("src/generated/orders/controller.rs"),
-        module.join("src/service/orders.rs"),
+        module.join("src/generated/orders/service_impl.rs"),
         module.join(SERVICE_STUB_MANIFEST),
     ];
     let modified_before = tracked

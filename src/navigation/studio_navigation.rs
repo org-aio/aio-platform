@@ -400,5 +400,5 @@ fn menu_references_page_outside(
 }
 
 #[cfg(test)]
-#[path = "studio_navigation_tests.rs"]
+#[path = "tests.rs"]
 mod tests;

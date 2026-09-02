@@ -404,7 +404,7 @@ impl ProgramStore {
     }
 }
 
-include!("program_store_lifecycle.rs");
+include!("store_lifecycle.rs");
 
 async fn reconcile_expression_indexes(
     transaction: &mut Transaction<'_, Postgres>,

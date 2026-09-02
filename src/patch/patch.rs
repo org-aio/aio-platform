@@ -602,7 +602,7 @@ impl ProgramDefinition {
     }
 }
 
-include!("patch_properties.rs");
+include!("properties.rs");
 
 fn ensure_studio_insertable(entity: &GraphEntity) -> Result<(), PatchError> {
     let contains_reserved_id = match entity {
@@ -713,5 +713,5 @@ fn take_menu_from(values: &mut Vec<MenuDefinition>, target: SymbolId) -> Option<
 }
 
 #[cfg(test)]
-#[path = "patch_tests.rs"]
+#[path = "tests.rs"]
 mod tests;

@@ -641,15 +641,15 @@ impl<'a> ProgramCompiler<'a> {
     }
 }
 
-include!("compiler_pipeline.rs");
+include!("pipeline.rs");
 
-include!("compiler_model_validation.rs");
+include!("model_validation.rs");
 
-include!("compiler_page_lowering.rs");
+include!("page_lowering.rs");
 
-include!("compiler_reference_validation.rs");
+include!("reference_validation.rs");
 
-include!("compiler_function_lowering.rs");
+include!("function_lowering.rs");
 
 pub fn content_hash(definition: &ProgramDefinition) -> Result<String> {
     let bytes = serde_json::to_vec(definition)?;
@@ -658,7 +658,7 @@ pub fn content_hash(definition: &ProgramDefinition) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    include!("compiler_tests.rs");
+    include!("tests.rs");
 
     #[test]
     fn content_hash_is_deterministic() -> anyhow::Result<()> {

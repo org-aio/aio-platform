@@ -487,8 +487,8 @@ fn MetadataTablePage(
     }
 }
 
-include!("runtime_endpoint_form.rs");
+include!("endpoint_form.rs");
 
-include!("runtime_record_dialog.rs");
+include!("record_dialog.rs");
 
-include!("runtime_table_support.rs");
+include!("table_support.rs");

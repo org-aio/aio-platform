@@ -561,7 +561,7 @@ pub enum ValueType {
     Optional { value: Box<ValueType> },
 }
 
-include!("definition_pages.rs");
+include!("pages.rs");
 
 /// Capability 目录是编译期链接白名单，不包含可执行实现。
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]

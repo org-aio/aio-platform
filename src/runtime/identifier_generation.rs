@@ -346,17 +346,17 @@ mod tests {
     #[test]
     fn studio_ui_does_not_accept_manual_identifiers() {
         let sources = [
-            include_str!("ui/model_panel.rs"),
-            include_str!("ui/field_dialog.rs"),
-            include_str!("ui/query_dialog.rs"),
-            include_str!("ui/function_definition_dialog.rs"),
-            include_str!("ui/function_node_dialog.rs"),
-            include_str!("ui/function_node_fields.rs"),
-            include_str!("ui/function_edge_dialog.rs"),
-            include_str!("ui/endpoint_editor.rs"),
-            include_str!("ui/page_dialog.rs"),
-            include_str!("ui/menu_dialog.rs"),
-            include_str!("ui/permission_panel.rs"),
+            include_str!("../ui/model_panel.rs"),
+            include_str!("../ui/field_dialog.rs"),
+            include_str!("../ui/query_dialog.rs"),
+            include_str!("../ui/function_definition_dialog.rs"),
+            include_str!("../ui/function_node_dialog.rs"),
+            include_str!("../ui/function_node_fields.rs"),
+            include_str!("../ui/function_edge_dialog.rs"),
+            include_str!("../ui/endpoint_editor.rs"),
+            include_str!("../ui/page_dialog.rs"),
+            include_str!("../ui/menu_dialog.rs"),
+            include_str!("../ui/permission_panel.rs"),
         ]
         .join("\n");
         for forbidden in [

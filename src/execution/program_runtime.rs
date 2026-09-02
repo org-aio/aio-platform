@@ -757,5 +757,5 @@ fn record_id(value: &Value) -> Result<&str> {
 }
 
 #[cfg(test)]
-#[path = "program_runtime_tests.rs"]
+#[path = "runtime_tests.rs"]
 mod tests;

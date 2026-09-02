@@ -12,14 +12,14 @@ use sha2::{Digest, Sha256};
 
 use crate::{PageDefinition, PageEndpointDefinition, ProgramDefinition, RestMethod};
 
-#[path = "business_module_source_format.rs"]
+#[path = "source_format.rs"]
 mod business_module_source_format;
 use business_module_source_format::write_rust_source_if_changed;
 
 const GENERATED_MARKER: &str = ".aio-generated";
 const SERVICE_STUB_MANIFEST: &str = "src/generated/service-stubs.json";
 const SERVICE_STUB_COMMENT: &str =
-    "// AIO 根据元数据生成的 Service 骨架；内容修改后自动转为人工所有。\n";
+    "// AIO 根据元数据生成的 Service 实现起点；内容修改后自动转为人工所有。\n";
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct ServiceStubManifest {
@@ -71,8 +71,6 @@ impl BusinessModuleManager {
         }
         fs::create_dir_all(module_dir.join("src/generated"))
             .context("创建业务模块 generated 目录失败")?;
-        fs::create_dir_all(module_dir.join("src/service"))
-            .context("创建业务模块 service 目录失败")?;
         write_if_changed(
             &module_dir.join(GENERATED_MARKER),
             format!("application = {}\n", definition.name).as_bytes(),
@@ -100,23 +98,17 @@ impl BusinessModuleManager {
             &generated_mod_source(&pages),
             &mut result,
         )?;
-        write_generated(
-            &module_dir,
-            "src/service/mod.rs",
-            &service_mod_source(&pages),
-            &mut result,
-        )?;
 
         let expected_page_modules = pages
             .iter()
             .map(|page| rust_identifier(&page.name))
             .collect::<BTreeSet<_>>();
-        remove_stale_generated_pages(&module_dir, &expected_page_modules)?;
         let expected_service_paths = expected_page_modules
             .iter()
-            .map(|module_name| format!("src/service/{module_name}.rs"))
+            .map(|module_name| format!("src/generated/{module_name}/service_impl.rs"))
             .collect::<BTreeSet<_>>();
         let mut service_stub_manifest = load_service_stub_manifest(&module_dir)?;
+        remove_stale_generated_pages(&module_dir, &expected_page_modules, &service_stub_manifest)?;
         remove_stale_service_stubs(
             &module_dir,
             &expected_service_paths,
@@ -134,7 +126,7 @@ impl BusinessModuleManager {
             )?;
             write_generated(
                 &module_dir,
-                &format!("{page_dir}/contract.rs"),
+                &format!("{page_dir}/service.rs"),
                 &service_contract_source(page),
                 &mut result,
             )?;
@@ -144,9 +136,20 @@ impl BusinessModuleManager {
                 &controller_source(page),
                 &mut result,
             )?;
-            remove_stale_generated_page_files(&module_dir, &page_dir)?;
+            write_generated(
+                &module_dir,
+                &format!("{page_dir}/model.rs"),
+                &model_source(),
+                &mut result,
+            )?;
+            write_generated(
+                &module_dir,
+                &format!("{page_dir}/util.rs"),
+                &util_source(),
+                &mut result,
+            )?;
 
-            let implementation_relative = format!("src/service/{module_name}.rs");
+            let implementation_relative = format!("{page_dir}/service_impl.rs");
             let implementation_path = module_dir.join(&implementation_relative);
             let implementation_source = service_implementation_source(page);
             let implementation_exists = implementation_path.exists();
@@ -156,11 +159,12 @@ impl BusinessModuleManager {
                 &implementation_source,
                 &mut service_stub_manifest,
             )? {
-                if write_rust_source_if_changed(&implementation_path, &implementation_source)? {
-                    result
-                        .changed_rust_sources
-                        .insert(implementation_relative.clone());
-                }
+                write_generated(
+                    &module_dir,
+                    &implementation_relative,
+                    &implementation_source,
+                    &mut result,
+                )?;
                 owned_service_stubs.insert(implementation_relative.clone());
             }
             if !implementation_exists {
@@ -168,6 +172,7 @@ impl BusinessModuleManager {
                     .created_service_implementations
                     .push(implementation_relative);
             }
+            remove_stale_generated_page_files(&module_dir, &page_dir)?;
         }
         update_service_stub_manifest(
             &module_dir,
@@ -278,19 +283,29 @@ fn source_hash(source: &[u8]) -> String {
 }
 
 fn service_stub_shape(source: &str) -> String {
-    let mut shape = source
-        .lines()
-        .filter(|line| !line.starts_with(SERVICE_STUB_COMMENT.trim()))
-        .map(|line| {
-            let line = line.trim();
-            if line.starts_with("bail!(") {
-                return "bail!(...)".to_owned();
-            }
-            line.chars()
-                .filter(|character| !character.is_whitespace())
-                .collect::<String>()
-        })
-        .collect::<String>();
+    let mut imports = Vec::new();
+    let mut body = String::new();
+    for line in source.lines() {
+        if line.starts_with(SERVICE_STUB_COMMENT.trim()) {
+            continue;
+        }
+        let line = line.trim();
+        if line.starts_with("use ") {
+            imports.push(line.to_owned());
+        } else if line.starts_with("bail!(") {
+            body.push_str("bail!(...)");
+        } else {
+            body.push_str(
+                &line
+                    .chars()
+                    .filter(|character| !character.is_whitespace())
+                    .collect::<String>(),
+            );
+        }
+    }
+    imports.sort();
+    let mut shape = imports.concat();
+    shape.push_str(&body);
     while shape.contains(",)") {
         shape = shape.replace(",)", ")");
     }
@@ -334,7 +349,11 @@ fn write_if_changed(path: &Path, source: &[u8]) -> Result<bool> {
     Ok(true)
 }
 
-fn remove_stale_generated_pages(module_dir: &Path, expected: &BTreeSet<String>) -> Result<()> {
+fn remove_stale_generated_pages(
+    module_dir: &Path,
+    expected: &BTreeSet<String>,
+    manifest: &ServiceStubManifest,
+) -> Result<()> {
     let generated_dir = module_dir.join("src/generated");
     for entry in fs::read_dir(&generated_dir).context("读取 generated 目录失败")? {
         let entry = entry.context("读取 generated 目录项失败")?;
@@ -354,15 +373,57 @@ fn remove_stale_generated_pages(module_dir: &Path, expected: &BTreeSet<String>) 
             path.parent() == Some(generated_dir.as_path()),
             "失效生成目录越界"
         );
+        let implementation_relative = format!("src/generated/{module_name}/service_impl.rs");
+        let implementation_path = path.join("service_impl.rs");
+        let preserve_manual_implementation = !implementation_path.is_file()
+            || manifest
+                .files
+                .get(&implementation_relative)
+                .is_none_or(|expected_hash| {
+                    fs::read(&implementation_path)
+                        .is_ok_and(|source| source_hash(&source) != *expected_hash)
+                });
+        if preserve_manual_implementation {
+            remove_generated_page_except_service_impl(&path)?;
+            continue;
+        }
         fs::remove_dir_all(path).context("删除失效生成页面目录失败")?;
     }
     Ok(())
 }
 
+fn remove_generated_page_except_service_impl(page_dir: &Path) -> Result<()> {
+    for entry in fs::read_dir(page_dir).context("读取生成页面目录失败")? {
+        let entry = entry.context("读取生成页面文件失败")?;
+        if !entry
+            .file_type()
+            .context("读取生成页面文件类型失败")?
+            .is_file()
+        {
+            continue;
+        }
+        if entry.file_name() == "service_impl.rs" {
+            continue;
+        }
+        fs::remove_file(entry.path()).context("删除失效生成文件失败")?;
+    }
+    Ok(())
+}
+
 fn remove_stale_generated_page_files(module_dir: &Path, page_dir: &str) -> Result<()> {
-    const EXPECTED_FILES: &[&str] = &["contract.rs", "controller.rs", "mod.rs"];
+    const EXPECTED_FILES: &[&str] = &[
+        "controller.rs",
+        "mod.rs",
+        "model.rs",
+        "service.rs",
+        "service_impl.rs",
+        "util.rs",
+    ];
 
     let page_dir = module_dir.join(page_dir);
+    if !page_dir.is_dir() {
+        return Ok(());
+    }
     for entry in fs::read_dir(&page_dir).context("读取生成页面目录失败")? {
         let entry = entry.context("读取生成页面文件失败")?;
         if !entry
@@ -413,7 +474,6 @@ fn lib_source() -> String {
     r#"#![forbid(unsafe_code)]
 
 mod generated;
-mod service;
 
 pub use generated::{ENDPOINT_COUNT, register};
 "#
@@ -447,48 +507,52 @@ fn generated_mod_source(pages: &[&PageDefinition]) -> String {
     source
 }
 
-fn service_mod_source(pages: &[&PageDefinition]) -> String {
-    let mut source = String::new();
-    let modules = pages
-        .iter()
-        .map(|page| rust_identifier(&page.name))
-        .collect::<BTreeSet<_>>();
-    for module in modules {
-        let _ = writeln!(source, "pub(crate) mod {module};");
-    }
-    source
-}
-
 fn page_mod_source(page: &PageDefinition) -> String {
-    let service_module = rust_identifier(&page.name);
-    let service_impl = format!("{}Impl", service_trait_name(page));
     format!(
         r#"mod controller;
-pub(crate) mod contract;
+pub(crate) mod model;
+pub(crate) mod service;
+mod service_impl;
+pub(crate) mod util;
 
 use dill::CatalogBuilder;
 
 pub(crate) fn register(builder: &mut CatalogBuilder) {{
-    builder.add::<crate::service::{service_module}::{service_impl}>();
+    builder.add::<service_impl::{}>();
     controller::register(builder);
 }}
-"#
+"#,
+        format!("{}Impl", service_trait_name(page))
     )
+}
+
+fn model_source() -> String {
+    r#"pub(crate) type EndpointRequest = studio::ConventionEndpointRequest;
+pub(crate) type EndpointFuture<'a> = studio::ConventionEndpointFuture<'a>;
+"#
+    .to_owned()
+}
+
+fn util_source() -> String {
+    r#"pub(crate) const fn endpoint_id(value: &'static str) -> &'static str {
+    value
+}
+"#
+    .to_owned()
 }
 
 fn service_contract_source(page: &PageDefinition) -> String {
     let service_name = service_trait_name(page);
     let methods = endpoint_methods(page);
-    let mut source =
-        String::from("use studio::{ConventionEndpointFuture, ConventionEndpointRequest};\n\n");
+    let mut source = String::from("use super::model::{EndpointFuture, EndpointRequest};\n\n");
     let _ = writeln!(source, "/// {} 领域服务契约。", page.title);
-    let _ = writeln!(source, "pub trait {service_name}: Send + Sync {{");
+    let _ = writeln!(source, "pub(crate) trait {service_name}: Send + Sync {{");
     for (method_name, endpoint) in methods {
         let _ = writeln!(source, "    /// {}", endpoint.title);
         let _ = writeln!(source, "    fn {method_name}(");
         source.push_str("        &self,\n");
-        source.push_str("        request: ConventionEndpointRequest,\n");
-        source.push_str("    ) -> ConventionEndpointFuture<'_>;\n");
+        source.push_str("        request: EndpointRequest,\n");
+        source.push_str("    ) -> EndpointFuture<'_>;\n");
     }
     source.push_str("}\n");
     source
@@ -519,9 +583,10 @@ fn controller_source(page: &PageDefinition) -> String {
         r#"use std::sync::Arc;
 
 use dill::CatalogBuilder;
-use studio::{{ConventionEndpointFuture, ConventionEndpointProvider, ConventionEndpointRequest}};
+use studio::ConventionEndpointProvider;
 
-use super::contract::{service_name};
+use super::model::{{EndpointFuture, EndpointRequest}};
+use super::service::{service_name};
 
 {controllers}
 pub(crate) fn register(builder: &mut CatalogBuilder) {{
@@ -552,7 +617,7 @@ impl ConventionEndpointProvider for {controller_name} {{
         {endpoint_id}
     }}
 
-    fn handle(&self, request: ConventionEndpointRequest) -> ConventionEndpointFuture<'_> {{
+    fn handle(&self, request: EndpointRequest) -> EndpointFuture<'_> {{
         self.service.{method_name}(request)
     }}
 }}
@@ -563,10 +628,9 @@ impl ConventionEndpointProvider for {controller_name} {{
 fn service_implementation_source(page: &PageDefinition) -> String {
     let service_name = service_trait_name(page);
     let implementation_name = format!("{service_name}Impl");
-    let generated_module = rust_identifier(&page.name);
     let methods = endpoint_methods(page);
     let mut source = format!(
-        "{SERVICE_STUB_COMMENT}use anyhow::bail;\nuse studio::{{ConventionEndpointFuture, ConventionEndpointRequest}};\n\nuse crate::generated::{generated_module}::contract::{service_name};\n\n"
+        "{SERVICE_STUB_COMMENT}use anyhow::bail;\nuse super::model::{{EndpointFuture, EndpointRequest}};\nuse super::service::{service_name};\n\n"
     );
     source.push_str("#[dill::component]\n");
     let _ = writeln!(source, "#[dill::interface(dyn {service_name})]");
@@ -577,8 +641,8 @@ fn service_implementation_source(page: &PageDefinition) -> String {
     for (method_name, endpoint) in methods {
         let _ = writeln!(source, "    fn {method_name}(");
         source.push_str("        &self,\n");
-        source.push_str("        request: ConventionEndpointRequest,\n");
-        source.push_str("    ) -> ConventionEndpointFuture<'_> {\n");
+        source.push_str("        request: EndpointRequest,\n");
+        source.push_str("    ) -> EndpointFuture<'_> {\n");
         source.push_str("        Box::pin(async move {\n");
         source.push_str("            let _ = request;\n");
         let _ = writeln!(
@@ -742,5 +806,5 @@ fn is_rust_keyword(value: &str) -> bool {
 }
 
 #[cfg(test)]
-#[path = "business_module_tests.rs"]
+#[path = "tests.rs"]
 mod tests;
