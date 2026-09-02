@@ -2,13 +2,14 @@
 
 use std::{convert::Infallible, sync::Arc};
 
+use crate::studio_contract::StudioPage as StudioPageData;
 use crate::{
     ApplicationBundle, ApplicationCompiler, ApplicationGenerationResult, ApplicationWorkspace,
     BusinessModuleManager, DraftSnapshot, FormStateExtractionRequest, FormStateExtractionResponse,
     FormStateExtractor, GraphPatchBatch, PatchOrigin, ProgramDefinition, ProgramPatchAgent,
     RevisionSnapshot, RuntimeRecordCriteria, RuntimeRecordInput, RuntimeRecordPage,
-    RuntimeRecordView, StudioPage, StudioPageParams, VibeMessageInput, VibeRunAccepted,
-    VibeRunRequest, VibeSessionSnapshot,
+    RuntimeRecordView, StudioPageParams, VibeMessageInput, VibeRunAccepted, VibeRunRequest,
+    VibeSessionSnapshot,
     program_runtime::{ProgramActivationEvent, ProgramRuntime},
     program_store::DraftVersionConflict,
 };
@@ -119,7 +120,6 @@ async fn extract_form_state(
     let runtime = state.runtime()?;
     let image = runtime
         .image()
-        .await
         .ok_or_else(|| ApiError::not_found("活动 ProgramImage 不存在"))?;
     let model = image
         .image()
@@ -310,7 +310,7 @@ fn parse_symbol_id(value: &str) -> Result<crate::SymbolId, ApiError> {
 async fn list_revisions(
     State(state): State<StudioState>,
     ApiQuery(query): ApiQuery<PaginationQuery>,
-) -> Result<Json<ApiResponse<StudioPage<RevisionSnapshot>>>, ApiError> {
+) -> Result<Json<ApiResponse<StudioPageData<RevisionSnapshot>>>, ApiError> {
     let runtime = state.runtime()?;
     let program_id = runtime.store().program().await.map_err(ApiError::from)?.id;
     runtime
@@ -373,7 +373,6 @@ async fn runtime_image(
     let runtime = state.runtime()?;
     let image = runtime
         .image()
-        .await
         .ok_or_else(|| ApiError::not_found("活动 ProgramImage 不存在"))?;
     Ok(ok_json(image.image().clone()))
 }
@@ -420,7 +419,6 @@ async fn generate_application(
         .map_err(ApiError::from)?;
     let image = runtime
         .image()
-        .await
         .ok_or_else(|| ApiError::not_found("活动 ProgramImage 不存在"))?;
     let revision = runtime
         .store()

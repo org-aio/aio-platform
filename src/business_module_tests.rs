@@ -44,15 +44,18 @@ fn generates_service_and_controller_without_string_plugin_identity() -> Result<(
     let module = root.join("lib/biz/example-app");
     let controller = fs::read_to_string(module.join("src/generated/orders/controller.rs"))?;
     let contract = fs::read_to_string(module.join("src/generated/orders/contract.rs"))?;
+    let manifest = fs::read_to_string(module.join("Cargo.toml"))?;
 
     assert!(controller.contains("ConventionEndpointProvider"));
     assert!(controller.contains("#[dill::component]"));
-    assert!(controller.contains("#[derive(derive_more::Debug)]"));
-    assert!(controller.contains("#[debug(skip)]"));
+    assert!(!controller.contains("derive_more::Debug"));
+    assert!(!controller.contains("fn comment"));
     assert!(controller.contains("self.service.post_submit(request)"));
     assert!(!controller.contains("fn key"));
     assert!(!controller.contains("fn name"));
     assert!(!controller.contains("module_path!"));
+    assert!(!manifest.contains("derive_more"));
+    assert!(!manifest.contains("serde_json"));
     assert!(contract.contains("trait OrdersService"));
     assert!(!contract.contains("std::fmt::Debug"));
     assert!(!contract.contains("Debug + Send + Sync"));

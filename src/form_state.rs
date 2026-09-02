@@ -1,6 +1,6 @@
-use std::{env, fmt};
+use std::fmt;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use rig::{
     client::CompletionClient,
     completion::{Completion, ToolDefinition},
@@ -10,21 +10,11 @@ use rig::{
 };
 use serde_json::{Map, Value, json};
 
-use crate::{CompiledModel, FormStateExtractionResponse, ValueType};
-
-const DEFAULT_API_BASE: &str = "https://api.openai.com/v1";
-const DEFAULT_MODEL: &str = "gpt-5.5";
+use crate::{CompiledModel, FormStateExtractionResponse, ValueType, agent_config};
 
 #[derive(Clone, Debug, Default)]
 pub struct FormStateExtractor {
-    config: Option<FormStateAgentConfig>,
-}
-
-#[derive(Clone, Debug)]
-struct FormStateAgentConfig {
-    api_key: String,
-    api_base: String,
-    model: String,
+    config: Option<agent_config::AgentConfig>,
 }
 
 #[derive(Clone)]
@@ -46,20 +36,8 @@ impl std::error::Error for FormStateValidationError {}
 
 impl FormStateExtractor {
     pub fn from_env() -> Result<Self> {
-        let Some(api_key) = first_env(["OPENAI_API_KEY", "API_KEY"]) else {
-            return Ok(Self { config: None });
-        };
-        let api_base = first_env(["OPENAI_BASE_URL", "OPENAI_BASEURL", "API_BASEURL"])
-            .unwrap_or_else(|| DEFAULT_API_BASE.to_owned());
-        let api_base = normalize_api_base(&api_base)?;
-        let model = first_env(["AZ_AIO_FORM_STATE_MODEL", "OPENAI_MODEL"])
-            .unwrap_or_else(|| DEFAULT_MODEL.to_owned());
         Ok(Self {
-            config: Some(FormStateAgentConfig {
-                api_key,
-                api_base,
-                model,
-            }),
+            config: agent_config::from_env(&["AZ_AIO_FORM_STATE_MODEL", "OPENAI_MODEL"])?,
         })
     }
 
@@ -338,23 +316,6 @@ fn value_matches_type(value_type: &ValueType, value: &Value) -> bool {
         ValueType::List { .. } => value.is_array(),
         ValueType::Optional { value: inner } => value_matches_type(inner, value),
     }
-}
-
-fn first_env<const N: usize>(names: [&str; N]) -> Option<String> {
-    names.into_iter().find_map(|name| {
-        env::var(name)
-            .ok()
-            .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty())
-    })
-}
-
-fn normalize_api_base(value: &str) -> Result<String> {
-    let value = value.trim().trim_end_matches('/');
-    if !value.starts_with("https://") && !value.starts_with("http://") {
-        bail!("OPENAI_BASE_URL 必须是 HTTP(S) URL");
-    }
-    Ok(value.to_owned())
 }
 
 fn versioned_api_base(value: &str) -> String {

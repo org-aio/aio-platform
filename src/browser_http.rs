@@ -33,14 +33,6 @@ where
     send_json("PATCH", api_base_url, path, input).await
 }
 
-pub async fn put_api<I, O>(api_base_url: &str, path: &str, input: &I) -> Result<O, String>
-where
-    I: Serialize + ?Sized,
-    O: DeserializeOwned,
-{
-    send_json("PUT", api_base_url, path, input).await
-}
-
 pub async fn delete_api<O>(api_base_url: &str, path: &str) -> Result<O, String>
 where
     O: DeserializeOwned,
@@ -206,52 +198,6 @@ async fn sleep_ms_platform(milliseconds: u32) {
 #[cfg(not(target_arch = "wasm32"))]
 async fn sleep_ms_platform(milliseconds: u32) {
     tokio::time::sleep(std::time::Duration::from_millis(u64::from(milliseconds))).await;
-}
-
-pub fn format_unix_timestamp(value: &str) -> String {
-    let value = value.trim();
-    if value.is_empty() {
-        return String::new();
-    }
-    let value = value.strip_prefix("unix:").unwrap_or(value);
-    let Ok(seconds) = value.parse::<i64>() else {
-        return value.to_string();
-    };
-    format_timestamp(seconds.saturating_mul(1_000))
-}
-
-pub fn format_millis_timestamp(value: i64) -> String {
-    if value <= 0 {
-        return String::new();
-    }
-    format_timestamp(value)
-}
-
-#[cfg(target_arch = "wasm32")]
-fn format_timestamp(milliseconds: i64) -> String {
-    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(milliseconds as f64));
-    format!(
-        "{:04}-{:02}-{:02} {:02}:{:02}",
-        date.get_full_year(),
-        date.get_month().saturating_add(1),
-        date.get_date(),
-        date.get_hours(),
-        date.get_minutes(),
-    )
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn format_timestamp(milliseconds: i64) -> String {
-    use chrono::{DateTime, Local};
-
-    DateTime::from_timestamp_millis(milliseconds)
-        .map(|timestamp| {
-            timestamp
-                .with_timezone(&Local)
-                .format("%Y-%m-%d %H:%M")
-                .to_string()
-        })
-        .unwrap_or_else(|| milliseconds.to_string())
 }
 
 #[cfg(test)]

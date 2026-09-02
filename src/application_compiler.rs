@@ -330,7 +330,6 @@ workspace = "../../.."
 [features]
 default = []
 client = [
-    "dep:az-ui-components",
     "dep:dioxus",
     "dep:studio",
 ]
@@ -340,7 +339,6 @@ server = ["dep:anyhow", "dep:az-aio-app", "dep:business"]
 
 [dependencies]
 anyhow = {{ workspace = true, optional = true }}
-az-ui-components = {{ workspace = true, optional = true }}
 dioxus = {{ workspace = true, optional = true }}
 studio = {{ package = "az-studio", path = "../../../app/plugins/studio", default-features = false, optional = true }}
 
@@ -515,6 +513,7 @@ mod tests {
             .context("缺少 Cargo.toml")?;
         assert!(cargo.content.contains("studio/web"));
         assert!(cargo.content.contains("studio/desktop"));
+        assert!(!cargo.content.contains("az-ui-components"));
         assert!(
             cargo
                 .content

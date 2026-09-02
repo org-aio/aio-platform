@@ -2,6 +2,8 @@
 #![forbid(unsafe_code)]
 
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+mod agent_config;
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 mod application_compiler;
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 mod business_module;

@@ -1,7 +1,6 @@
 use std::{
     any::{Any, TypeId},
     collections::{BTreeMap, HashSet},
-    fmt::Debug,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -32,12 +31,7 @@ pub struct ConventionEndpointRequest {
 
 pub type ConventionEndpointFuture<'a> = Pin<Box<dyn Future<Output = Result<Value>> + Send + 'a>>;
 
-pub trait ConventionEndpointProvider: Any + Send + Sync + Debug {
-    /// 可选的人类可读说明，只用于日志和诊断。
-    fn comment(&self) -> &'static str {
-        ""
-    }
-
+pub trait ConventionEndpointProvider: Any + Send + Sync {
     fn endpoint_id(&self) -> &'static str;
 
     fn handle(&self, request: ConventionEndpointRequest) -> ConventionEndpointFuture<'_>;
@@ -45,7 +39,7 @@ pub trait ConventionEndpointProvider: Any + Send + Sync + Debug {
 
 pub type DynConventionEndpointProvider = Arc<dyn ConventionEndpointProvider>;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct ConventionEndpointIndex {
     providers: BTreeMap<String, DynConventionEndpointProvider>,
 }

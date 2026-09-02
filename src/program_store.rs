@@ -2,8 +2,8 @@ use std::{collections::BTreeSet, fmt};
 
 use crate::{
     DraftSnapshot, GraphPatchBatch, ImageTarget, ProgramDefinition, ProgramImage,
-    RevisionRunSnapshot, RevisionSnapshot, StudioPage, StudioPageParams, ValueType,
-    VibeMessageInput, VibeSessionSnapshot,
+    RevisionRunSnapshot, RevisionSnapshot, StudioPageParams, ValueType, VibeMessageInput,
+    VibeSessionSnapshot,
 };
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Postgres, Row, Transaction, postgres::PgPoolOptions, types::Json};
 use uuid::Uuid;
 
+use crate::studio_contract::StudioPage as StudioPageData;
 use az_plugin_core::{timestamp_ms, verify_database_url};
 
 #[derive(Clone)]
@@ -315,7 +316,7 @@ impl ProgramStore {
         &self,
         program_id: &str,
         page: StudioPageParams,
-    ) -> Result<StudioPage<RevisionSnapshot>> {
+    ) -> Result<StudioPageData<RevisionSnapshot>> {
         let total = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM engine_program_revisions WHERE program_id = $1",
         )
@@ -337,7 +338,7 @@ impl ProgramStore {
         .fetch_all(&self.pool)
         .await
         .context("查询 program revisions 失败")?;
-        Ok(StudioPage {
+        Ok(StudioPageData {
             d: rows
                 .iter()
                 .map(revision_from_row)

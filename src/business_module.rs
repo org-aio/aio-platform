@@ -274,7 +274,7 @@ fn write_service_stub_manifest(module_dir: &Path, manifest: &ServiceStubManifest
 }
 
 fn source_hash(source: &[u8]) -> String {
-    hex::encode(Sha256::digest(source))
+    format!("{:x}", Sha256::digest(source))
 }
 
 fn service_stub_shape(source: &str) -> String {
@@ -400,9 +400,7 @@ workspace = "../../.."
 
 [dependencies]
 anyhow.workspace = true
-derive_more.workspace = true
 dill.workspace = true
-serde_json.workspace = true
 studio = {{ package = "az-studio", path = "../../../app/plugins/studio", default-features = false, features = ["server"] }}
 
 [lints]
@@ -539,24 +537,17 @@ fn controller_definition_source(
     endpoint: &PageEndpointDefinition,
 ) -> String {
     let controller_name = format!("{}Controller", pascal_case(method_name));
-    let comment = rust_string(&endpoint.title);
     let endpoint_id = rust_string(&endpoint.id.to_string());
 
     format!(
         r#"#[dill::component]
 #[dill::interface(dyn ConventionEndpointProvider)]
 #[dill::scope(dill::Singleton)]
-#[derive(derive_more::Debug)]
 pub(crate) struct {controller_name} {{
-    #[debug(skip)]
     service: Arc<dyn {service_name}>,
 }}
 
 impl ConventionEndpointProvider for {controller_name} {{
-    fn comment(&self) -> &'static str {{
-        {comment}
-    }}
-
     fn endpoint_id(&self) -> &'static str {{
         {endpoint_id}
     }}

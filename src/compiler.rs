@@ -653,7 +653,7 @@ include!("compiler_function_lowering.rs");
 
 pub fn content_hash(definition: &ProgramDefinition) -> Result<String> {
     let bytes = serde_json::to_vec(definition)?;
-    Ok(hex::encode(Sha256::digest(bytes)))
+    Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
 #[cfg(test)]

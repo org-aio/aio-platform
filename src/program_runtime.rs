@@ -153,19 +153,15 @@ impl ProgramRuntime {
     }
 
     /// 请求入口取得 Arc 后可跨越发布过程安全使用旧 Image。
-    pub async fn image(&self) -> Option<Arc<RuntimeProgramImage>> {
+    pub fn image(&self) -> Option<Arc<RuntimeProgramImage>> {
         self.slot.load_full()
-    }
-
-    pub async fn active_image(&self) -> Option<Arc<RuntimeProgramImage>> {
-        self.image().await
     }
 
     pub async fn resolve_route(
         &self,
         path: &str,
     ) -> Result<(Arc<RuntimeProgramImage>, RuntimeRouteMatch)> {
-        let image = self.image().await.context("活动 ProgramImage 不存在")?;
+        let image = self.image().context("活动 ProgramImage 不存在")?;
         let route = image.route(path)?;
         Ok((image, route))
     }
@@ -175,7 +171,7 @@ impl ProgramRuntime {
         function_id: SymbolId,
         request: &SegmentInvocationRequest,
     ) -> Result<SegmentInvocationResult> {
-        let image = self.image().await.context("活动 ProgramImage 不存在")?;
+        let image = self.image().context("活动 ProgramImage 不存在")?;
         if !image.image().server_functions.contains_key(&function_id) {
             bail!("published server segment not found: {function_id}");
         }
@@ -266,7 +262,7 @@ impl ProgramRuntime {
     }
 
     async fn model_name(&self, model_id: SymbolId) -> Result<String> {
-        let image = self.image().await.context("活动 ProgramImage 不存在")?;
+        let image = self.image().context("活动 ProgramImage 不存在")?;
         image
             .image()
             .models
@@ -410,7 +406,7 @@ impl ProgramRuntime {
         self.store
             .activate_revision(&program_id, &revision.id)
             .await?;
-        self.swap_image(Arc::clone(&warmed)).await;
+        self.swap_image(Arc::clone(&warmed));
         let event = ProgramActivationEvent {
             revision_id: revision.id.clone(),
             content_hash: image.content_hash.clone(),
@@ -469,7 +465,7 @@ impl ProgramRuntime {
         self.store.save_image(&image).await?;
         let content_hash = image.content_hash.clone();
         let warmed = Arc::new(RuntimeProgramImage::build(image)?);
-        self.swap_image(Arc::clone(&warmed)).await;
+        self.swap_image(Arc::clone(&warmed));
         if emit_event {
             let _ = self.events.send(ProgramActivationEvent {
                 revision_id: revision_id.to_owned(),
@@ -519,7 +515,7 @@ impl ProgramRuntime {
         self.store
             .activate_revision(&program_id, revision_id)
             .await?;
-        self.swap_image(Arc::clone(&warmed)).await;
+        self.swap_image(Arc::clone(&warmed));
         let _ = self.events.send(ProgramActivationEvent {
             revision_id: revision_id.to_owned(),
             content_hash,
@@ -528,7 +524,7 @@ impl ProgramRuntime {
     }
 
     /// 每个实例持有独立 LISTEN 连接，收到通知后从不可变 revision/cache 恢复。
-    pub async fn spawn_postgres_listener(&self, database_url: &str) -> Result<()> {
+    pub fn spawn_postgres_listener(&self, database_url: &str) {
         let runtime = self.clone();
         let database_url = database_url.to_owned();
         tokio::spawn(async move {
@@ -551,7 +547,6 @@ impl ProgramRuntime {
                 attempt = attempt.saturating_add(1);
             }
         });
-        Ok(())
     }
 
     async fn listen_postgres_activations(&self, database_url: &str) -> Result<()> {
@@ -577,7 +572,6 @@ impl ProgramRuntime {
                 };
             let already_loaded = self
                 .image()
-                .await
                 .is_some_and(|image| image.image().revision_id == payload.revision_id);
             if already_loaded {
                 continue;
@@ -592,7 +586,7 @@ impl ProgramRuntime {
         }
     }
 
-    async fn swap_image(&self, image: Arc<RuntimeProgramImage>) {
+    fn swap_image(&self, image: Arc<RuntimeProgramImage>) {
         self.slot.store(Some(image));
     }
 
