@@ -512,6 +512,7 @@ fn generated_mod_source(pages: &[&PageDefinition]) -> String {
 }
 
 fn page_mod_source(page: &PageDefinition) -> String {
+    let implementation_name = format!("{}Impl", service_trait_name(page));
     format!(
         r#"mod controller;
 pub(crate) mod model;
@@ -526,7 +527,7 @@ pub(crate) fn register(builder: &mut CatalogBuilder) {{
     controller::register(builder);
 }}
 "#,
-        format!("{}Impl", service_trait_name(page))
+        implementation_name
     )
 }
 
