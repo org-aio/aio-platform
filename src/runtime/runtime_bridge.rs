@@ -9,9 +9,7 @@ use crate::{
     MenuDefinition, MenuRowActions, ProgramImage, SymbolId, browser_http::get_api,
 };
 pub use az_dioxus_admin_shell::ApplicationUser;
-use az_dioxus_admin_shell::{
-    ApplicationAccountAction, ApplicationMenuItem, ApplicationSceneItem, ApplicationShell,
-};
+use az_dioxus_admin_shell::{ApplicationMenuItem, ApplicationSceneItem, ApplicationShell};
 
 type ConventionPageRenderFn = fn(SymbolId) -> Element;
 
@@ -164,14 +162,8 @@ pub fn PublishedApplication(
             status.set(None);
             settings_open.set(true);
         }));
-    let account_action = Callback::new(move |action| {
-        let message = match action {
-            ApplicationAccountAction::AgentSettings => "Agent 设置尚未接入",
-            ApplicationAccountAction::Profile => "个人资料尚未接入",
-            ApplicationAccountAction::ChangePassword => "修改密码尚未接入",
-            ApplicationAccountAction::SignOut => "退出系统尚未接入",
-        };
-        status.set(Some(message.to_owned()));
+    let account_action = Callback::new(move |action: String| {
+        status.set(Some(format!("账户插件动作未处理: {action}")));
     });
 
     rsx! {
@@ -183,6 +175,7 @@ pub fn PublishedApplication(
             menus: application_menus,
             active_page_id: active_page.map(|page_id| page_id.to_string()),
             user,
+            account_items: Vec::new(),
             status: status(),
             on_select_scene: select_scene,
             on_select_page: select_page,
