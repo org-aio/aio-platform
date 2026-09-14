@@ -106,6 +106,8 @@ pub(super) async fn prepare(root: &Path, explicit: Option<&str>) -> Result<Datab
                 "exec",
                 &name,
                 "pg_isready",
+                "-h",
+                "127.0.0.1",
                 "-U",
                 "developer",
                 "-d",

@@ -11,6 +11,8 @@ cd my-plugin
 aio plugin dev .
 ```
 
+Linux 的 Kotlin/Wasm 工具链还需要 `libatomic1`（Debian/Ubuntu：`sudo apt-get install libatomic1`）。工具链缺失的系统库会显示在项目构建日志中。
+
 `--language` 支持 `rust`、`kotlin`、`typescript`。初始化不联网，不要求 Git、远端仓库或提交。开发命令会准备项目数据库、构建前后端、启动平台宿主并打开浏览器。
 
 ```sh
