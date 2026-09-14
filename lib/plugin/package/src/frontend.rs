@@ -80,9 +80,8 @@ impl PluginPackage {
             let artifact = STANDARD
                 .decode(&self.artifact_base64)
                 .context("页面产物 base64 无效")?;
-            let pages =
-                serde_json::from_slice::<Vec<az_plugin_manifest::PageDefinition>>(&artifact)
-                    .context("解析前端页面定义失败")?;
+            let pages = az_plugin_manifest::parse_page_definitions(&artifact)
+                .context("解析前端页面定义失败")?;
             az_plugin_manifest::validate_frontend_pages(
                 manifest,
                 &pages,

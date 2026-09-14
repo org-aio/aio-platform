@@ -1,13 +1,56 @@
 {
   "$id": "https://raw.githubusercontent.com/zjarlin/aio-platform/main/docs/plugin/schema/page-definitions.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Array_of_PageDefinition",
-  "type": "array",
+  "title": "PageDocument",
+  "description": "导航编写文档与已展开的页面协议共用一个接收入口。",
   "$comment": "AIO Plugin JSON contract aio:plugin@1.0.0",
-  "items": {
-    "$ref": "#/$defs/PageDefinition"
-  },
+  "anyOf": [
+    {
+      "$ref": "#/$defs/SceneTree"
+    },
+    {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SceneTree"
+      }
+    },
+    {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PageDefinition"
+      }
+    }
+  ],
   "$defs": {
+    "MenuBranch": {
+      "type": "object",
+      "properties": {
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MenuNode"
+          }
+        },
+        "icon": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "children"
+      ]
+    },
     "MenuGroupDefinition": {
       "description": "页面在当前场景菜单树中的一个目录节点。",
       "type": "object",
@@ -30,6 +73,48 @@
       "required": [
         "id",
         "label"
+      ]
+    },
+    "MenuNode": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MenuBranch"
+        },
+        {
+          "$ref": "#/$defs/MenuPage"
+        }
+      ]
+    },
+    "MenuPage": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/PageBody"
+        },
+        "icon": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "required_permission": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "body"
       ]
     },
     "PageActionDefinition": {
@@ -202,6 +287,29 @@
       "required": [
         "id",
         "label"
+      ]
+    },
+    "SceneTree": {
+      "type": "object",
+      "properties": {
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MenuNode"
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "children"
       ]
     }
   }

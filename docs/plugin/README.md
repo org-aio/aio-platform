@@ -105,37 +105,45 @@ Wasm Component 必须实现 [`aio:plugin/page@1`](wit/page.wit)：`definition() 
 
 ### KMP 插件自定义顶部分组与多级菜单
 
-`aio plugin init my-kmp-plugin --language kotlin --title "我的插件"` 生成的项目，在 `backend/service/resources/pages.json` 定义宿主导航。`--title` 不负责菜单归属，目前没有 `--scene` 或 `--menu-path` 初始化参数。“社区插件”只是默认 `scene`，可以改成自己的业务分组。
+`aio plugin init my-kmp-plugin --language kotlin --title "我的插件"` 生成的项目，在 `backend/service/resources/pages.json` 使用 `children` 树编写导航。根节点是顶部分组，目录节点带 `children`，叶子页面带 `body`。不需要为每个页面重复填写 `scene` 和 `menu_path`；公共解析层展开后统一校验、存储和合并菜单。
 
-以下是完整的双页面配置，可用于理解顶部分组和两层目录；其中两个菜单刻意复用现有 `index.html`，不会凭空生成第二个 Compose 页面：
+以下是完整双页面示例。两个菜单复用现有 `index.html`，可以直接验证导航；不同业务页面需要实现各自的前端入口：
 
 ```json
-[
-  {
-    "id": "business-dashboard",
-    "label": "数据大屏",
-    "icon": "layout",
-    "scene": { "id": "my-business", "label": "我的业务" },
-    "menu_path": [
-      { "id": "business-operations", "label": "运营中心", "icon": "folder" },
-      { "id": "business-analysis", "label": "数据分析", "icon": "folder" }
-    ],
-    "required_permission": null,
-    "body": { "kind": "frontend", "entry": "index.html" }
-  },
-  {
-    "id": "business-reports",
-    "label": "报表管理",
-    "icon": "layout",
-    "scene": { "id": "my-business", "label": "我的业务" },
-    "menu_path": [
-      { "id": "business-operations", "label": "运营中心", "icon": "folder" },
-      { "id": "business-analysis", "label": "数据分析", "icon": "folder" }
-    ],
-    "required_permission": null,
-    "body": { "kind": "frontend", "entry": "index.html" }
-  }
-]
+{
+  "id": "my-business",
+  "label": "我的业务",
+  "children": [
+    {
+      "id": "business-operations",
+      "label": "运营中心",
+      "icon": "folder",
+      "children": [
+        {
+          "id": "business-analysis",
+          "label": "数据分析",
+          "icon": "folder",
+          "children": [
+            {
+              "id": "business-dashboard",
+              "label": "数据大屏",
+              "icon": "layout",
+              "required_permission": null,
+              "body": { "kind": "frontend", "entry": "index.html" }
+            },
+            {
+              "id": "business-reports",
+              "label": "报表管理",
+              "icon": "layout",
+              "required_permission": null,
+              "body": { "kind": "frontend", "entry": "index.html" }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
 ```
 
 导航效果：
@@ -148,13 +156,18 @@ Wasm Component 必须实现 [`aio:plugin/page@1`](wit/page.wit)：`definition() 
          └─ 报表管理
 ```
 
-- `scene.id` 聚合顶部分组，`scene.label` 是顶部标题；相同 id 的标题必须一致。
-- `menu_path` 从外到内排列目录对象，不能写成字符串数组。空数组表示页面直接位于顶部分组下。
-- 页面 `id` 唯一，页面 `label` 是叶子菜单标题。调整已发布页面的菜单位置时保留原 `id`，只改 `scene`、`menu_path` 和需要改名的 `label`。
-- 复用目录时保持目录 id、场景、父节点、标题及图标一致；不同分支下的同名目录需要不同 id。目录 id 不能与页面 id 冲突。
-- 导航配置只创建菜单，不生成业务页面。若报表需要独立页面，先实现并构建对应 HTML 到 `dist/frontend`，再将其 `body.entry` 改成该 HTML 的相对路径；不要只填一个不存在的文件名，也不要用查询串代替 HTML 入口。
+- 一个顶部分组写成上面的根对象，多个分组写成根对象数组。页面直接放在根的 `children` 下时没有中间目录。
+- 目录的 `children` 不能为空，目录最多八层。叶子必须有 `body`，不能同时包含 `children`；未知字段和拼写错误会拒绝。
+- `required_permission` 只声明在叶子上，例如 `"reports.read"`，由宿主按页面检查权限。目录不接受权限字段，也不会隐式继承或覆盖叶子的权限。
+- 页面 id 必须唯一。调整已发布页面的菜单位置时保留原页面 id 和 body；新增页面后必须同步清单中的 `plugin.subplugins[].pages`。
+- 不同插件可以共同贡献相同目录，但目录 id 的场景、父节点、标题和图标必须一致。不同分支下的同名目录需要不同 id；目录 id 不能与页面 id 冲突。
+- 菜单配置不会自动生成 Compose 页面。如果报表需要独立页面，先实现并构建对应 HTML 到 `dist/frontend`，再将 `body.entry` 改成该 HTML 的相对路径；不能只填不存在的文件名或查询串。
 
-在生成的插件根目录执行 `sh scripts/build.sh`，然后执行 `aio plugin validate .`。构建后按该项目发布流程发布新版本并激活，宿主才会读取新的菜单配置。无需修改宿主源码；仅调整导航也无需修改 Compose 页面。校验依赖构建产物，尚未构建时提示 `dist/plugin.jar` 不存在是预期结果。
+在生成的插件根目录执行 `sh scripts/build.sh`，然后执行 `aio plugin validate .`。构建后按项目发布流程发布新版本并激活，宿主才会采用新菜单。校验需要构建产物，尚未构建时提示 `dist/plugin.jar` 不存在是预期结果。初始化命令目前没有 `--scene` 或 `--menu-path` 参数，直接修改 JSON 即可。
+
+上面的双页面示例还需将 `aio-plugin.toml` 现有 `[[plugin.subplugins]]` 中的 `pages` 改为 `['business-dashboard', 'business-reports']`。只改目录或标题且页面 id 不变时，无需改这个列表。
+
+树状文档统一适用于静态 `page-definition` 产物、Wasm `definition` 和 process `/aio/definition`。需使用包含 `parse_page_definitions` 的 CLI 与宿主；此前发布的 npm `2026.5.10` 不含此功能。内部协议与数据库继续存储展开后的 `PageDefinition` 列表，不需要数据迁移。
 
 生成项目中的说明来源见 [KMP 模板 README](../../cli/templates/plugin/fullstack/kotlin/README.md)。
 

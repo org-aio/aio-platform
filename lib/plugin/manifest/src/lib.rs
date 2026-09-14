@@ -3,6 +3,7 @@
 #[cfg(feature = "validation")]
 mod frontend;
 mod model;
+mod navigation;
 #[cfg(feature = "schema")]
 mod schema;
 #[cfg(feature = "validation")]
@@ -20,6 +21,9 @@ pub use model::{
     PluginManifest, PluginRequest, PluginRuntime, RepositoryManifest, RepositoryPackage,
     RuntimeManifest, SceneDefinition, SubpluginManifest,
 };
+#[cfg(feature = "validation")]
+pub use navigation::parse_page_definitions;
+pub use navigation::{MenuBranch, MenuNode, MenuPage, PageDocument, SceneTree};
 #[cfg(feature = "schema")]
 pub use schema::{PluginSchema, schemas};
 #[cfg(feature = "validation")]

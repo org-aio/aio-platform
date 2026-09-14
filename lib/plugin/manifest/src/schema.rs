@@ -1,9 +1,7 @@
 use schemars::{Schema, schema_for};
 use serde_json::Value;
 
-use crate::{
-    ComponentResponse, PageActionResult, PageDefinition, PluginRequest, RepositoryManifest,
-};
+use crate::{ComponentResponse, PageActionResult, PageDocument, PluginRequest, RepositoryManifest};
 
 pub struct PluginSchema {
     pub file_name: &'static str,
@@ -16,10 +14,7 @@ pub fn schemas() -> Vec<PluginSchema> {
             "repository-manifest.schema.json",
             schema_for!(RepositoryManifest),
         ),
-        document(
-            "page-definitions.schema.json",
-            schema_for!(Vec<PageDefinition>),
-        ),
+        document("page-definitions.schema.json", schema_for!(PageDocument)),
         document("plugin-request.schema.json", schema_for!(PluginRequest)),
         document(
             "component-response.schema.json",

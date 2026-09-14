@@ -102,6 +102,14 @@ mod tests {
             let manifest = az_plugin_manifest::read_manifest(&root)?;
             assert!(manifest.plugin.runtime.is_some());
             assert!(manifest.plugin.frontend.is_some());
+            if language == PluginLanguage::Kotlin {
+                let pages = az_plugin_manifest::parse_page_definitions(&fs::read(
+                    root.join("backend/service/resources/pages.json"),
+                )?)?;
+                assert_eq!(pages.len(), 1);
+                assert_eq!(pages[0].id, "delivery-example");
+                assert_eq!(pages[0].label, "Delivery Example");
+            }
             fs::remove_dir_all(root)?;
         }
         Ok(())

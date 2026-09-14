@@ -199,11 +199,10 @@ pub fn validate_repository(root: &Path) -> Result<ValidationReport> {
     let frontend_files = crate::frontend_files(root, &manifest)?;
     let page_count = match runtime.kind {
         PluginRuntime::PageDefinition => {
-            let pages =
-                serde_json::from_slice::<Vec<PageDefinition>>(&fs::read(&artifact).with_context(
-                    || format!("读取 PageDefinition 产物失败: {}", artifact.display()),
-                )?)
-                .context("解析 PageDefinition 产物失败")?;
+            let pages = crate::parse_page_definitions(&fs::read(&artifact).with_context(|| {
+                format!("读取 PageDefinition 产物失败: {}", artifact.display())
+            })?)
+            .context("解析 PageDefinition 产物失败")?;
             ensure!(
                 !pages.is_empty(),
                 "page-definition 插件至少需要贡献一个页面"

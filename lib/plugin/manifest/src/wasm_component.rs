@@ -48,7 +48,7 @@ pub fn validate_wasm_component(bytes: &[u8]) -> Result<Vec<PageDefinition>> {
         definition.len() <= MAX_DEFINITION_BYTES,
         "Wasm Component PageDefinition 不能超过 {MAX_DEFINITION_BYTES} 字节"
     );
-    let pages = serde_json::from_str::<Vec<PageDefinition>>(&definition)
+    let pages = crate::parse_page_definitions(definition.as_bytes())
         .context("解析 Wasm Component PageDefinition 失败")?;
     ensure!(!pages.is_empty(), "Wasm Component 至少需要贡献一个页面");
     validate_page_definitions(&pages)?;

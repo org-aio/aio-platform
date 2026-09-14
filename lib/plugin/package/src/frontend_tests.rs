@@ -35,6 +35,27 @@ fn frontend_and_backend_form_one_deterministic_content_version() -> Result<()> {
 }
 
 #[test]
+fn verifies_tree_frontend_entries_without_rewriting_signed_artifact() -> Result<()> {
+    let tree = br#"{"id":"business","label":"Business","children":[{"id":"reports","label":"Reports","children":[{"id":"screen","label":"Screen","body":{"kind":"frontend","entry":"index.html"}}]}]}"#;
+    let create = |assets| {
+        PluginPackage::new(
+            "https://example.com/fullstack.git".into(),
+            "1.0.0".into(),
+            None,
+            MANIFEST.into(),
+            tree,
+            assets,
+        )
+    };
+    let verified = PluginPackage::decode(&create(files())?.encode()?)?.verify()?;
+    assert_eq!(verified.artifact, tree);
+    let mut missing = files();
+    missing.remove("index.html");
+    assert!(create(missing).is_err());
+    Ok(())
+}
+
+#[test]
 fn changing_either_side_changes_package_revision_and_tampering_is_rejected() -> Result<()> {
     let original = package(MANIFEST, files())?;
     let mut changed = files();
