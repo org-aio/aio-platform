@@ -1,6 +1,6 @@
 (() => {
   const token = document.currentScript.dataset.token;
-  let activated = false;
+  let activated = new URL(location.href).searchParams.get('__aio_prepare') !== '1';
   let suspended = false;
   let prepared = false;
   let compiling = 0;

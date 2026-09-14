@@ -4,13 +4,14 @@ import { webcrypto } from 'node:crypto';
 import vm from 'node:vm';
 import { test } from 'node:test';
 
-function fixture() {
+function fixture(preparing = true) {
   const listeners = [];
   const sent = [];
   const timers = [];
   const parent = { postMessage: value => sent.push(value) };
   const window = { parent, addEventListener: (kind, fn) => { if (kind === 'message') listeners.push(fn); } };
   const context = vm.createContext({ window, parent, document: { currentScript: { dataset: { token: 't' } }, body: { querySelector: () => ({}) } },
+    location: { href: `https://host.test/plugin/${preparing ? '?__aio_prepare=1' : ''}` },
     crypto: webcrypto, URL, Uint8Array, TextEncoder, TextDecoder, CustomEvent: class {}, dispatchEvent() {},
     addEventListener: window.addEventListener, setInterval: () => 1, clearInterval() {},
     setTimeout: fn => { timers.push(fn); return timers.length; }, clearTimeout() {} });
@@ -31,6 +32,17 @@ test('preparation delays business and its timeout until authenticated activation
   await Promise.resolve();
   assert.equal(f.sent.length, 1);
   f.state({ active: true });
+  await Promise.resolve();
+  assert.equal(f.sent.length, 2);
+  assert.equal(f.timers.length, 1);
+  const message = f.sent[1];
+  f.receive({ protocol: 'aio:plugin@2', kind: 'response', id: message.id, response: { status: 200, headers: [], body: [] } });
+  assert.equal(await request, null);
+});
+
+test('ordinary visible mounts do not wait for a preparation handshake', async () => {
+  const f = fixture(false);
+  const request = f.window.aioPlugin.json('GET', '/graph');
   await Promise.resolve();
   assert.equal(f.sent.length, 2);
   assert.equal(f.timers.length, 1);
