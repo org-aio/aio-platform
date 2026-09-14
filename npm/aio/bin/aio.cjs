@@ -16,12 +16,15 @@ try {
 }
 
 const child = spawn(binary, process.argv.slice(2), { stdio: "inherit" });
+const signals = ["SIGINT", "SIGTERM"];
+for (const signal of signals) process.on(signal, () => child.kill(signal));
 child.once("error", (error) => {
   console.error(`无法启动 AIO CLI: ${error.message}`);
   process.exitCode = 1;
 });
 child.once("exit", (code, signal) => {
   if (signal !== null) {
+    for (const name of signals) process.removeAllListeners(name);
     process.kill(process.pid, signal);
     return;
   }
