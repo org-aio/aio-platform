@@ -5,7 +5,7 @@
 插件开发规约见仓库 `docs/plugin/`，可运行示例见 [Dioxus 全栈示例](https://github.com/zjarlin/aio-plugin-dioxus-fullstack) 和 [KMP 全栈示例](https://github.com/zjarlin/aio-plugin-kmp-example)。
 
 ```bash
-npm install --global @zjarlin/aio
+npm install --global @zjarlin/aio --registry=https://registry.npmmirror.com
 aio init my-app --title "我的应用"
 aio plugin init my-plugin --title "业务插件"
 aio plugin init my-kmp-plugin --title "KMP 服务" --language kotlin
@@ -21,7 +21,9 @@ aio plugin uninstall https://example.com/team/my-plugin.git
 
 需要 Node.js 18 或以上版本。npm 包自动安装当前系统的原生 CLI，发布配置见 [npm 分发](../npm/README.md)。从源码安装可在仓库根目录运行 `cargo +nightly install --path cli --locked`。
 
-语言决定默认初始化目标：Rust 固定为源码装配，Kotlin 默认 `process`，TypeScript 默认 `wasm-component`。`--runtime` 是 Kotlin/TypeScript 选择静态页面或非默认目标时的高级覆盖选项，不是常规必填参数；Rust 不接受该选项。
+三种语言默认生成全栈插件。Rust 源码插件使用 `--kind system`；Kotlin/TypeScript 可用 `--runtime` 选择静态页面、Component 或进程服务。
+
+初始化完全离线，默认 `--network china`，生成项目级国内依赖源；`--network global` 使用官方源。Kotlin 模板自动复用本机 JDK 25、校验下载工具归档并预置前端工具，详情见生成项目的 `NETWORK.md` 或 [网络与工具链](templates/toolchain/README.md)。不修改全局 JAVA_HOME、npm、Cargo 或代理设置。
 
 应用仓库的 `aio.toml` 是插件来源真源。每个来源只需配置 `git` 和可选 `rev`；`aio plugin sync` 会拉取仓库、读取根目录 `aio-plugin.toml`、分别发现 client/server Cargo 包、更新 feature 依赖并生成 Dill 注册入口。`aio plugin validate` 则为 Rust、Kotlin 和 TypeScript 仓库提供相同的无副作用协议校验。
 

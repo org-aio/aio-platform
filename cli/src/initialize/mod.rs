@@ -1,6 +1,7 @@
 mod fullstack;
 mod kotlin;
 mod language;
+mod network;
 mod scaffold;
 pub(crate) mod template;
 mod typescript;
@@ -14,11 +15,13 @@ use anyhow::{Context as _, Result, bail, ensure};
 use az_plugin_manifest::PluginRuntime;
 
 pub use language::{PluginLanguage, PluginTemplate, parse_runtime};
+pub use network::NetworkProfile;
 
 pub struct ApplicationOptions {
     pub path: PathBuf,
     pub name: Option<String>,
     pub title: Option<String>,
+    pub network: NetworkProfile,
 }
 
 #[derive(Debug)]
@@ -27,6 +30,7 @@ pub struct RepositoryPluginOptions {
     pub name: Option<String>,
     pub title: Option<String>,
     pub template: PluginTemplate,
+    pub network: NetworkProfile,
 }
 
 pub fn application(options: ApplicationOptions) -> Result<()> {
@@ -76,6 +80,7 @@ pub fn application(options: ApplicationOptions) -> Result<()> {
         &options.path.join("compose.yaml"),
         template::COMPOSE_MANIFEST,
     )?;
+    network::configure(&options.path, PluginLanguage::Rust, options.network, false)?;
     println!("已初始化应用: {}", options.path.display());
     Ok(())
 }
@@ -123,6 +128,20 @@ pub fn repository_plugin(options: RepositoryPluginOptions) -> Result<()> {
             typescript::repository_plugin(&options.path, &name, &title, PluginRuntime::Process)?;
         }
     }
+    let language = match template {
+        PluginTemplate::Fullstack(language) => language,
+        PluginTemplate::Rust => PluginLanguage::Rust,
+        PluginTemplate::KotlinPages
+        | PluginTemplate::KotlinComponent
+        | PluginTemplate::KotlinService => PluginLanguage::Kotlin,
+        _ => PluginLanguage::TypeScript,
+    };
+    network::configure(
+        &options.path,
+        language,
+        options.network,
+        matches!(template, PluginTemplate::Fullstack(PluginLanguage::Kotlin)),
+    )?;
     println!(
         "已初始化插件: {} ({})",
         options.path.display(),
@@ -248,6 +267,7 @@ mod tests {
             path: path.clone(),
             name: None,
             title: Some("演示应用".to_owned()),
+            network: NetworkProfile::default(),
         })?;
 
         assert!(path.join("aio.toml").is_file());
@@ -271,6 +291,7 @@ mod tests {
             name: None,
             title: Some("问候".to_owned()),
             template: PluginTemplate::Rust,
+            network: NetworkProfile::default(),
         })?;
 
         assert!(path.join("client/src/lib.rs").is_file());
@@ -298,6 +319,7 @@ mod tests {
             name: None,
             title: Some("Kotlin 问候".to_owned()),
             template: PluginTemplate::KotlinService,
+            network: NetworkProfile::default(),
         })?;
 
         assert!(path.join("kotlin").is_file());
@@ -333,6 +355,7 @@ mod tests {
             name: None,
             title: Some("Kotlin 页面".to_owned()),
             template: PluginTemplate::KotlinPages,
+            network: NetworkProfile::default(),
         })?;
 
         assert!(path.join("kotlin").is_file());
@@ -361,6 +384,7 @@ mod tests {
             name: None,
             title: Some("Kotlin Component 问候".to_owned()),
             template: PluginTemplate::KotlinComponent,
+            network: NetworkProfile::default(),
         })?;
 
         assert!(path.join("kotlin").is_file());
@@ -390,6 +414,7 @@ mod tests {
             name: None,
             title: Some("TypeScript 问候".to_owned()),
             template: PluginTemplate::TypeScriptComponent,
+            network: NetworkProfile::default(),
         })?;
 
         assert!(path.join("pnpm-lock.yaml").is_file());
@@ -416,6 +441,7 @@ mod tests {
             name: None,
             title: Some("Node 问候".to_owned()),
             template: PluginTemplate::TypeScriptService,
+            network: NetworkProfile::default(),
         })?;
 
         assert!(path.join("pnpm-lock.yaml").is_file());
@@ -440,6 +466,7 @@ mod tests {
             name: None,
             title: Some("TypeScript 页面".to_owned()),
             template: PluginTemplate::TypeScriptPages,
+            network: NetworkProfile::default(),
         })?;
 
         assert!(path.join("pnpm-lock.yaml").is_file());

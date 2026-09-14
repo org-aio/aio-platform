@@ -16,6 +16,11 @@
 
 setlocal
 
+if not defined AIO_TOOLCHAIN_READY (
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0.aio\toolchain\bootstrap.ps1" "%~f0" %*
+    exit /b
+)
+
 @rem The version of the Kotlin Toolchain distribution to provision and use
 set kotlin_cli_version=0.12.0-dev-4233
 @rem Establish chain of trust from here by specifying the exact checksum of the Kotlin Toolchain distribution to be run

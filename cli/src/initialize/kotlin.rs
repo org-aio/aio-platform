@@ -5,12 +5,6 @@ use az_plugin_manifest::PluginRuntime;
 
 use super::scaffold::{TemplateFile, materialize};
 
-const COMMON_FILES: &[TemplateFile] = &[TemplateFile {
-    path: "kotlin",
-    content: include_str!("../../templates/plugin/kotlin-process/kotlin"),
-    executable: true,
-}];
-
 const COMPONENT_FILES: &[TemplateFile] = &[
     TemplateFile {
         path: ".gitattributes",
@@ -327,7 +321,6 @@ fn component_plugin(path: &Path, name: &str, title: &str) -> Result<()> {
         ("__PLUGIN_ID__", name.to_owned()),
         ("__TITLE_LITERAL__", serde_json::to_string(title)?),
     ];
-    materialize(path, COMMON_FILES, &replacements)?;
     materialize(path, COMPONENT_FILES, &replacements)?;
     super::write(&path.join("README.md"), &component_readme(title))
 }
@@ -345,7 +338,6 @@ fn page_plugin(path: &Path, name: &str, title: &str) -> Result<()> {
         ("__ABOUT_ID__", about_literal),
         ("__TITLE__", title_literal),
     ];
-    materialize(path, COMMON_FILES, &replacements)?;
     materialize(path, PAGE_FILES, &replacements)?;
     super::write(&path.join("README.md"), &page_readme(title))
 }
@@ -362,7 +354,6 @@ fn process_plugin(path: &Path, name: &str, title: &str) -> Result<()> {
         ("\"KMP 服务\"", title_literal.clone()),
         ("\"Kotlin 进程插件 v2 已在线\"", title_literal),
     ];
-    materialize(path, COMMON_FILES, &replacements)?;
     materialize(path, PROCESS_FILES, &replacements)?;
     super::write(&path.join("README.md"), &process_readme(title))
 }

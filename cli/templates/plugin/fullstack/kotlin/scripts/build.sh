@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+cd "$(dirname "$0")/.."
 KOTLIN_CLI_NO_WELCOME_BANNER=1 ./kotlin test -m shared -p jvm
 KOTLIN_CLI_NO_WELCOME_BANNER=1 ./kotlin test -m service -p jvm
 

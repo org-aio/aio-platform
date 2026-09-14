@@ -1,3 +1,5 @@
+apply: [//network.module-template.yaml]
+
 product: wasm-wasi/app
 
 description: "AIO Kotlin Wasm Component 导出适配器"

@@ -1,3 +1,5 @@
+apply: [//network.module-template.yaml]
+
 product: jvm/app
 
 description: "Generate the installable AIO PageDefinition artifact"
@@ -10,6 +12,7 @@ settings:
     version: 2.3.21
   jvm:
     jdk:
-      version: 17
+      version: 25
+      selectionMode: javaHome
     release: 17
     mainClass: __PACKAGE_NAME__.MainKt

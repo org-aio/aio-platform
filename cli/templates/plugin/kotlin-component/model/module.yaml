@@ -1,3 +1,5 @@
+apply: [//network.module-template.yaml]
+
 product:
   type: kmp/lib
   platforms: [jvm, wasmJs, wasmWasi]
@@ -15,5 +17,6 @@ settings:
       version: 1.11.0
   jvm:
     jdk:
-      version: 17
+      version: 25
+      selectionMode: javaHome
     release: 17

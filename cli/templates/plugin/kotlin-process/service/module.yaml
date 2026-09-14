@@ -1,3 +1,5 @@
+apply: [//network.module-template.yaml]
+
 product: jvm/app
 
 description: "AIO process plugin HTTP service"
@@ -10,6 +12,7 @@ settings:
     version: 2.3.21
   jvm:
     jdk:
-      version: 21
+      version: 25
+      selectionMode: javaHome
     release: 21
     mainClass: site.addzero.aio.plugin.kmpservice.MainKt

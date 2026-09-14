@@ -466,6 +466,7 @@ mod tests {
             path: application.clone(),
             name: None,
             title: None,
+            network: initialize::NetworkProfile::default(),
         })?;
         let plugin = create_plugin_repository(workspace.path())?;
         let source = PluginSource {

@@ -8,7 +8,8 @@ use std::{env, path::PathBuf};
 
 use anyhow::{Result, bail};
 use initialize::{
-    ApplicationOptions, PluginLanguage, PluginTemplate, RepositoryPluginOptions, parse_runtime,
+    ApplicationOptions, NetworkProfile, PluginLanguage, PluginTemplate, RepositoryPluginOptions,
+    parse_runtime,
 };
 use repository_plugin::{PackageOptions, PluginSource, PublicationOptions};
 
@@ -52,8 +53,7 @@ fn run_marketplace_command(arguments: &[String]) -> Result<()> {
 }
 
 fn initialize_application(arguments: &[String]) -> Result<()> {
-    let (path, name, title) = parse_init_arguments(arguments)?;
-    initialize::application(ApplicationOptions { path, name, title })
+    initialize::application(parse_init_arguments(arguments)?)
 }
 
 fn run_plugin_command(arguments: &[String]) -> Result<()> {
@@ -105,12 +105,13 @@ fn run_plugin_command(arguments: &[String]) -> Result<()> {
     }
 }
 
-fn parse_init_arguments(arguments: &[String]) -> Result<(PathBuf, Option<String>, Option<String>)> {
+fn parse_init_arguments(arguments: &[String]) -> Result<ApplicationOptions> {
     let Some(path) = arguments.first() else {
         bail!("缺少初始化目录");
     };
     let mut name = None;
     let mut title = None;
+    let mut network = NetworkProfile::default();
     let mut index = 1;
     while index < arguments.len() {
         let value = arguments
@@ -119,11 +120,17 @@ fn parse_init_arguments(arguments: &[String]) -> Result<(PathBuf, Option<String>
         match arguments[index].as_str() {
             "--name" => name = Some(value.clone()),
             "--title" => title = Some(value.clone()),
+            "--network" => network = NetworkProfile::parse(value)?,
             option => bail!("未知初始化选项: {option}"),
         }
         index += 2;
     }
-    Ok((PathBuf::from(path), name, title))
+    Ok(ApplicationOptions {
+        path: PathBuf::from(path),
+        name,
+        title,
+        network,
+    })
 }
 
 fn parse_plugin_init_arguments(arguments: &[String]) -> Result<RepositoryPluginOptions> {
@@ -135,6 +142,7 @@ fn parse_plugin_init_arguments(arguments: &[String]) -> Result<RepositoryPluginO
     let mut language = None;
     let mut kind = None;
     let mut runtime = None;
+    let mut network = NetworkProfile::default();
     let mut index = 1;
     while index < arguments.len() {
         let value = arguments
@@ -146,6 +154,7 @@ fn parse_plugin_init_arguments(arguments: &[String]) -> Result<RepositoryPluginO
             "--language" => language = Some(PluginLanguage::parse(value)?),
             "--kind" => kind = Some(value.as_str()),
             "--runtime" => runtime = Some(parse_runtime(value)?),
+            "--network" => network = NetworkProfile::parse(value)?,
             option => bail!("未知插件初始化选项: {option}"),
         }
         index += 2;
@@ -166,6 +175,7 @@ fn parse_plugin_init_arguments(arguments: &[String]) -> Result<RepositoryPluginO
         name,
         title,
         template,
+        network,
     })
 }
 
@@ -277,11 +287,11 @@ fn is_help(argument: &str) -> bool {
 }
 
 fn usage() -> &'static str {
-    "用法:\n  aio init <目录> [--name <包名>] [--title <标题>]\n  aio plugin init <目录> [--name <包名>] [--title <插件标题>] [--language <rust|kotlin|typescript>]\n  aio plugin init --help\n  aio plugin install <git> [--rev <分支、标签或提交>]\n  aio plugin package <目录> --version <SemVer> [--git <HTTPS Git>] [-o <文件.aio-plugin>]\n  aio plugin publish [<目录或文件.aio-plugin>] [--git <HTTPS Git>] [--version <SemVer>]\n  aio plugin uninstall <git>\n  aio plugin sync\n  aio plugin list\n  aio plugin validate [<仓库目录>]\n  aio plugin schema [<输出目录>]\n  aio marketplace build [<registry> <output>]"
+    "用法:\n  aio init <目录> [--name <包名>] [--title <标题>] [--network <china|global>]\n  aio plugin init <目录> [--name <包名>] [--title <插件标题>] [--language <rust|kotlin|typescript>] [--network <china|global>]\n  aio plugin init --help\n  aio plugin install <git> [--rev <分支、标签或提交>]\n  aio plugin package <目录> --version <SemVer> [--git <HTTPS Git>] [-o <文件.aio-plugin>]\n  aio plugin publish [<目录或文件.aio-plugin>] [--git <HTTPS Git>] [--version <SemVer>]\n  aio plugin uninstall <git>\n  aio plugin sync\n  aio plugin list\n  aio plugin validate [<仓库目录>]\n  aio plugin schema [<输出目录>]\n  aio marketplace build [<registry> <output>]"
 }
 
 fn plugin_init_usage() -> &'static str {
-    "用法:\n  aio plugin init <目录> [--name <包名>] [--title <标题>] [--language <rust|kotlin|typescript>] [--kind <fullstack|system|runtime>]\n\n默认生成全栈插件，包含前端、后端、共享模型与自动发布配置。推送默认分支后自动构建上架。\n  --kind system   Rust 系统源码插件，使用 trait + Dill/TypeId\n\n高级模板覆盖（Kotlin/TypeScript）:\n  --runtime page-definition   静态页面\n  --runtime wasm-component    Component\n  --runtime process           JVM/Node 服务"
+    "用法:\n  aio plugin init <目录> [--name <包名>] [--title <标题>] [--language <rust|kotlin|typescript>] [--network <china|global>] [--kind <fullstack|system|runtime>]\n\n默认国内依赖源，初始化不联网；--network global 使用官方源。\n默认生成全栈插件，包含前端、后端、共享模型与自动发布配置。推送默认分支后自动构建上架。\n  --kind system   Rust 系统源码插件，使用 trait + Dill/TypeId\n\n高级模板覆盖（Kotlin/TypeScript）:\n  --runtime page-definition   静态页面\n  --runtime wasm-component    Component\n  --runtime process           JVM/Node 服务"
 }
 fn plugin_publish_usage() -> &'static str {
     "用法:\n  aio plugin publish [<目录或文件.aio-plugin>] [--git <HTTPS Git>] [--version <SemVer>]\n\n默认直接发布到官方插件中心，不依赖 CI。目录可从自己的 origin 推导来源，并从 Cargo.toml 或 package.json 推导版本。已有插件包保留包内来源和版本。\n\n环境变量:\n  AIO_PLUGIN_PUBLISH_TOKEN   插件市场创建的来源绑定发布凭证\n  AIO_PLUGIN_PUBLISH_URL     可选，覆盖官方插件中心发布接口\n\n发布前校验包的清单、版本和内容摘要。构建产物不需要提交到 Git。"

@@ -16,6 +16,8 @@
 
 set -e -u
 
+. "$(dirname "$0")/.aio/toolchain/bootstrap.sh"
+
 # The version of the Kotlin Toolchain (and CLI) distribution to provision and use
 kotlin_cli_version=0.12.0-dev-4233
 # Establish chain of trust from here by specifying exact checksum of Kotlin Toolchain (and CLI) distribution to be run
@@ -138,16 +140,7 @@ EOF
 
   temp_file="$cache_dir/download-file-$$.bin"
   rm -f "$temp_file"
-  if command -v curl >/dev/null 2>&1; then
-    if [ -t 1 ]; then CURL_PROGRESS="--progress-bar"; else CURL_PROGRESS="--silent --show-error"; fi
-    # shellcheck disable=SC2086
-    curl $CURL_PROGRESS -L --fail --retry 5 --connect-timeout 30 --output "${temp_file}" "$file_url"
-  elif command -v wget >/dev/null 2>&1; then
-    if [ -t 1 ]; then WGET_PROGRESS=""; else WGET_PROGRESS="-nv"; fi
-    wget $WGET_PROGRESS --tries=5 --connect-timeout=30 --read-timeout=120 -O "${temp_file}" "$file_url"
-  else
-    die "ERROR: Please install 'wget' or 'curl', as one of them is required to download $moniker"
-  fi
+  cp "$(aio_download "${file_url##*/}" "$file_sha" "$file_url")" "$temp_file"
 
   check_sha "$file_url" "$temp_file" "$file_sha" "$sha_size"
 
