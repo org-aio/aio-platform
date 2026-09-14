@@ -5,7 +5,7 @@
 插件开发规约见仓库 `docs/plugin/`，可运行示例见 [Dioxus 全栈示例](https://github.com/zjarlin/aio-plugin-dioxus-fullstack) 和 [KMP 全栈示例](https://github.com/zjarlin/aio-plugin-kmp-example)。
 
 ```bash
-cargo install --path cli
+npm install --global @zjarlin/aio
 aio init my-app --title "我的应用"
 aio plugin init my-plugin --title "业务插件"
 aio plugin init my-kmp-plugin --title "KMP 服务" --language kotlin
@@ -18,6 +18,8 @@ aio plugin validate ../my-plugin
 aio plugin publish ../my-component
 aio plugin uninstall https://example.com/team/my-plugin.git
 ```
+
+需要 Node.js 18 或以上版本。npm 包自动安装当前系统的原生 CLI，发布配置见 [npm 分发](../npm/README.md)。从源码安装可在仓库根目录运行 `cargo +nightly install --path cli --locked`。
 
 语言决定默认初始化目标：Rust 固定为源码装配，Kotlin 默认 `process`，TypeScript 默认 `wasm-component`。`--runtime` 是 Kotlin/TypeScript 选择静态页面或非默认目标时的高级覆盖选项，不是常规必填参数；Rust 不接受该选项。
 

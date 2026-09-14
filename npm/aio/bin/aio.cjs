@@ -10,7 +10,7 @@ try {
   binary = require.resolve(`${packageName}/bin/${executableName()}`);
 } catch (error) {
   console.error(`无法启动 AIO CLI: ${error.message}`);
-  console.error("请重新安装 @addzero/aio，并确认 npm 未禁用 optionalDependencies。");
+  console.error("请重新安装 @zjarlin/aio，并确认 npm 未禁用 optionalDependencies。");
   process.exitCode = 1;
   return;
 }

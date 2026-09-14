@@ -10,14 +10,14 @@ const {
 
 test("为全部发布目标选择平台包", () => {
   assert.deepEqual(PACKAGES, {
-    "darwin-arm64": "@addzero/aio-darwin-arm64",
-    "darwin-x64": "@addzero/aio-darwin-x64",
-    "linux-arm64": "@addzero/aio-linux-arm64",
-    "linux-x64": "@addzero/aio-linux-x64",
-    "win32-x64": "@addzero/aio-win32-x64"
+    "darwin-arm64": "@zjarlin/aio-darwin-arm64",
+    "darwin-x64": "@zjarlin/aio-darwin-x64",
+    "linux-arm64": "@zjarlin/aio-linux-arm64",
+    "linux-x64": "@zjarlin/aio-linux-x64",
+    "win32-x64": "@zjarlin/aio-win32-x64"
   });
-  assert.equal(platformPackage("linux", "x64"), "@addzero/aio-linux-x64");
-  assert.equal(platformPackage("darwin", "arm64"), "@addzero/aio-darwin-arm64");
+  assert.equal(platformPackage("linux", "x64"), "@zjarlin/aio-linux-x64");
+  assert.equal(platformPackage("darwin", "arm64"), "@zjarlin/aio-darwin-arm64");
 });
 
 test("Windows 使用 exe 后缀", () => {

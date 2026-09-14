@@ -1,6 +1,7 @@
 name: npm release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*"
@@ -15,6 +16,7 @@ permissions:
 jobs:
   verify:
     name: 校验发布来源
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -24,8 +26,14 @@ jobs:
         with:
           node-version: 24
       - name: 校验发布版本
-        run: node npm/aio/scripts/check-release.cjs "${GITHUB_REF_NAME}"
-      - name: 校验标签提交属于 main
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            node npm/aio/scripts/check-release.cjs "$GITHUB_REF_NAME"
+          else
+            node npm/aio/scripts/check-release.cjs
+          fi
+      - name: 校验发布提交属于 main
         shell: bash
         run: |
           git fetch --no-tags origin main:refs/remotes/origin/main
@@ -107,7 +115,7 @@ jobs:
         with:
           path: npm/artifacts
       - name: 校验发布版本
-        run: node npm/aio/scripts/check-release.cjs "${GITHUB_REF_NAME}"
+        run: node npm/aio/scripts/check-release.cjs
       - name: 测试 npm 入口
         run: npm test --prefix npm/aio
       - name: 生成平台包
