@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 
 mod initialize;
-mod marketplace;
 mod repository_plugin;
 
 use std::{env, path::PathBuf};
@@ -25,30 +24,12 @@ fn run(arguments: Vec<String>) -> Result<()> {
 
     match command {
         "init" => initialize_application(&arguments[1..]),
-        "marketplace" => run_marketplace_command(&arguments[1..]),
         "plugin" => run_plugin_command(&arguments[1..]),
         "help" | "--help" | "-h" => {
             print_usage();
             Ok(())
         }
         _ => bail!("未知命令: {command}\n\n{}", usage()),
-    }
-}
-
-fn run_marketplace_command(arguments: &[String]) -> Result<()> {
-    let Some(command) = arguments.first().map(String::as_str) else {
-        bail!("缺少市场命令\n\n{}", usage());
-    };
-    match (command, &arguments[1..]) {
-        ("build", []) => marketplace::build(
-            &PathBuf::from("marketplace/registry"),
-            &PathBuf::from("marketplace/index.json"),
-        ),
-        ("build", [registry, output]) => {
-            marketplace::build(&PathBuf::from(registry), &PathBuf::from(output))
-        }
-        ("build", _) => bail!("marketplace build 只接受可选的 <registry> <output>"),
-        _ => bail!("未知市场命令: {command}\n\n{}", usage()),
     }
 }
 
@@ -287,7 +268,7 @@ fn is_help(argument: &str) -> bool {
 }
 
 fn usage() -> &'static str {
-    "用法:\n  aio init <目录> [--name <包名>] [--title <标题>] [--network <china|global>]\n  aio plugin init <目录> [--name <包名>] [--title <插件标题>] [--language <rust|kotlin|typescript>] [--network <china|global>]\n  aio plugin init --help\n  aio plugin install <git> [--rev <分支、标签或提交>]\n  aio plugin package <目录> --version <SemVer> [--git <HTTPS Git>] [-o <文件.aio-plugin>]\n  aio plugin publish [<目录或文件.aio-plugin>] [--git <HTTPS Git>] [--version <SemVer>]\n  aio plugin uninstall <git>\n  aio plugin sync\n  aio plugin list\n  aio plugin validate [<仓库目录>]\n  aio plugin schema [<输出目录>]\n  aio marketplace build [<registry> <output>]"
+    "用法:\n  aio init <目录> [--name <包名>] [--title <标题>] [--network <china|global>]\n  aio plugin init <目录> [--name <包名>] [--title <插件标题>] [--language <rust|kotlin|typescript>] [--network <china|global>]\n  aio plugin init --help\n  aio plugin install <git> [--rev <分支、标签或提交>]\n  aio plugin package <目录> --version <SemVer> [--git <HTTPS Git>] [-o <文件.aio-plugin>]\n  aio plugin publish [<目录或文件.aio-plugin>] [--git <HTTPS Git>] [--version <SemVer>]\n  aio plugin uninstall <git>\n  aio plugin sync\n  aio plugin list\n  aio plugin validate [<仓库目录>]\n  aio plugin schema [<输出目录>]"
 }
 
 fn plugin_init_usage() -> &'static str {

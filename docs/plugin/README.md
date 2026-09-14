@@ -201,7 +201,7 @@ rev = "9d0b7d16f9f5a4c5a3b4c0e1e6c43ae8d47aa001"
 
 ## 市场
 
-正式插件市场读取 PostgreSQL。`aio plugin publish` 上传的包通过验证与激活后，清单元数据直接进入官方市场。`marketplace/registry/` 是可选的冷启动发现目录，不是在线市场的唯一来源；租户也可以配置未收录 Git 仓库。发布凭证与租户安装权限分开管理。
+正式插件市场读取 PostgreSQL。`aio plugin publish` 上传的包通过验证与激活后，清单元数据直接进入官方市场。官方宿主会自动发现配置的发布账号下带 `aio-delivery.toml` 的公开仓库，构建与校验成功后自动上架。用户无需配置市场源；不支持第三方市场索引。发布凭证与租户安装权限分开管理。
 
 语言细节见 [Rust 规约](rs-plugin-convention.md)、[Kotlin 规约](kt-plugin-convention.md)、[TypeScript 规约](ts-plugin-convention.md) 和 [在线发布规约](publish.md)。
 
