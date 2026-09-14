@@ -103,6 +103,61 @@ Wasm Component 必须实现 [`aio:plugin/page@1`](wit/page.wit)：`definition() 
 
 同一目录 id 的场景、父目录、标题和图标必须一致；目录路径不能循环，目录 id 不能与页面 id 冲突。省略 `menu_path` 的页面是该场景 root 的直接子页面。账户区贡献的页面仍是独立全屏入口，不进入场景树。
 
+### KMP 插件自定义顶部分组与多级菜单
+
+`aio plugin init my-kmp-plugin --language kotlin --title "我的插件"` 生成的项目，在 `backend/service/resources/pages.json` 定义宿主导航。`--title` 不负责菜单归属，目前没有 `--scene` 或 `--menu-path` 初始化参数。“社区插件”只是默认 `scene`，可以改成自己的业务分组。
+
+以下是完整的双页面配置，可用于理解顶部分组和两层目录；其中两个菜单刻意复用现有 `index.html`，不会凭空生成第二个 Compose 页面：
+
+```json
+[
+  {
+    "id": "business-dashboard",
+    "label": "数据大屏",
+    "icon": "layout",
+    "scene": { "id": "my-business", "label": "我的业务" },
+    "menu_path": [
+      { "id": "business-operations", "label": "运营中心", "icon": "folder" },
+      { "id": "business-analysis", "label": "数据分析", "icon": "folder" }
+    ],
+    "required_permission": null,
+    "body": { "kind": "frontend", "entry": "index.html" }
+  },
+  {
+    "id": "business-reports",
+    "label": "报表管理",
+    "icon": "layout",
+    "scene": { "id": "my-business", "label": "我的业务" },
+    "menu_path": [
+      { "id": "business-operations", "label": "运营中心", "icon": "folder" },
+      { "id": "business-analysis", "label": "数据分析", "icon": "folder" }
+    ],
+    "required_permission": null,
+    "body": { "kind": "frontend", "entry": "index.html" }
+  }
+]
+```
+
+导航效果：
+
+```text
+顶部：我的业务
+侧栏：运营中心
+      └─ 数据分析
+         ├─ 数据大屏
+         └─ 报表管理
+```
+
+- `scene.id` 聚合顶部分组，`scene.label` 是顶部标题；相同 id 的标题必须一致。
+- `menu_path` 从外到内排列目录对象，不能写成字符串数组。空数组表示页面直接位于顶部分组下。
+- 页面 `id` 唯一，页面 `label` 是叶子菜单标题。调整已发布页面的菜单位置时保留原 `id`，只改 `scene`、`menu_path` 和需要改名的 `label`。
+- 复用目录时保持目录 id、场景、父节点、标题及图标一致；不同分支下的同名目录需要不同 id。目录 id 不能与页面 id 冲突。
+- 导航配置只创建菜单，不生成业务页面。若报表需要独立页面，先实现并构建对应 HTML 到 `dist/frontend`，再将其 `body.entry` 改成该 HTML 的相对路径；不要只填一个不存在的文件名，也不要用查询串代替 HTML 入口。
+
+在生成的插件根目录执行 `sh scripts/build.sh`，然后执行 `aio plugin validate .`。构建后按该项目发布流程发布新版本并激活，宿主才会读取新的菜单配置。无需修改宿主源码；仅调整导航也无需修改 Compose 页面。校验依赖构建产物，尚未构建时提示 `dist/plugin.jar` 不存在是预期结果。
+
+生成项目中的说明来源见 [KMP 模板 README](../../cli/templates/plugin/fullstack/kotlin/README.md)。
+
 纯文本页面把 `body` 改为 `{ "kind": "text", "title": "...", "content": "..." }`。`counter` 由宿主维护当前浏览器中的本地计数，适合静态示例，不调用插件运行时，也不在刷新后保留值。渲染阶段的 `UiOp`、HTML、CSS 和 Dioxus `Element` 都不能作为持久化协议。
 
 需要由插件处理按钮事件时，`wasm-component` 或 `process` 页面使用 `actions` 页面体：
