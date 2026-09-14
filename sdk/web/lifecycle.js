@@ -3,6 +3,9 @@
   let activated = false;
   let suspended = false;
   let prepared = false;
+  let compiling = 0;
+  let instantiated = 0;
+  let settled = 0;
   const waiting = new Set();
   const notify = kind => parent.postMessage({ channel: 'aio-lifecycle', token, kind }, '*');
   const whenActive = () => {
@@ -23,9 +26,23 @@
     dispatchEvent(new CustomEvent('aio:visibility', { detail: message.visible === true && !suspended }));
   });
   Object.defineProperty(window, 'aioLifecycle', { value: Object.freeze({ whenActive, get activated() { return activated; } }) });
+  for (const name of ['instantiate', 'instantiateStreaming']) {
+    const instantiate = globalThis.WebAssembly?.[name];
+    if (typeof instantiate !== 'function') continue;
+    WebAssembly[name] = async (...arguments_) => {
+      compiling++;
+      try {
+        const result = await instantiate.apply(WebAssembly, arguments_);
+        instantiated++;
+        return result;
+      } finally { compiling--; settled = Date.now(); }
+    };
+  }
   // 只观察初始化进度，不读取业务数据，也不调用插件服务。
   const inspect = () => {
-    if (prepared || !document.body?.querySelector('canvas,button,input,[role="tree"]')) return;
+    if (prepared || compiling || !document.body) return;
+    const wasmReady = instantiated > 0 && Date.now() - settled >= 500 && document.body.childElementCount > 0;
+    if (!wasmReady && !document.body.querySelector('canvas,button,input,[role="tree"]')) return;
     prepared = true;
     clearInterval(timer);
     notify('prepared');
