@@ -12,7 +12,8 @@ workspace = "../../.."
 [features]
 default = []
 schema = ["dep:schemars"]
-validation = ["dep:anyhow", "dep:semver", "dep:toml", "dep:wasmtime", "dep:wit-component", "dep:wit-parser"]
+dependency-validation = ["dep:anyhow", "dep:semver", "dep:url"]
+validation = ["dependency-validation", "dep:toml", "dep:wasmtime", "dep:wit-component", "dep:wit-parser"]
 
 [dependencies]
 anyhow = { workspace = true, optional = true }
@@ -20,6 +21,7 @@ schemars = { workspace = true, optional = true }
 semver = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
+url = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 wit-component = { workspace = true, optional = true }
 wit-parser = { workspace = true, optional = true }

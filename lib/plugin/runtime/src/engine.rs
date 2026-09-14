@@ -124,6 +124,17 @@ impl ComponentEngine {
 }
 
 impl ComponentInstance {
+    pub(crate) fn rebind_revision(&mut self, revision: &str) -> Result<()> {
+        self.execution
+            .as_mut()
+            .context("实例已停止")?
+            .store
+            .data_mut()
+            .scope
+            .revision = revision.into();
+        Ok(())
+    }
+
     fn begin(&mut self, executing: bool) -> Result<Execution> {
         // 调用期间转移所有权，future 被取消时 Store 和未提交事务随之销毁。
         let mut execution = self.execution.take().context("实例已失效，必须重新创建")?;

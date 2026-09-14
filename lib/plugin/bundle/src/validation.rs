@@ -57,25 +57,11 @@ impl Bundle {
                 != Some(self.git.as_str()),
             "插件不能以自身为父插件"
         );
-        let frontend_prefix = format!("{}/", plugin.frontend.path);
-        let migration_prefix = plugin
-            .database
-            .as_ref()
-            .map(|value| format!("{}/", value.migrations));
+        ensure!(self.digest == self.content_digest(), "整包摘要不匹配");
         let mut remaining = MAX_BUNDLE_BYTES;
         let mut files = BTreeMap::new();
-        let mut frontend_assets = BTreeMap::new();
-        let mut frontend_count = 0;
-        let mut migration_count = 0;
         for (path, encoded) in &self.files {
-            validate_relative_path(path)?;
-            for (offset, _) in path.match_indices('/') {
-                ensure!(
-                    !self.files.contains_key(&path[..offset]),
-                    "文件和目录路径冲突: {path}"
-                );
-            }
-            // 解码前限额，避免攻击者利用 Base64 临时分配绕过整包配额。
+            // 解码前限额，避免临时分配绕过整包配额。
             ensure!(
                 encoded.len() <= remaining.div_ceil(3) * 4,
                 "产物超过整包配额"
@@ -83,64 +69,9 @@ impl Bundle {
             let bytes = STANDARD.decode(encoded).context("产物 Base64 无效")?;
             ensure!(bytes.len() <= remaining, "产物超过整包配额");
             remaining -= bytes.len();
-            if path == &plugin.runtime.artifact {
-                if plugin.runtime.process.is_some() {
-                    ensure!(
-                        bytes.len() >= 64
-                            && bytes.starts_with(b"\x7fELF\x02\x01")
-                            && bytes[18..20] == [62, 0],
-                        "process 后端必须是 Linux x86_64 ELF"
-                    );
-                } else {
-                    ensure!(
-                        bytes.starts_with(b"\0asm\x0d\0\x01\0"),
-                        "后端不是 Wasm Component，不能装入浏览器 Wasm 或 JAR"
-                    );
-                }
-            } else if path.starts_with(&frontend_prefix) {
-                frontend_count += 1;
-                frontend_assets.insert(
-                    path[frontend_prefix.len()..].to_owned(),
-                    crate::FrontendAsset {
-                        digest: format!("{:x}", Sha256::digest(&bytes)),
-                        size: bytes.len(),
-                    },
-                );
-            } else if let Some(relative) = migration_prefix
-                .as_deref()
-                .and_then(|prefix| path.strip_prefix(prefix))
-            {
-                ensure!(
-                    !relative.contains('/') && relative.ends_with(".sql"),
-                    "迁移目录只接受直接包含的 SQL 文件"
-                );
-                ensure!(bytes.len() <= 1024 * 1024, "单个迁移文件超过配额");
-                ensure!(
-                    !std::str::from_utf8(&bytes)?.trim().is_empty(),
-                    "迁移文件不能为空"
-                );
-                migration_count += 1;
-            } else {
-                anyhow::bail!("包包含未声明产物: {path}");
-            }
             files.insert(path.clone(), bytes);
         }
-        ensure!(
-            files.contains_key(&plugin.runtime.artifact),
-            "包缺少后端产物"
-        );
-        ensure!(frontend_count > 0, "全栈包缺少前端产物");
-        ensure!(
-            plugin.database.is_none() || migration_count > 0,
-            "包缺少已声明的数据库迁移"
-        );
-        ensure!(self.digest == self.content_digest(), "整包摘要不匹配");
-        Ok(VerifiedBundle {
-            manifest,
-            files,
-            digest: self.digest.clone(),
-            frontend_assets,
-        })
+        verify_artifacts(manifest, files, self.digest.clone(), false)
     }
 
     pub(crate) fn content_digest(&self) -> String {
@@ -161,4 +92,93 @@ impl Bundle {
 fn hash_field(hash: &mut Sha256, value: &[u8]) {
     hash.update((value.len() as u64).to_be_bytes());
     hash.update(value);
+}
+
+pub(crate) fn verify_artifacts(
+    manifest: BundleManifest,
+    files: BTreeMap<String, Vec<u8>>,
+    digest: String,
+    development: bool,
+) -> Result<VerifiedBundle> {
+    ensure!(files.len() <= MAX_FILES, "产物文件数量超过配额");
+    let plugin = &manifest.plugin;
+    let frontend_prefix = format!("{}/", plugin.frontend.path);
+    let migration_prefix = plugin
+        .database
+        .as_ref()
+        .map(|value| format!("{}/", value.migrations));
+    let mut remaining = if development {
+        MAX_BUNDLE_BYTES * 8
+    } else {
+        MAX_BUNDLE_BYTES
+    };
+    let mut frontend_assets = BTreeMap::new();
+    let mut frontend_count = 0;
+    let mut migration_count = 0;
+    for (path, bytes) in &files {
+        validate_relative_path(path)?;
+        for (offset, _) in path.match_indices('/') {
+            ensure!(
+                !files.contains_key(&path[..offset]),
+                "文件和目录路径冲突: {path}"
+            );
+        }
+        ensure!(bytes.len() <= remaining, "产物超过整包配额");
+        remaining -= bytes.len();
+        if path == &plugin.runtime.artifact {
+            if plugin.runtime.process.is_some() && !development {
+                ensure!(
+                    bytes.len() >= 64
+                        && bytes.starts_with(b"\x7fELF\x02\x01")
+                        && bytes[18..20] == [62, 0],
+                    "process 后端必须是 Linux x86_64 ELF"
+                );
+            } else if plugin.runtime.process.is_none() {
+                ensure!(
+                    bytes.starts_with(b"\0asm\x0d\0\x01\0"),
+                    "后端不是 Wasm Component，不能装入浏览器 Wasm 或 JAR"
+                );
+            }
+        } else if path.starts_with(&frontend_prefix) {
+            frontend_count += 1;
+            frontend_assets.insert(
+                path[frontend_prefix.len()..].to_owned(),
+                crate::FrontendAsset {
+                    digest: format!("{:x}", Sha256::digest(&bytes)),
+                    size: bytes.len(),
+                },
+            );
+        } else if let Some(relative) = migration_prefix
+            .as_deref()
+            .and_then(|prefix| path.strip_prefix(prefix))
+        {
+            ensure!(
+                !relative.contains('/') && relative.ends_with(".sql"),
+                "迁移目录只接受直接包含的 SQL 文件"
+            );
+            ensure!(bytes.len() <= 1024 * 1024, "单个迁移文件超过配额");
+            ensure!(
+                !std::str::from_utf8(&bytes)?.trim().is_empty(),
+                "迁移文件不能为空"
+            );
+            migration_count += 1;
+        } else {
+            anyhow::bail!("包包含未声明产物: {path}");
+        }
+    }
+    ensure!(
+        files.contains_key(&plugin.runtime.artifact),
+        "包缺少后端产物"
+    );
+    ensure!(frontend_count > 0, "全栈包缺少前端产物");
+    ensure!(
+        plugin.database.is_none() || migration_count > 0,
+        "包缺少已声明的数据库迁移"
+    );
+    Ok(VerifiedBundle {
+        manifest,
+        files,
+        digest,
+        frontend_assets,
+    })
 }

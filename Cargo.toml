@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "cli",
     "delivery",
+    "host",
     "lib/plugin/*",
 ]
 exclude = ["lib/dioxus-admin-workbench"]
@@ -66,3 +67,8 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 dbg_macro = "deny"
 todo = "deny"
+
+[patch."https://github.com/zjarlin/dioxus-admin-workbench.git"]
+az-dioxus-admin-shell = { path = "lib/dioxus-admin-workbench/crates/admin-shell/dioxus" }
+az-ui-components = { path = "lib/dioxus-admin-workbench/crates/ui/components" }
+az-admin-shell-core = { path = "lib/dioxus-admin-workbench/crates/admin-shell/core" }

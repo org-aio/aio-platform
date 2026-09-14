@@ -1,0 +1,24 @@
+[package]
+name = "aio-host"
+version = "2026.9.14"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+az-plugin-host = { path = "../lib/plugin/host", default-features = false }
+az-plugin-development = { path = "../lib/plugin/development" }
+anyhow.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+axum = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "signal"], optional = true }
+dioxus = { version = "=0.7.9", default-features = false, features = ["macro", "html", "signals"], optional = true }
+az-ui-components = { workspace = true, optional = true }
+
+[features]
+default = ["server"]
+server = ["az-plugin-host/server", "dep:axum", "dep:tokio"]
+web = ["az-plugin-host/web", "dep:dioxus", "dioxus/web", "dioxus/launch", "dep:az-ui-components"]
+
+[lints]
+workspace = true

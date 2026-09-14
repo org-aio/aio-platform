@@ -32,6 +32,16 @@ for (const platform of PLATFORMS) {
   fs.mkdirSync(destinationBin, { recursive: true });
   fs.copyFileSync(source, path.join(destinationBin, platform.executable));
   fs.chmodSync(path.join(destinationBin, platform.executable), 0o755);
+  if (platform.developmentHost) {
+    const host = path.join(artifactsRoot, platform.id, "aio-host");
+    const web = path.join(artifactsRoot, platform.id, "web");
+    if (!fs.existsSync(host) || !fs.existsSync(path.join(web, "index.html"))) {
+      throw new Error(`缺少 ${platform.id} 配套开发宿主或 Web 产物`);
+    }
+    fs.copyFileSync(host, path.join(destinationBin, "aio-host"));
+    fs.chmodSync(path.join(destinationBin, "aio-host"), 0o755);
+    fs.cpSync(web, path.join(destinationBin, "web"), { recursive: true });
+  }
   for (const licenseFile of licenseFiles) {
     fs.copyFileSync(
       path.join(packageRoot, licenseFile),

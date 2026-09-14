@@ -157,6 +157,42 @@ impl ComponentSlot {
         Ok(())
     }
 
+    /// 仅资源变化时保留后端实例；能力、迁移和运行声明改变时交回完整替换流程。
+    pub async fn refresh_frontend(&self, bundle: Arc<VerifiedBundle>) -> Result<bool> {
+        let _update = self.updates.lock().await;
+        let mut state = self.state.write().await;
+        let Some(active) = state.active.as_mut() else {
+            return Ok(false);
+        };
+        let execution_manifest = |bundle: &VerifiedBundle| -> Result<serde_json::Value> {
+            let mut manifest = serde_json::to_value(&bundle.manifest().plugin)?;
+            let object = manifest.as_object_mut().context("插件清单不是对象")?;
+            object.remove("frontend");
+            object.remove("marketplace");
+            Ok(manifest)
+        };
+        if active.bundle.component() != bundle.component()
+            || active.bundle.migrations().collect::<Vec<_>>()
+                != bundle.migrations().collect::<Vec<_>>()
+            || execution_manifest(&active.bundle)? != execution_manifest(&bundle)?
+        {
+            return Ok(false);
+        }
+        for page in &active.description.pages {
+            ensure!(
+                bundle.frontend(&page.entry).is_some(),
+                "新版前端缺少页面入口"
+            );
+        }
+        active
+            .instance
+            .lock()
+            .await
+            .rebind_revision(bundle.digest())?;
+        active.bundle = bundle;
+        Ok(true)
+    }
+
     pub async fn handle(
         &self,
         digest: &str,

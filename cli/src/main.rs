@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod development;
 mod initialize;
 mod repository_plugin;
 
@@ -23,6 +24,10 @@ fn run(arguments: Vec<String>) -> Result<()> {
     };
 
     match command {
+        "--version" | "-V" => {
+            println!("aio {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
         "init" => initialize_application(&arguments[1..]),
         "plugin" => run_plugin_command(&arguments[1..]),
         "help" | "--help" | "-h" => {
@@ -43,6 +48,10 @@ fn run_plugin_command(arguments: &[String]) -> Result<()> {
     };
 
     match command {
+        "dev" => development::run(&arguments[1..]),
+        "dev-container-cache" => development::cache_container(&arguments[1..]),
+        "dev-container" => development::run_container(&arguments[1..]),
+        "dev-build" => development::build_adapter(&arguments[1..]),
         "init" if arguments[1..].iter().any(|argument| is_help(argument)) => {
             println!("{}", plugin_init_usage());
             Ok(())

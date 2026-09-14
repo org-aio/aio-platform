@@ -36,6 +36,7 @@ pub fn parse_manifest(source: &str) -> Result<RepositoryManifest> {
 
 pub fn validate_manifest(manifest: &RepositoryManifest) -> Result<()> {
     let plugin = &manifest.plugin;
+    crate::validate_dependencies(&plugin.dependencies)?;
     ensure!(
         plugin.runtime.is_some() || plugin.client.is_some() || plugin.server.is_some(),
         "插件必须声明 runtime、client 或 server 能力"

@@ -11,3 +11,5 @@ test-artifacts/
 node_modules/
 dist/plugin.jar
 dist/*.aio-plugin
+/.aio/
+/.run/AIO_*.run.xml

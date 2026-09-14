@@ -1,2 +1,4 @@
 /node_modules/
 /dist/
+/.aio/
+/.run/AIO_*.run.xml

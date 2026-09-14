@@ -355,3 +355,33 @@ fn author_directory_builds_without_executing_scripts() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn local_native_artifacts_do_not_weaken_published_package_validation() -> anyhow::Result<()> {
+    let root = tempfile::tempdir()?;
+    std::fs::create_dir(root.path().join("web"))?;
+    std::fs::write(root.path().join("web/index.html"), "<html>Local</html>")?;
+    std::fs::write(root.path().join("server"), b"native debug executable")?;
+    let manifest = format!(
+        "schema_version=2\n[plugin.runtime]\nartifact='server'\nhost_version='>=2026.5.10'\n[plugin.runtime.process]\nimage='sha256:{}'\n[plugin.frontend]\npath='web'\n",
+        "a".repeat(64)
+    );
+    std::fs::write(root.path().join("aio-plugin.toml"), manifest)?;
+    let local = crate::VerifiedBundle::from_development_directory(root.path(), "b".repeat(64))?;
+    assert_eq!(local.component(), b"native debug executable");
+    assert!(
+        Bundle::from_directory(
+            root.path(),
+            "aio-plugin.toml",
+            "https://example.test/plugin.git".into(),
+            "c".repeat(40),
+            "1.0.0".into()
+        )
+        .is_err()
+    );
+    assert!(
+        crate::VerifiedBundle::from_development_directory(root.path(), "../outside".into())
+            .is_err()
+    );
+    Ok(())
+}

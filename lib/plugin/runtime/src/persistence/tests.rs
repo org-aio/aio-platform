@@ -109,3 +109,82 @@ async fn binding_survives_restart_and_rejects_rewritten_history() -> Result<()> 
     tx.commit().await?;
     Ok(())
 }
+
+#[tokio::test]
+#[ignore = "需要同一实例中的两个独立测试数据库"]
+async fn databases_isolate_roles_and_reopen_persisted_bindings() -> Result<()> {
+    let first = DatabaseProvisioner::connect(&std::env::var("AIO_TEST_DATABASE_URL")?).await?;
+    let second =
+        DatabaseProvisioner::connect(&std::env::var("AIO_TEST_SECOND_DATABASE_URL")?).await?;
+    let source = uuid::Uuid::new_v4().to_string();
+    let tenant = "database-isolation";
+    let keyring = Keyring::new("test".into(), BTreeMap::from([("test".into(), [42; 32])]))?;
+    let migrations = vec![(
+        "0001.sql".into(),
+        "CREATE TABLE records (id BIGINT PRIMARY KEY, value TEXT NOT NULL)".into(),
+    )];
+    let database = first
+        .install(&source, tenant, &migrations, &keyring)
+        .await?;
+    let mut tx = database.begin().await?;
+    sqlx::query("INSERT INTO records VALUES (1,'first-database')")
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    drop(database);
+    let other = second
+        .install(&source, tenant, &migrations, &keyring)
+        .await?;
+    let mut tx = other.begin().await?;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM records")
+            .fetch_one(&mut *tx)
+            .await?,
+        0
+    );
+    tx.commit().await?;
+    let first_role = first
+        .process_connection(&source, tenant, &keyring)
+        .await?
+        .get_username()
+        .to_owned();
+    let second_role = second
+        .process_connection(&source, tenant, &keyring)
+        .await?
+        .get_username()
+        .to_owned();
+    assert_ne!(first_role, second_role);
+    // 持久记录拥有角色身份；算法调整或恢复备份不会要求在线服务更换数据库账号。
+    let existing_role = format!("r_{}", crate::provision::namespace(&source, tenant));
+    for statement in [
+        format!("ALTER ROLE {first_role} RENAME TO {existing_role}"),
+        format!(
+            "ALTER ROLE o_{} RENAME TO o_{}",
+            &first_role[2..],
+            &existing_role[2..]
+        ),
+    ] {
+        sqlx::query(&statement).execute(&first.pool).await?;
+    }
+    sqlx::query("UPDATE aio_plugin_host.database_bindings SET role_name=$1 WHERE source_id=$2 AND tenant_id=$3")
+        .bind(&existing_role).bind(&source).bind(tenant).execute(&first.pool).await?;
+    let reopened = first
+        .install(&source, tenant, &migrations, &keyring)
+        .await?;
+    let mut tx = reopened.begin().await?;
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT value FROM records WHERE id=1")
+            .fetch_one(&mut *tx)
+            .await?,
+        "first-database"
+    );
+    tx.commit().await?;
+    assert_eq!(
+        first
+            .process_connection(&source, tenant, &keyring)
+            .await?
+            .get_username(),
+        existing_role
+    );
+    Ok(())
+}

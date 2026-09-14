@@ -1,0 +1,11 @@
+version = 1
+
+[frontend]
+inputs = ["frontend", "shared", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "scripts/dev.sh"]
+command = ["sh", "scripts/dev.sh", "frontend"]
+output = "dist/web"
+
+[backend]
+inputs = ["backend", "shared", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "scripts/dev.sh"]
+command = ["sh", "scripts/dev.sh", "backend"]
+output = "dist/backend.wasm"

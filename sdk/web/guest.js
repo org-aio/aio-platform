@@ -1,5 +1,6 @@
 (() => {
   "use strict";
+  const development = document.currentScript?.dataset.development === "true";
   const pending = new Map();
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -22,7 +23,7 @@
     const body = input.body ?? new Uint8Array();
     if (!(body instanceof Uint8Array) || body.length > 16 * 1024 * 1024) return reject(new Error("Invalid binary body"));
     const id = crypto.randomUUID();
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error("Service request timed out")); }, 35000);
+    const timer = development ? null : setTimeout(() => { pending.delete(id); reject(new Error("Service request timed out")); }, 35000);
     pending.set(id, { resolve, reject, timer });
     window.parent.postMessage({ protocol: "aio:plugin@2", kind: "request", id,
       request: { method: input.method ?? "GET", path: url.pathname, query: input.query ?? (url.search.slice(1) || null),

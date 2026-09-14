@@ -14,6 +14,8 @@ pub struct RepositoryManifest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct PluginManifest {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependencies: Vec<RepositoryDependency>,
     #[serde(default)]
     pub marketplace: Option<MarketplaceManifest>,
     #[serde(default)]
@@ -28,6 +30,14 @@ pub struct PluginManifest {
     pub capabilities: CapabilityManifest,
     #[serde(default)]
     pub subplugins: Vec<SubpluginManifest>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct RepositoryDependency {
+    pub git: String,
+    pub version: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

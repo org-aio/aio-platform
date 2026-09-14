@@ -3,6 +3,7 @@
 const PLATFORMS = Object.freeze([
   {
     id: "darwin-arm64",
+    developmentHost: true,
     name: "@zjarlin/aio-darwin-arm64",
     os: "darwin",
     cpu: "arm64",
@@ -24,6 +25,7 @@ const PLATFORMS = Object.freeze([
   },
   {
     id: "linux-x64",
+    developmentHost: true,
     name: "@zjarlin/aio-linux-x64",
     os: "linux",
     cpu: "x64",

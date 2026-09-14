@@ -14,6 +14,8 @@ pub struct BundleManifest {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ComponentManifest {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependencies: Vec<az_plugin_manifest::RepositoryDependency>,
     #[serde(default)]
     pub permissions: Vec<String>,
     pub marketplace: Option<MarketplaceManifest>,
@@ -78,6 +80,7 @@ impl BundleManifest {
             "只接受 v2 清单"
         );
         let plugin = &manifest.plugin;
+        az_plugin_manifest::validate_dependencies(&plugin.dependencies)?;
         ensure!(
             plugin.permissions.len() <= 64
                 && plugin.permissions.iter().all(|p| !p.is_empty()

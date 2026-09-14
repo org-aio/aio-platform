@@ -11,7 +11,9 @@ aio plugin init my-plugin --title "业务插件"
 aio plugin init my-kmp-plugin --title "KMP 服务" --language kotlin
 aio plugin init my-component --title "TS 页面" --language typescript
 aio plugin init my-node-plugin --title "Node 服务" --language typescript --runtime process
-cd my-app
+cd my-kmp-plugin
+aio plugin dev . --debug
+cd ../my-app
 aio plugin install https://example.com/team/my-plugin.git
 aio plugin list
 aio plugin validate ../my-plugin
@@ -19,7 +21,7 @@ aio plugin publish ../my-component
 aio plugin uninstall https://example.com/team/my-plugin.git
 ```
 
-需要 Node.js 18 或以上版本。npm 包自动安装当前系统的原生 CLI，发布配置见 [npm 分发](../npm/README.md)。从源码安装可在仓库根目录运行 `cargo +nightly install --path cli --locked`。
+需要 Node.js 18 或以上版本。npm 包自动安装当前系统的原生 CLI，发布配置见 [npm 分发](../npm/README.md)。完整的 macOS arm64 / Linux x64 分发还包含同版本开发宿主和 Web 资源；仅从源码安装 CLI 不会自动带入 Web 资源，配套构建步骤见 [开发沙箱](../docs/development/README.md)。
 
 三种语言默认生成全栈插件。Rust 源码插件使用 `--kind system`；Kotlin/TypeScript 可用 `--runtime` 选择静态页面、Component 或进程服务。
 

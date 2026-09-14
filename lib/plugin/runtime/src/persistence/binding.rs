@@ -6,7 +6,7 @@ use sqlx::Row;
 
 use crate::{
     DatabaseProvisioner, Keyring, ScopedDatabase,
-    provision::{namespace, validate_migration},
+    provision::{namespace, role_namespace, validate_migration, validate_role},
 };
 
 impl DatabaseProvisioner {
@@ -34,8 +34,7 @@ impl DatabaseProvisioner {
             grants: Default::default(),
         };
         let schema = namespace(source, tenant);
-        let role = format!("r_{schema}");
-        let owner = format!("o_{schema}");
+
         let mut parsed = Vec::new();
         let mut previous = "";
         for (name, sql) in migrations {
@@ -71,6 +70,12 @@ impl DatabaseProvisioner {
             .await?;
         sqlx::query("CREATE TABLE IF NOT EXISTS aio_plugin_host.database_bindings(source_id TEXT NOT NULL,tenant_id TEXT NOT NULL,schema_name TEXT NOT NULL,role_name TEXT NOT NULL,ciphertext BYTEA NOT NULL,migrations JSONB NOT NULL,PRIMARY KEY(source_id,tenant_id))").execute(&mut *tx).await?;
         let existing = sqlx::query("SELECT schema_name,role_name,ciphertext,migrations FROM aio_plugin_host.database_bindings WHERE source_id=$1 AND tenant_id=$2 FOR UPDATE").bind(source).bind(tenant).fetch_optional(&mut *tx).await?;
+        let role = existing
+            .as_ref()
+            .map(|row| row.get::<String, _>("role_name"))
+            .unwrap_or_else(|| format!("r_{}", role_namespace(&self.connection, source, tenant)));
+        validate_role(&role)?;
+        let owner = format!("o_{}", &role[2..]);
         let (password, applied) = if let Some(row) = existing {
             ensure!(
                 row.get::<String, _>("schema_name") == schema

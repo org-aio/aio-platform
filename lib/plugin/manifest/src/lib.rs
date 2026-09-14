@@ -1,8 +1,12 @@
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "dependency-validation")]
+mod dependencies;
 #[cfg(feature = "validation")]
 mod frontend;
 mod model;
+#[cfg(feature = "dependency-validation")]
+pub use dependencies::validate_dependencies;
 mod navigation;
 #[cfg(feature = "schema")]
 mod schema;
@@ -18,8 +22,8 @@ pub use frontend::{
 pub use model::{
     CapabilityManifest, ComponentResponse, FrontendManifest, MarketplaceManifest,
     MenuGroupDefinition, PageActionDefinition, PageActionResult, PageBody, PageDefinition,
-    PluginManifest, PluginRequest, PluginRuntime, RepositoryManifest, RepositoryPackage,
-    RuntimeManifest, SceneDefinition, SubpluginManifest,
+    PluginManifest, PluginRequest, PluginRuntime, RepositoryDependency, RepositoryManifest,
+    RepositoryPackage, RuntimeManifest, SceneDefinition, SubpluginManifest,
 };
 #[cfg(feature = "validation")]
 pub use navigation::parse_page_definitions;

@@ -10,11 +10,11 @@ const repositoryRoot = path.resolve(packageRoot, "../..");
 const manifest = JSON.parse(
   fs.readFileSync(path.join(packageRoot, "package.json"), "utf8")
 );
-const cargo = fs.readFileSync(path.join(repositoryRoot, "Cargo.toml"), "utf8");
-const cargoVersion = cargo.match(/\[workspace\.package\][\s\S]*?\nversion = "([^"]+)"/)?.[1];
+const cargo = fs.readFileSync(path.join(repositoryRoot, "cli/Cargo.toml"), "utf8");
+const cargoVersion = cargo.match(/\[package\][\s\S]*?\nversion = "([^"]+)"/)?.[1];
 
 if (cargoVersion === undefined) {
-  throw new Error("无法读取 Cargo workspace 版本");
+  throw new Error("无法读取 Cargo CLI 版本");
 }
 if (manifest.version !== cargoVersion) {
   throw new Error(`npm 版本 ${manifest.version} 与 Cargo 版本 ${cargoVersion} 不一致`);

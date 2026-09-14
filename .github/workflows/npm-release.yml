@@ -74,7 +74,7 @@ jobs:
           submodules: true
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 固定动作提交
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-05-25
           targets: ${{ matrix.target }}
       - name: 安装 Linux musl 工具链
         if: runner.os == 'Linux'
@@ -84,6 +84,26 @@ jobs:
       - name: 验证 CLI 可执行
         shell: bash
         run: '"target/${{ matrix.target }}/release/${{ matrix.executable }}" --help'
+      - name: 构建配套开发宿主
+        if: matrix.id == 'darwin-arm64' || matrix.id == 'linux-x64'
+        shell: bash
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo install dioxus-cli --version 0.7.9 --locked
+          if [[ "${{ matrix.id }}" == "linux-x64" ]]; then
+            rustup target add x86_64-unknown-linux-gnu
+            pip install cargo-zigbuild==0.23.4 ziglang==0.16.0
+            cargo zigbuild --locked --release -p aio-host --target x86_64-unknown-linux-gnu.2.17
+            host_binary=target/x86_64-unknown-linux-gnu/release/aio-host
+          else
+            cargo build --locked --release -p aio-host --target ${{ matrix.target }}
+            host_binary=target/${{ matrix.target }}/release/aio-host
+          fi
+          dx build --package aio-host --platform web --release --no-default-features --features web --debug-symbols false
+          mkdir -p npm-artifact
+          cp "$host_binary" npm-artifact/aio-host
+          cp -R target/dx/aio-host/release/web/public npm-artifact/web
+          npm-artifact/aio-host --version
       - name: 整理构建产物
         shell: bash
         run: |
@@ -92,7 +112,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.id }}
-          path: npm-artifact/${{ matrix.executable }}
+          path: npm-artifact/
           if-no-files-found: error
 
   publish:

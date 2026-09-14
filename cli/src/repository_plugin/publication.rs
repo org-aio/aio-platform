@@ -13,7 +13,7 @@ use super::packaging::{prepare_package, read_package};
 
 const PUBLISH_URL_ENV: &str = "AIO_PLUGIN_PUBLISH_URL";
 const PUBLISH_TOKEN_ENV: &str = "AIO_PLUGIN_PUBLISH_TOKEN";
-const DEFAULT_PUBLISH_URL: &str = "https://aio.addzero.site/api/runtime/plugins/publish";
+pub(crate) const DEFAULT_PUBLISH_URL: &str = "https://aio.addzero.site/api/runtime/plugins/publish";
 const POLL_ATTEMPTS: usize = 90;
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_RESPONSE_BYTES: u64 = 128 * 1024;

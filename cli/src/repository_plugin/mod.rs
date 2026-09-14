@@ -11,6 +11,7 @@ use toml_edit::{DocumentMut, InlineTable, Item, Value};
 
 pub use manifest::PluginSource;
 pub use packaging::{PackageOptions, package};
+pub(crate) use publication::DEFAULT_PUBLISH_URL;
 pub use publication::{PublicationOptions, publish};
 pub use schema::write_schemas;
 

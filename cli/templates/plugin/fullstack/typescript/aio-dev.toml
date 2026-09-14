@@ -1,0 +1,21 @@
+version = 1
+
+[prepare]
+inputs = ["package.json", "pnpm-lock.yaml", ".npmrc"]
+command = ["corepack", "pnpm", "install", "--frozen-lockfile", "--prefer-offline"]
+output = "node_modules"
+
+[frontend]
+inputs = ["frontend", "shared", "package.json", "pnpm-lock.yaml", "scripts/dev.mjs"]
+command = ["node", "scripts/dev.mjs", "frontend"]
+output = "dist/frontend"
+
+[backend]
+inputs = ["backend", "shared", "package.json", "pnpm-lock.yaml", "scripts/dev.mjs"]
+command = ["node", "scripts/dev.mjs", "backend"]
+output = "dist/server.js"
+
+[run]
+command = ["node", "{debug_args}", "{artifact}"]
+debug_arguments = ["--inspect=127.0.0.1:{debug_port}"]
+health = "/health"

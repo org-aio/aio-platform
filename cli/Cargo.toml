@@ -1,6 +1,6 @@
 [package]
 name = "az-aio-cli"
-version.workspace = true
+version = "2026.9.14"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -14,15 +14,22 @@ name = "aio"
 path = "src/main.rs"
 
 [dependencies]
+az-plugin-development = { path = "../lib/plugin/development" }
+tokio = { workspace = true, features = ["rt-multi-thread", "process", "signal", "fs"] }
+uuid.workspace = true
+sha2.workspace = true
+semver.workspace = true
 include_dir = "0.7.4"
 anyhow.workspace = true
 az-plugin-manifest = { workspace = true, features = ["schema", "validation"] }
 az-plugin-package.workspace = true
-reqwest.workspace = true
+az-plugin-bundle = { path = "../lib/plugin/bundle" }
+reqwest = { workspace = true, features = ["json"] }
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 toml_edit.workspace = true
+serde_yaml = "0.9.34"
 
 [dev-dependencies]
 tempfile = "3.23.0"

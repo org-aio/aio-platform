@@ -49,8 +49,9 @@ impl DatabaseProvisioner {
         initial_schema: &str,
     ) -> Result<ScopedDatabase> {
         let schema = namespace(source, tenant);
-        let role = format!("r_{schema}");
-        let owner = format!("o_{schema}");
+        let names = role_namespace(&self.connection, source, tenant);
+        let role = format!("r_{names}");
+        let owner = format!("o_{names}");
         let mut random = [0u8; 32];
         getrandom::fill(&mut random)
             .map_err(|error| anyhow::anyhow!("生成数据库凭据失败: {error}"))?;
@@ -114,6 +115,24 @@ impl DatabaseProvisioner {
         )
         .await
     }
+}
+
+pub(crate) fn role_namespace(connection: &PgConnectOptions, source: &str, tenant: &str) -> String {
+    // PostgreSQL 角色属于实例级对象；同一插件在不同数据库中必须使用不同凭据。
+    let database = connection
+        .get_database()
+        .unwrap_or(connection.get_username());
+    namespace(&format!("{}:{database}{source}", database.len()), tenant)
+}
+
+pub(crate) fn validate_role(role: &str) -> Result<()> {
+    ensure!(
+        role.len() == 44
+            && role.starts_with("r_p_")
+            && role[4..].bytes().all(|b| b.is_ascii_hexdigit()),
+        "持久数据库角色无效"
+    );
+    Ok(())
 }
 
 pub(crate) fn namespace(source: &str, tenant: &str) -> String {

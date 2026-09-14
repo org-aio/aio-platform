@@ -1,0 +1,16 @@
+version = 1
+
+[frontend]
+inputs = ["frontend", "shared", "build.module-template.yaml", "project.yaml", "kotlin", "kotlin-toolchain.properties"]
+command = ["aio", "plugin", "dev-build", "kotlin-frontend"]
+output = "build/development/tasks/_frontend_buildWasmJsAppWasmJsDebug"
+
+[backend]
+inputs = ["backend/service", "shared", "build.module-template.yaml", "project.yaml", "kotlin", "kotlin-toolchain.properties"]
+command = ["./kotlin", "package", "-m", "service", "-p", "jvm", "-f", "executable-jar"]
+output = "build/tasks/_service_executableJarJvm/service-jvm-executable.jar"
+
+[run]
+command = ["./kotlin", "run", "-m", "service", "-p", "jvm", "{debug_args}"]
+debug_arguments = ["--jvm-args", "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=127.0.0.1:{debug_port}"]
+health = "/health"

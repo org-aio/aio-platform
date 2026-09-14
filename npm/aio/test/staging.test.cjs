@@ -18,6 +18,11 @@ test("从各平台构建产物生成受限平台包", (context) => {
     const artifact = path.join(artifacts, platform.id, platform.executable);
     fs.mkdirSync(path.dirname(artifact), { recursive: true });
     fs.writeFileSync(artifact, platform.id);
+    if (platform.developmentHost) {
+      fs.writeFileSync(path.join(path.dirname(artifact), "aio-host"), platform.id);
+      fs.mkdirSync(path.join(path.dirname(artifact), "web"));
+      fs.writeFileSync(path.join(path.dirname(artifact), "web/index.html"), "Sandbox");
+    }
   }
 
   execFileSync(
@@ -58,6 +63,8 @@ test("从各平台构建产物生成受限平台包", (context) => {
     )[0];
     const packedFiles = packed.files.map((file) => file.path);
     assert.ok(packedFiles.includes(`bin/${platform.executable}`));
+    assert.equal(packedFiles.includes("bin/aio-host"), Boolean(platform.developmentHost));
+    assert.equal(packedFiles.includes("bin/web/index.html"), Boolean(platform.developmentHost));
     assert.ok(packedFiles.includes("LICENSE-APACHE"));
     assert.ok(packedFiles.includes("LICENSE-MIT"));
   }
