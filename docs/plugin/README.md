@@ -167,7 +167,7 @@ Wasm Component 必须实现 [`aio:plugin/page@1`](wit/page.wit)：`definition() 
 
 上面的双页面示例还需将 `aio-plugin.toml` 现有 `[[plugin.subplugins]]` 中的 `pages` 改为 `['business-dashboard', 'business-reports']`。只改目录或标题且页面 id 不变时，无需改这个列表。
 
-树状文档统一适用于静态 `page-definition` 产物、Wasm `definition` 和 process `/aio/definition`。需使用包含 `parse_page_definitions` 的 CLI 与宿主；此前发布的 npm `2026.5.10` 不含此功能。内部协议与数据库继续存储展开后的 `PageDefinition` 列表，不需要数据迁移。
+树状文档统一适用于静态 `page-definition` 产物、Wasm `definition` 和 process `/aio/definition`。需使用包含 `parse_page_definitions` 的 CLI 与 AIO IDEA `2026.9.14` 或以上宿主；已有插件改用树时，也应将 `[plugin.runtime].host_version` 设为 `">=2026.9.14"`。此前发布的 npm `2026.5.10` 不含此功能。内部协议与数据库继续存储展开后的 `PageDefinition` 列表，不需要数据迁移。
 
 生成项目中的说明来源见 [KMP 模板 README](../../cli/templates/plugin/fullstack/kotlin/README.md)。
 

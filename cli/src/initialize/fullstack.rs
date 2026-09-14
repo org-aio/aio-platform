@@ -103,6 +103,11 @@ mod tests {
             assert!(manifest.plugin.runtime.is_some());
             assert!(manifest.plugin.frontend.is_some());
             if language == PluginLanguage::Kotlin {
+                assert!(
+                    az_plugin_manifest::validate_host_compatibility(&manifest, "2026.9.11")
+                        .is_err()
+                );
+                az_plugin_manifest::validate_host_compatibility(&manifest, "2026.9.14")?;
                 let pages = az_plugin_manifest::parse_page_definitions(&fs::read(
                     root.join("backend/service/resources/pages.json"),
                 )?)?;

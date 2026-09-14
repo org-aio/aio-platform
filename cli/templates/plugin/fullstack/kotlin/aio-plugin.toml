@@ -1,7 +1,7 @@
 [plugin.runtime]
 kind = "process"
 artifact = "dist/plugin.jar"
-host_version = ">=2026.9.11"
+host_version = ">=2026.9.14"
 container_image = "eclipse-temurin:21-jre@sha256:5c67d24ee8e3dd810b2a0cb6c3827ced2ac5d22729538f90b36c2b9d77678bb8"
 entrypoint = ["java", "-Xms16m", "-Xmx96m", "-XX:MaxMetaspaceSize=80m", "-XX:+UseSerialGC", "-jar", "{artifact}"]
 health_check = "/health"

@@ -50,6 +50,6 @@ aio plugin validate .
 
 构建后按项目发布流程发布新版本并激活，宿主才会采用新导航。修改本地 JSON 不会直接改变已安装版本。当前初始化命令没有 `--scene` 或 `--menu-path` 参数。
 
-树状配置需要包含 `parse_page_definitions` 导航解析器的 CLI 与宿主。此前发布的 npm `2026.5.10` 不含此功能，需要更新工具和宿主后再使用；升级宿主不会改写已有数据库页面列表。
+树状配置需要包含 `parse_page_definitions` 导航解析器的 CLI 与 AIO IDEA `2026.9.14` 或以上宿主，模板已声明最低宿主版本。此前发布的 npm `2026.5.10` 不含此功能，需要更新工具和宿主后再使用；升级宿主不会改写已有数据库页面列表。
 
 完整双页面示例见 [中文插件开发指南：KMP 多级菜单](https://github.com/zjarlin/aio-platform/blob/main/docs/plugin/README.md#kmp-插件自定义顶部分组与多级菜单)。
