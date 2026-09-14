@@ -1,0 +1,28 @@
+{
+  "host": "macOS arm64",
+  "package": "Linux x64 ELF",
+  "allowed": {
+    "brokerStatus": 200,
+    "result": {
+      "body": [
+        {
+          "id": "f96c08cdc241caaa8ad4457d17f48582",
+          "modelBinding": null,
+          "personal": true,
+          "role": "OWNER",
+          "title": "个人记忆"
+        }
+      ],
+      "status": 200
+    }
+  },
+  "denied": {
+    "brokerStatus": 403,
+    "result": {
+      "error": "资料不可用或调用未授权"
+    }
+  },
+  "networkDisabled": true,
+  "readonlyRoot": true,
+  "errors": []
+}

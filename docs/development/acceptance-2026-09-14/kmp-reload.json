@@ -1,0 +1,14 @@
+{
+  "backendRetained": true,
+  "routeRetained": true,
+  "results": [
+    {
+      "name": "desktop",
+      "reloadMs": 51301
+    },
+    {
+      "name": "mobile",
+      "reloadMs": 51562
+    }
+  ]
+}

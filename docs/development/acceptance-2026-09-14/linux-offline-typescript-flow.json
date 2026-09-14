@@ -1,0 +1,14 @@
+{
+  "url": "http://127.0.0.1:58144",
+  "noRemote": true,
+  "loadedPlugins": 1,
+  "reloadMs": 6490,
+  "before": "linux-sandbox-typescript\nTypeScript Counter\n0\n+1\n服务计数\n1\n请求后端 +1\n\ndevelopment",
+  "after": "linux-sandbox-typescript\nTypeScript Counter Sandbox\n0\n+1\n服务计数\n1\n请求后端 +1\n\ndevelopment",
+  "backendProcessRetained": true,
+  "compileFailureKeptPage": true,
+  "restoreClearedError": true,
+  "unchangedPollKeptMount": true,
+  "errors": [],
+  "outboundInternetDenied": true
+}

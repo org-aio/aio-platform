@@ -1,0 +1,8 @@
+{
+  "language": "kotlin",
+  "outboundInternetDenied": true,
+  "totalReloadMs": 29001,
+  "activationToMountMs": 4,
+  "activationToVisibleMs": 7685,
+  "errors": []
+}

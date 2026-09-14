@@ -1,0 +1,8 @@
+{
+  "language": "rust",
+  "outboundInternetDenied": true,
+  "totalReloadMs": 22954,
+  "activationToMountMs": 5,
+  "activationToVisibleMs": 6632,
+  "errors": []
+}

@@ -1,0 +1,9 @@
+{
+  "language": "kotlin",
+  "platform": "linux-x64",
+  "warmBuild": true,
+  "totalReloadMs": 69589,
+  "activationToMountMs": 13,
+  "activationToVisibleMs": 10938,
+  "errors": []
+}

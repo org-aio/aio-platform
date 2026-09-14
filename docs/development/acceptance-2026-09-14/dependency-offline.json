@@ -1,0 +1,12 @@
+{
+  "pages": [
+    "published-dependency-sandbox",
+    "Dioxus 全栈计数器"
+  ],
+  "source": "https://github.com/zjarlin/aio-plugin-dioxus-fullstack.git",
+  "sha": "2d08be28be88eade7715537bf882af0b9f9b87a5",
+  "digest": "c05bdeca15bb6a09b5713ff27612c123666f836ee279d79d2b8bd4defc5a8c8d",
+  "version": "1.0.1",
+  "frontendBackend": true,
+  "errors": []
+}

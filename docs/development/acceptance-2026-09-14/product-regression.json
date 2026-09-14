@@ -1,0 +1,20 @@
+[
+  {
+    "test": "bootstrap",
+    "database": "aio_startup_test",
+    "passed": true,
+    "log": "/Users/zjarlin/aio/workspace/zjarlin/aio/aio-platform/target/sandbox-acceptance/product-bootstrap.log"
+  },
+  {
+    "test": "frontend",
+    "database": "aio_extraction_frontend_d5d041b4",
+    "passed": true,
+    "log": "/Users/zjarlin/aio/workspace/zjarlin/aio/aio-platform/target/sandbox-acceptance/product-frontend.log"
+  },
+  {
+    "test": "publication",
+    "database": "aio_extraction_publication_0fbffa5e",
+    "passed": true,
+    "log": "/Users/zjarlin/aio/workspace/zjarlin/aio/aio-platform/target/sandbox-acceptance/product-publication.log"
+  }
+]

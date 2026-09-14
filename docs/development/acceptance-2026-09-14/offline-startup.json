@@ -1,0 +1,17 @@
+[
+  {
+    "language": "rust",
+    "warmStartupMs": 25444,
+    "networkPolicy": "external outbound denied; loopback and Unix sockets allowed"
+  },
+  {
+    "language": "kotlin-fresh",
+    "warmStartupMs": 16831,
+    "networkPolicy": "external outbound denied; loopback and Unix sockets allowed"
+  },
+  {
+    "language": "typescript-docker",
+    "warmStartupMs": 6388,
+    "networkPolicy": "external outbound denied; loopback and Unix sockets allowed"
+  }
+]

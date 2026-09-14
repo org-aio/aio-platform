@@ -1,0 +1,7 @@
+{
+  "continuousSaves": true,
+  "staleBuildNotActivated": true,
+  "onlyFinalRevisionMounted": true,
+  "sharedModelFrontendValue": 2,
+  "sharedModelBackendValue": 2
+}

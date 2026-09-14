@@ -1,0 +1,128 @@
+[
+  {
+    "mobile": false,
+    "catalogPages": [
+      "计数器示例",
+      "任务工作台示例"
+    ],
+    "marketplace": [
+      {
+        "git": "https://github.com/zjarlin/aio-plugin-screen.git",
+        "revision": "bb9d641da06bb1dbb67daf0b5974cae1c16e367cad09cf1f3c09d69e95c6b0ef",
+        "installed": false
+      },
+      {
+        "git": "https://github.com/zjarlin/aio-plugin-agent.git",
+        "revision": "99774f7b5a4fccb82182c69a6596048291258a7c7eab703b129dac0130905234",
+        "installed": false
+      },
+      {
+        "git": "https://github.com/zjarlin/aio-plugin-agent-memory.git",
+        "revision": "20aadce31823c688e7481eda0aebe4dc0a6b30de2856834dd1d6e24b81767c74",
+        "installed": false
+      },
+      {
+        "git": "https://github.com/zjarlin/aio-plugin-dioxus-fullstack.git",
+        "revision": "a78e33cc18f47918ee503dd7e8fbcf1606da8f2b7229870ee46b58d9c413fa79",
+        "installed": true
+      },
+      {
+        "git": "https://github.com/zjarlin/aio-plugin-kmp-example.git",
+        "revision": "a66c931256755ef459d3890444f9dbe952f02e091b2da168d8820deec9f48de7",
+        "installed": true
+      }
+    ],
+    "releases": [
+      {
+        "version": "0.0.0-dev.25+739becece2a22aa1451f3b12111fa155d473fba9",
+        "sha": "739becece2a22aa1451f3b12111fa155d473fba9",
+        "digest": "a78e33cc18f47918ee503dd7e8fbcf1606da8f2b7229870ee46b58d9c413fa79"
+      },
+      {
+        "version": "0.0.0-dev.20+dfac21e6feb1b62cb094fc9c1be4b16ac0cbe39d",
+        "sha": "dfac21e6feb1b62cb094fc9c1be4b16ac0cbe39d",
+        "digest": "2b3110a84f4558b3f6cfb3cad3b24b17b1161a43346bd55dfc5bccfb7a1b735b"
+      },
+      {
+        "version": "0.0.0-dev.1+5d6bc5d473ce5a87b16d423e2611eb77f6893b3a",
+        "sha": "5d6bc5d473ce5a87b16d423e2611eb77f6893b3a",
+        "digest": "1522c984902f85b3fde40a6b43d54210c255e3fbd471f230f90b028ba0221039"
+      },
+      {
+        "version": "1.0.1",
+        "sha": "2d08be28be88eade7715537bf882af0b9f9b87a5",
+        "digest": "c05bdeca15bb6a09b5713ff27612c123666f836ee279d79d2b8bd4defc5a8c8d"
+      },
+      {
+        "version": "1.0.0",
+        "sha": "80475dfba5508016a977ba34c931253b0fce5fe7",
+        "digest": "2728478f6a3c34cc75dc0fdde05bf1ec02d262240696fe4ea13490c90ead4ffe"
+      }
+    ],
+    "counter": "KMP Counter3",
+    "errors": []
+  },
+  {
+    "mobile": true,
+    "catalogPages": [
+      "计数器示例",
+      "任务工作台示例"
+    ],
+    "marketplace": [
+      {
+        "git": "https://github.com/zjarlin/aio-plugin-screen.git",
+        "revision": "bb9d641da06bb1dbb67daf0b5974cae1c16e367cad09cf1f3c09d69e95c6b0ef",
+        "installed": false
+      },
+      {
+        "git": "https://github.com/zjarlin/aio-plugin-agent.git",
+        "revision": "99774f7b5a4fccb82182c69a6596048291258a7c7eab703b129dac0130905234",
+        "installed": false
+      },
+      {
+        "git": "https://github.com/zjarlin/aio-plugin-agent-memory.git",
+        "revision": "20aadce31823c688e7481eda0aebe4dc0a6b30de2856834dd1d6e24b81767c74",
+        "installed": false
+      },
+      {
+        "git": "https://github.com/zjarlin/aio-plugin-dioxus-fullstack.git",
+        "revision": "a78e33cc18f47918ee503dd7e8fbcf1606da8f2b7229870ee46b58d9c413fa79",
+        "installed": true
+      },
+      {
+        "git": "https://github.com/zjarlin/aio-plugin-kmp-example.git",
+        "revision": "a66c931256755ef459d3890444f9dbe952f02e091b2da168d8820deec9f48de7",
+        "installed": true
+      }
+    ],
+    "releases": [
+      {
+        "version": "0.0.0-dev.25+739becece2a22aa1451f3b12111fa155d473fba9",
+        "sha": "739becece2a22aa1451f3b12111fa155d473fba9",
+        "digest": "a78e33cc18f47918ee503dd7e8fbcf1606da8f2b7229870ee46b58d9c413fa79"
+      },
+      {
+        "version": "0.0.0-dev.20+dfac21e6feb1b62cb094fc9c1be4b16ac0cbe39d",
+        "sha": "dfac21e6feb1b62cb094fc9c1be4b16ac0cbe39d",
+        "digest": "2b3110a84f4558b3f6cfb3cad3b24b17b1161a43346bd55dfc5bccfb7a1b735b"
+      },
+      {
+        "version": "0.0.0-dev.1+5d6bc5d473ce5a87b16d423e2611eb77f6893b3a",
+        "sha": "5d6bc5d473ce5a87b16d423e2611eb77f6893b3a",
+        "digest": "1522c984902f85b3fde40a6b43d54210c255e3fbd471f230f90b028ba0221039"
+      },
+      {
+        "version": "1.0.1",
+        "sha": "2d08be28be88eade7715537bf882af0b9f9b87a5",
+        "digest": "c05bdeca15bb6a09b5713ff27612c123666f836ee279d79d2b8bd4defc5a8c8d"
+      },
+      {
+        "version": "1.0.0",
+        "sha": "80475dfba5508016a977ba34c931253b0fce5fe7",
+        "digest": "2728478f6a3c34cc75dc0fdde05bf1ec02d262240696fe4ea13490c90ead4ffe"
+      }
+    ],
+    "counter": "KMP Counter3",
+    "errors": []
+  }
+]

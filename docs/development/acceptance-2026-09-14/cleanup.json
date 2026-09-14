@@ -1,0 +1,9 @@
+{
+  "localSandboxProcessesStopped": true,
+  "linuxSandboxProcessesStopped": true,
+  "ownedPostgresStopped": true,
+  "productionTestSessionRevoked": true,
+  "developmentDataAndCachesRetained": true,
+  "colimaProfile": "aio-dev, left available for local development",
+  "productionService": "active, unchanged during test cleanup"
+}

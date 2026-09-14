@@ -1,0 +1,13 @@
+READY site.addzero.aio.example.tasks.TaskStore:28
+HIT TaskStore.kt:28
+VARIABLE tenantId="development"
+VARIABLE userId="developer"
+VARIABLE search=""
+VARIABLE $completion=instance of site.addzero.aio.example.tasks.TaskRoutesKt$taskRoutes$1(id=7)
+VARIABLE $continuation=instance of site.addzero.aio.example.tasks.TaskStore$page$1(id=9)
+VARIABLE $result=null
+VARIABLE $i$f$withLock=0
+VARIABLE owner$iv=null
+VARIABLE $this$withLock_u24default$iv=instance of kotlinx.coroutines.sync.MutexImpl(id=11)
+VARIABLE $i$a$-withLock$default-TaskStore$page$2=0
+RESUME after 32 seconds

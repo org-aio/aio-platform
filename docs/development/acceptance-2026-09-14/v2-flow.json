@@ -1,0 +1,26 @@
+{
+  "allowed": {
+    "brokerStatus": 200,
+    "result": {
+      "body": [
+        {
+          "id": "053b1b289e2cb2622a19166fabbdd030",
+          "modelBinding": null,
+          "personal": true,
+          "role": "OWNER",
+          "title": "个人记忆"
+        }
+      ],
+      "status": 200
+    }
+  },
+  "denied": {
+    "brokerStatus": 403,
+    "result": {
+      "error": "资料不可用或调用未授权"
+    }
+  },
+  "elapsed": 806,
+  "backendRetained": true,
+  "errors": []
+}

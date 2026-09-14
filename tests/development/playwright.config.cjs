@@ -1,6 +1,8 @@
 const { defineConfig } = require('@playwright/test');
 const path = require('node:path');
-const output = path.resolve(__dirname, '../../target/development-report');
+const output = process.env.AIO_SANDBOX_REPORT_DIR
+  ? path.resolve(process.env.AIO_SANDBOX_REPORT_DIR)
+  : path.resolve(__dirname, '../../target/development-report');
 module.exports = defineConfig({
   testDir: __dirname,
   testMatch: '*.spec.cjs',

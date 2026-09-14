@@ -1,0 +1,9 @@
+{
+  "language": "rust",
+  "platform": "linux-x64",
+  "warmBuild": true,
+  "totalReloadMs": 65422,
+  "activationToMountMs": 41,
+  "activationToVisibleMs": 8585,
+  "errors": []
+}

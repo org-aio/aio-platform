@@ -1,0 +1,10 @@
+{
+  "language": "kotlin",
+  "platform": "linux-x64",
+  "warmBuild": true,
+  "outboundInternetDenied": true,
+  "totalReloadMs": 57110,
+  "activationToMountMs": 13,
+  "activationToVisibleMs": 2878,
+  "errors": []
+}

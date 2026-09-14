@@ -1,0 +1,14 @@
+{
+  "network": "aio-sandbox-offline-20260914",
+  "internal": true,
+  "publicAccessProbes": {
+    "typescript": "blocked",
+    "kotlin": "blocked",
+    "rust": "blocked"
+  },
+  "database": "dedicated PostgreSQL on the internal network",
+  "browserAccess": "SSH tunnel to test-only container proxy; host remains on loopback",
+  "distribution": "GitHub Linux x64 artifact for npm 2026.9.14",
+  "frontendBackend": true,
+  "sourceChanges": true
+}

@@ -1,0 +1,34 @@
+[
+  {
+    "coldDatabase": true,
+    "hostMs": 1550,
+    "sigtermExitCode": 0,
+    "containerStopped": true,
+    "listenerClosed": true
+  },
+  {
+    "manuallyEditedRunConfigurationPreserved": true
+  },
+  {
+    "occupiedPortRejected": true,
+    "failedStartupStoppedDatabase": true
+  },
+  {
+    "otherWorkspaceDatabaseRejected": true,
+    "externalDatabaseNotStopped": true
+  },
+  {
+    "coldDatabase": true,
+    "hostMs": 1536,
+    "sigtermExitCode": 0,
+    "containerStopped": true,
+    "listenerClosed": true
+  },
+  {
+    "coldDatabase": true,
+    "hostMs": 1538,
+    "sigtermExitCode": 0,
+    "containerStopped": true,
+    "listenerClosed": true
+  }
+]

@@ -115,7 +115,7 @@ version = "^1.0"
 ## 从源码验证分发
 
 ```sh
-cargo +nightly build -p az-aio-cli -p aio-host
+cargo build -p az-aio-cli -p aio-host
 dx build --package aio-host --platform web --release --no-default-features --features web --debug-symbols false
 AIO_DEV_HOST="$PWD/target/debug/aio-host" \
 AIO_DEV_WEB_DIST="$PWD/target/dx/aio-host/release/web/public" \
@@ -123,3 +123,5 @@ AIO_DEV_WEB_DIST="$PWD/target/dx/aio-host/release/web/public" \
 ```
 
 npm 的 macOS arm64 和 Linux x64 分发包含同版本 `aio`、`aio-host` 和 `web/`。仅 `cargo install --path cli` 安装的是 CLI 可执行文件，需要额外提供配套开发宿主与 Web 资源。其他平台保留原有 CLI 能力，不据此声称已完成本轮沙箱调试验收。
+
+本轮平台、分发、调试、离线和生产验证见 [2026-09-14 验收报告](acceptance-2026-09-14/README.md)。

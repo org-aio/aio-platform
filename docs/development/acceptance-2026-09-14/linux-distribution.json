@@ -1,0 +1,9 @@
+{
+  "platform": "linux-x64",
+  "version": "2026.9.14",
+  "source": "GitHub release artifact",
+  "bundledHostAndWeb": true,
+  "frontendBackend": true,
+  "glibcCompatibility": "CLI and host version commands passed directly on CentOS 7 glibc 2.17; development ran in Ubuntu 26.04 container with Node 22",
+  "errors": []
+}

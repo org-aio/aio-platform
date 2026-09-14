@@ -1,0 +1,32 @@
+[
+  {
+    "language": "typescript",
+    "hostVersion": "2026.9.14",
+    "project": "/Users/zjarlin/aio/workspace/zjarlin/aio/aio-platform/target/distribution-acceptance/projects-YrOXWZ/typescript",
+    "freshProjectMs": 5784,
+    "cachedRestartMs": 1116,
+    "noRemote": true,
+    "bundledHost": true,
+    "frontendBackend": true
+  },
+  {
+    "language": "kotlin",
+    "hostVersion": "2026.9.14",
+    "project": "/Users/zjarlin/aio/workspace/zjarlin/aio/aio-platform/target/distribution-acceptance/projects-YrOXWZ/kotlin",
+    "freshProjectMs": 37614,
+    "cachedRestartMs": 2849,
+    "noRemote": true,
+    "bundledHost": true,
+    "frontendBackend": true
+  },
+  {
+    "language": "rust",
+    "hostVersion": "2026.9.14",
+    "project": "/Users/zjarlin/aio/workspace/zjarlin/aio/aio-platform/target/distribution-acceptance/projects-YrOXWZ/rust",
+    "freshProjectMs": 55023,
+    "cachedRestartMs": 1627,
+    "noRemote": true,
+    "bundledHost": true,
+    "frontendBackend": true
+  }
+]

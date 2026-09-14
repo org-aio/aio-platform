@@ -1,0 +1,10 @@
+{
+  "language": "rust",
+  "platform": "linux-x64",
+  "warmBuild": true,
+  "outboundInternetDenied": true,
+  "totalReloadMs": 40362,
+  "activationToMountMs": 7,
+  "activationToVisibleMs": 1955,
+  "errors": []
+}

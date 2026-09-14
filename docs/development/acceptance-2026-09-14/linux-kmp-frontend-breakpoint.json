@@ -1,0 +1,493 @@
+{
+  "count": {
+    "result": [
+      {
+        "name": "type",
+        "value": {
+          "type": "string",
+          "value": "i64"
+        },
+        "writable": false,
+        "configurable": false,
+        "enumerable": true,
+        "isOwn": true
+      },
+      {
+        "name": "value",
+        "value": {
+          "type": "bigint",
+          "unserializableValue": "0n",
+          "description": "0n"
+        },
+        "writable": false,
+        "configurable": false,
+        "enumerable": true,
+        "isOwn": true
+      }
+    ]
+  },
+  "source": "file:///opt/aio-sandbox-acceptance-20260914/projects/kotlin/frontend/src/site/addzero/aio/linux_sandbox_kotlin/CounterPage.kt",
+  "sourceLine": 20,
+  "mapURL": "http://127.0.0.1:58148/api/runtime/frontend/assets/<capability>/frontend.wasm.map",
+  "breakpoint": {
+    "breakpointId": "4:0:12320521:35",
+    "actualLocation": {
+      "scriptId": "35",
+      "lineNumber": 0,
+      "columnNumber": 12320521
+    }
+  },
+  "frame": {
+    "name": "$site.addzero.aio.linux_sandbox_kotlin.CounterPage",
+    "location": {
+      "scriptId": "35",
+      "lineNumber": 0,
+      "columnNumber": 12320521
+    }
+  },
+  "scopes": [
+    {
+      "result": [
+        {
+          "name": "$count",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "i64",
+            "objectId": "4109533223386917323.7.122"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$onIncrement",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref $site.addzero.aio.linux_sandbox_kotlin.WorkbenchPage$lambda$lambda$lambda)",
+            "objectId": "4109533223386917323.7.123"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$$composer",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref $androidx.compose.runtime.GapComposer)",
+            "objectId": "4109533223386917323.7.124"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$$changed",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "i32",
+            "objectId": "4109533223386917323.7.125"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$$dirty",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "i32",
+            "objectId": "4109533223386917323.7.126"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$~tmp0",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref $androidx.compose.ui.CombinedModifier)",
+            "objectId": "4109533223386917323.7.127"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$~this",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "i32",
+            "objectId": "4109533223386917323.7.128"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$~tmp2",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref $androidx.compose.foundation.layout.SpacedAligned)",
+            "objectId": "4109533223386917323.7.129"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$~tmp4",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref null $kotlin.Any)",
+            "objectId": "4109533223386917323.7.130"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$~tmp6",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref $androidx.compose.runtime.GapComposer)",
+            "objectId": "4109533223386917323.7.131"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$~tmp8",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "i32",
+            "objectId": "4109533223386917323.7.132"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$~tmp10",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "i32",
+            "objectId": "4109533223386917323.7.133"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$~modifier",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref $androidx.compose.ui.CombinedModifier)",
+            "objectId": "4109533223386917323.7.134"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$~verticalArrangement",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref $androidx.compose.foundation.layout.SpacedAligned)",
+            "objectId": "4109533223386917323.7.135"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$~horizontalAlignment",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref null $kotlin.Any)",
+            "objectId": "4109533223386917323.7.136"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$~$composer",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref $androidx.compose.runtime.GapComposer)",
+            "objectId": "4109533223386917323.7.137"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$~$changed",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "i32",
+            "objectId": "4109533223386917323.7.138"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$~$default",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "i32",
+            "objectId": "4109533223386917323.7.139"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$modifier",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref $androidx.compose.ui.CombinedModifier)",
+            "objectId": "4109533223386917323.7.140"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$verticalArrangement",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref $androidx.compose.foundation.layout.SpacedAligned)",
+            "objectId": "4109533223386917323.7.141"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$horizontalAlignment",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref $androidx.compose.ui.Horizontal)",
+            "objectId": "4109533223386917323.7.142"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$measurePolicy",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref $androidx.compose.foundation.layout.ColumnMeasurePolicy)",
+            "objectId": "4109533223386917323.7.143"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$~measurePolicy",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref $androidx.compose.foundation.layout.ColumnMeasurePolicy)",
+            "objectId": "4109533223386917323.7.144"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$compositeKeyHash",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "i32",
+            "objectId": "4109533223386917323.7.145"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$localMap",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref $androidx.compose.runtime.internal.PersistentCompositionLocalHashMap)",
+            "objectId": "4109533223386917323.7.146"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$materialized",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref $androidx.compose.ui.CombinedModifier)",
+            "objectId": "4109533223386917323.7.147"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$~factory",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref $androidx.compose.ui.node.LayoutNode$Companion$Constructor$lambda)",
+            "objectId": "4109533223386917323.7.148"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$~tmp",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref $androidx.compose.ui.platform.DefaultUiApplier)",
+            "objectId": "4109533223386917323.7.149"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$~$this$ReusableComposeNode",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref $androidx.compose.runtime.GapComposer)",
+            "objectId": "4109533223386917323.7.150"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$~$this$Column",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref $androidx.compose.foundation.layout.ColumnScopeInstance)",
+            "objectId": "4109533223386917323.7.151"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        },
+        {
+          "name": "$~tmp0_safe_receiver",
+          "value": {
+            "type": "object",
+            "subtype": "wasmvalue",
+            "className": "Object",
+            "description": "(ref null $kotlin.Any)",
+            "objectId": "4109533223386917323.7.152"
+          },
+          "writable": false,
+          "configurable": false,
+          "enumerable": true,
+          "isOwn": true
+        }
+      ]
+    }
+  ],
+  "step": {
+    "scriptId": "35",
+    "lineNumber": 0,
+    "columnNumber": 12320525
+  }
+}
