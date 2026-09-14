@@ -13,7 +13,7 @@
     if (message.error) call.reject(new Error(message.error));
     else call.resolve({ ...message.response, body: new Uint8Array(message.response.body) });
   });
-  const request = (input) => new Promise((resolve, reject) => {
+  const sendRequest = (input) => new Promise((resolve, reject) => {
     if (pending.size >= 16) return reject(new Error("Too many pending requests"));
     if (!input || typeof input.path !== "string" || !input.path.startsWith("/") || input.path.startsWith("//")) return reject(new Error("Invalid service path"));
     const url = new URL(input.path, "https://aio.invalid");
@@ -28,6 +28,9 @@
       request: { method: input.method ?? "GET", path: url.pathname, query: input.query ?? (url.search.slice(1) || null),
         headers: input.headers ?? [], body } }, "*");
   });
+  const request = input => window.aioLifecycle
+    ? window.aioLifecycle.whenActive().then(() => sendRequest(input))
+    : sendRequest(input);
   const json = async (method, path, value) => {
     const response = await request({ method, path,
       headers: value === undefined ? [] : [{ name: "content-type", value: "application/json" }],

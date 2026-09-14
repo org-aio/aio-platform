@@ -38,8 +38,17 @@ struct Execution {
 
 impl ComponentEngine {
     pub fn new() -> Result<Self> {
+        Self::configured(None)
+    }
+
+    pub fn with_cache(directory: &std::path::Path) -> Result<Self> {
+        Self::configured(Some(crate::compilation_cache(directory)?))
+    }
+
+    fn configured(cache: Option<wasmtime::Cache>) -> Result<Self> {
         let mut config = Config::new();
         config
+            .cache(cache)
             .wasm_component_model(true)
             .wasm_gc(true)
             .wasm_function_references(true)

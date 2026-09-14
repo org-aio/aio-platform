@@ -26,9 +26,20 @@ pub struct VerifiedBundle {
     pub(crate) manifest: BundleManifest,
     pub(crate) files: BTreeMap<String, Vec<u8>>,
     pub(crate) digest: String,
+    pub(crate) frontend_assets: BTreeMap<String, FrontendAsset>,
+}
+
+#[derive(Debug)]
+pub struct FrontendAsset {
+    pub digest: String,
+    pub size: usize,
 }
 
 impl VerifiedBundle {
+    pub fn frontend_assets(&self) -> &BTreeMap<String, FrontendAsset> {
+        &self.frontend_assets
+    }
+
     pub fn digest(&self) -> &str {
         &self.digest
     }

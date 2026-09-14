@@ -109,6 +109,20 @@ fn bundle() -> Bundle {
 }
 
 #[test]
+fn frontend_metadata_is_bound_to_verified_bytes() -> Result<()> {
+    use sha2::{Digest, Sha256};
+    let verified = bundle().verify()?;
+    assert_eq!(verified.frontend_assets().len(), 2);
+    for (name, bytes) in verified.frontend_files() {
+        let asset = &verified.frontend_assets()[name];
+        assert_eq!(asset.size, bytes.len());
+        assert_eq!(asset.digest, format!("{:x}", Sha256::digest(bytes)));
+    }
+    assert!(!verified.frontend_assets().contains_key("dist/plugin.wasm"));
+    Ok(())
+}
+
+#[test]
 fn entire_release_roundtrips_deterministically() -> Result<()> {
     let original = bundle();
     let encoded = original.encode()?;

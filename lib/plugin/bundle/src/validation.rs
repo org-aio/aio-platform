@@ -64,6 +64,7 @@ impl Bundle {
             .map(|value| format!("{}/", value.migrations));
         let mut remaining = MAX_BUNDLE_BYTES;
         let mut files = BTreeMap::new();
+        let mut frontend_assets = BTreeMap::new();
         let mut frontend_count = 0;
         let mut migration_count = 0;
         for (path, encoded) in &self.files {
@@ -98,6 +99,13 @@ impl Bundle {
                 }
             } else if path.starts_with(&frontend_prefix) {
                 frontend_count += 1;
+                frontend_assets.insert(
+                    path[frontend_prefix.len()..].to_owned(),
+                    crate::FrontendAsset {
+                        digest: format!("{:x}", Sha256::digest(&bytes)),
+                        size: bytes.len(),
+                    },
+                );
             } else if let Some(relative) = migration_prefix
                 .as_deref()
                 .and_then(|prefix| path.strip_prefix(prefix))
@@ -131,6 +139,7 @@ impl Bundle {
             manifest,
             files,
             digest: self.digest.clone(),
+            frontend_assets,
         })
     }
 

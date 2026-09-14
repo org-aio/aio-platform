@@ -1,5 +1,7 @@
 # Browser Bridge SDK
 
+`lifecycle.js` 由正式宿主先行注入。准备阶段仅初始化 UI 和资源；`aioPlugin.request/json` 等待宿主首次激活后才启动请求及超时计时。宿主通信桥再次检查激活状态，不能通过直接发消息绕过。未激活队列最多 16 项，租户暂停时拒绝待执行调用。已访问页面切走后保留实例；权限和版本撤销由宿主销毁挂载。开发预览未注入生命周期时沿用立即执行语义。
+
 `guest.js` 为隔离 iframe 提供二进制请求与 JSON 辅助接口。`host.mjs` 绑定单个窗口，不读取插件 DOM，不向插件暴露 Cookie 或管理票据。
 
 `request` 和 `json` 接收 `/graph?spaceId=...` 形式的服务地址，统一用 URL 解析器分离 v2 的 `path` 与 `query` 字段。也可显式传递 `request.query`，但不能同时在两个位置提供查询参数。地址必须属于当前插件，拒绝外部地址和片段。

@@ -16,7 +16,7 @@ serde_json.workspace = true
 sha2.workspace = true
 sqlx = { workspace = true, features = ["uuid"] }
 tokio = { workspace = true, features = ["fs", "rt-multi-thread"] }
-wasmtime = { workspace = true, features = ["async", "component-model-async"] }
+wasmtime = { workspace = true, features = ["async", "component-model-async", "cache"] }
 wasmtime-wasi = { version = "48.0.1", default-features = false, features = ["p2"] }
 getrandom = "0.4.2"
 tracing.workspace = true
