@@ -117,6 +117,7 @@ impl PluginStore {
             .await
             .context("创建插件运行时表失败")?;
         super::marketplace_store::migrate(&self.pool).await?;
+        super::tools::migrate(&self.pool).await?;
         super::publisher_store::migrate(&self.pool).await?;
         super::package_store::migrate(&self.pool).await?;
         super::delivery::migrate(&self.pool).await?;

@@ -5,6 +5,7 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+az-tool = { path = "../../tool" }
 az-plugin-development = { path = "../development" }
 az-plugin-delivery = { path = "../delivery" }
 base64 = "0.22.1"

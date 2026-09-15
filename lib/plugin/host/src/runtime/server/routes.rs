@@ -92,6 +92,7 @@ pub fn router(state: RuntimeState) -> Router {
         .merge(super::delivery::router())
         .merge(super::components::router(state.clone()))
         .merge(super::bootstrap::router())
+        .merge(super::tools::router())
         .with_state(state)
 }
 
@@ -565,7 +566,7 @@ async fn rollback(
 async fn marketplace(
     State(state): State<RuntimeState>,
     headers: HeaderMap,
-) -> Result<Json<RuntimeResponse<Vec<MarketplaceEntry>>>, RuntimeError> {
+) -> Result<Json<RuntimeResponse<Vec<super::tools::MarketplaceItem>>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
     let catalog = catalog_value(&state, &session).await?;
     let mut entries = if let Some(components) = &state.components {
@@ -602,7 +603,12 @@ async fn marketplace(
             entries.push(unlisted_entry(plugin));
         }
     }
-    Ok(Json(RuntimeResponse { data: entries }))
+    let mut items = entries
+        .into_iter()
+        .map(super::tools::MarketplaceItem::Plugin)
+        .collect::<Vec<_>>();
+    items.extend(super::tools::entries(&state.store.pool).await?);
+    Ok(Json(RuntimeResponse { data: items }))
 }
 
 fn enrich_marketplace_entry(

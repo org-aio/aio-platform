@@ -38,6 +38,7 @@ mod store;
 mod supervisor;
 #[cfg(feature = "test-support")]
 pub mod test_support;
+mod tools;
 mod wasm;
 
 use std::{

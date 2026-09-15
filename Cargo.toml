@@ -5,6 +5,7 @@ members = [
     "delivery",
     "host",
     "lib/plugin/*",
+    "lib/tool",
 ]
 exclude = ["lib/dioxus-admin-workbench"]
 

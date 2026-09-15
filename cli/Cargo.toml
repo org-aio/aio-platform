@@ -1,6 +1,6 @@
 [package]
 name = "az-aio-cli"
-version = "2026.9.14"
+version = "2026.9.15"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -14,6 +14,7 @@ name = "aio"
 path = "src/main.rs"
 
 [dependencies]
+az-tool = { path = "../lib/tool", features = ["native"] }
 az-plugin-development = { path = "../lib/plugin/development" }
 tokio = { workspace = true, features = ["rt-multi-thread", "process", "signal", "fs"] }
 uuid.workspace = true

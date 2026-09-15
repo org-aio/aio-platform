@@ -1,0 +1,23 @@
+[package]
+name = "az-tool"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+semver.workspace = true
+url.workspace = true
+reqwest = { workspace = true, features = ["json"], optional = true }
+fs2 = { version = "0.4.3", optional = true }
+
+[features]
+native = ["dep:reqwest", "dep:fs2"]
+
+[dev-dependencies]
+tempfile = "3.23.0"
+
+[lints]
+workspace = true
