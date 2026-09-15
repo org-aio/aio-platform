@@ -3,12 +3,34 @@ use std::{fs, path::Path};
 use anyhow::Result;
 use include_dir::{Dir, include_dir};
 
-use super::PluginLanguage;
+use super::{PluginLanguage, WebFramework};
 
 static RUST: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/plugin/fullstack/rust");
 static KOTLIN: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/plugin/fullstack/kotlin");
 static TYPESCRIPT: Dir<'_> =
     include_dir!("$CARGO_MANIFEST_DIR/templates/plugin/fullstack/typescript");
+
+static WEB: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/plugin/fullstack/web");
+static NUXT: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/plugin/fullstack/nuxt");
+static NEXT: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/plugin/fullstack/next");
+
+pub(super) fn materialize_web(
+    root: &Path,
+    framework: WebFramework,
+    name: &str,
+    title: &str,
+) -> Result<()> {
+    materialize_directory(root, &WEB, name, title)?;
+    materialize_directory(
+        root,
+        match framework {
+            WebFramework::Nuxt => &NUXT,
+            WebFramework::Next => &NEXT,
+        },
+        name,
+        title,
+    )
+}
 
 pub(super) fn materialize(
     root: &Path,
@@ -21,6 +43,10 @@ pub(super) fn materialize(
         PluginLanguage::Kotlin => &KOTLIN,
         PluginLanguage::TypeScript => &TYPESCRIPT,
     };
+    materialize_directory(root, template, name, title)
+}
+
+fn materialize_directory(root: &Path, template: &Dir<'_>, name: &str, title: &str) -> Result<()> {
     let identifier = name.replace('-', "_");
     let title_json = serde_json::to_string(title)?;
     let escaped_title = &title_json[1..title_json.len() - 1];
@@ -70,6 +96,38 @@ pub(super) fn materialize(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn creates_framework_projects_with_valid_manifests_and_locked_dependencies() -> Result<()> {
+        for framework in [WebFramework::Nuxt, WebFramework::Next] {
+            let root = tempfile::tempdir()?;
+            materialize_web(root.path(), framework, "counter-example", "计数 \"A\"")?;
+            let manifest = az_plugin_manifest::read_manifest(root.path())?;
+            assert_eq!(
+                manifest.plugin.runtime.as_ref().unwrap().artifact,
+                "dist/server.cjs"
+            );
+            assert_eq!(
+                manifest.plugin.marketplace.as_ref().unwrap().title,
+                "计数 \"A\""
+            );
+            assert_eq!(manifest.plugin.subplugins[0].routes, ["api/counter"]);
+            let package: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(root.path().join("package.json"))?)?;
+            assert_eq!(package["name"], "counter-example");
+            let lock: serde_yaml::Value =
+                serde_yaml::from_str(&fs::read_to_string(root.path().join("pnpm-lock.yaml"))?)?;
+            for (name, version) in package["dependencies"].as_object().unwrap() {
+                assert_eq!(
+                    lock["importers"]["."]["dependencies"][name]["specifier"].as_str(),
+                    version.as_str()
+                );
+            }
+            fs::read_to_string(root.path().join("aio-dev.toml"))?
+                .parse::<toml_edit::DocumentMut>()?;
+        }
+        Ok(())
+    }
 
     #[test]
     fn creates_three_opted_in_fullstack_projects() -> Result<()> {

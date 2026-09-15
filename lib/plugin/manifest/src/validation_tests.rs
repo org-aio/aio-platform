@@ -331,3 +331,16 @@ fn rejects_artifact_symlink_that_leaves_repository() -> Result<()> {
     assert!(error.to_string().contains("符号链接"));
     Ok(())
 }
+
+#[test]
+fn validates_process_temporary_storage_budget() -> Result<()> {
+    let base = "[plugin.runtime]\nkind='process'\nartifact='server.cjs'\ncontainer_image='node:22@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3'\nentrypoint=['node','{artifact}']\nhealth_check='/health'\n";
+    for value in [16, 64, 128] {
+        parse_manifest(&format!("{base}temporary_storage_mb={value}\n"))?;
+    }
+    for value in [0, 15, 129, u64::MAX] {
+        assert!(parse_manifest(&format!("{base}temporary_storage_mb={value}\n")).is_err());
+    }
+    assert!(parse_manifest("[plugin.runtime]\nkind='page-definition'\nartifact='pages.json'\ntemporary_storage_mb=64\n").is_err());
+    Ok(())
+}

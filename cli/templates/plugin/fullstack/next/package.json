@@ -1,0 +1,24 @@
+{
+  "name": "__NAME__",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.2",
+  "scripts": {
+    "dev": "next dev frontend",
+    "build": "next build frontend --webpack && node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p frontend/tsconfig.json",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "next": "16.3.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "@types/node": "22.15.30",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3"
+  }
+}

@@ -99,6 +99,12 @@
           ],
           "default": null
         },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RepositoryDependency"
+          }
+        },
         "frontend": {
           "anyOf": [
             {
@@ -162,6 +168,22 @@
         "process"
       ]
     },
+    "RepositoryDependency": {
+      "type": "object",
+      "properties": {
+        "git": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "git",
+        "version"
+      ]
+    },
     "RepositoryPackage": {
       "type": "object",
       "properties": {
@@ -220,6 +242,14 @@
           ],
           "format": "uint64",
           "default": null,
+          "minimum": 0
+        },
+        "temporary_storage_mb": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
           "minimum": 0
         }
       },

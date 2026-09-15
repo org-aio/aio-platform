@@ -76,6 +76,8 @@ pub struct RuntimeManifest {
     pub health_check: Option<String>,
     #[serde(default)]
     pub shutdown_timeout_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temporary_storage_mb: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

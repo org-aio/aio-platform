@@ -432,7 +432,10 @@ fn container_arguments(
         "--memory-swap=268435456".to_owned(),
         "--cpus=0.50".to_owned(),
         "--ulimit=nofile=1024:1024".to_owned(),
-        "--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=16777216".to_owned(),
+        format!(
+            "--tmpfs=/tmp:rw,noexec,nosuid,nodev,size={}",
+            runtime.temporary_storage_mb.unwrap_or(16) * 1024 * 1024
+        ),
         "--ipc=private".to_owned(),
         format!("--mount={mount}"),
         "--workdir=/plugin".to_owned(),
@@ -558,7 +561,7 @@ mod tests {
     #[test]
     fn builds_locked_down_container_arguments() -> Result<()> {
         let repository = tempdir()?;
-        let runtime = RuntimeManifest {
+        let mut runtime = RuntimeManifest {
             kind: PluginRuntime::Process,
             artifact: "dist/plugin.js".to_owned(),
             host_version: None,
@@ -569,6 +572,7 @@ mod tests {
             entrypoint: vec!["node".to_owned(), "{artifact}".to_owned()],
             health_check: Some("/health".to_owned()),
             shutdown_timeout_seconds: Some(8),
+            temporary_storage_mb: None,
         };
         let request = StartProcessRequest {
             tenant_id: "default".to_owned(),
@@ -594,6 +598,24 @@ mod tests {
         ] {
             assert!(arguments.iter().any(|argument| argument == required));
         }
+        assert!(
+            arguments
+                .iter()
+                .any(|argument| argument == "--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=16777216")
+        );
+        runtime.temporary_storage_mb = Some(64);
+        let larger = container_arguments(
+            &request,
+            &runtime,
+            repository.path(),
+            "0123456789abcdef01234567",
+            "aio-plugin-net-0123456789abcdef01234567",
+        )?;
+        assert!(
+            larger
+                .iter()
+                .any(|argument| argument == "--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=67108864")
+        );
         assert!(!arguments.iter().any(|argument| argument == "--privileged"));
         assert!(
             !arguments

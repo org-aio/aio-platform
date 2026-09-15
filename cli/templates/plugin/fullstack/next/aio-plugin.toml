@@ -1,0 +1,23 @@
+[plugin.runtime]
+kind = "process"
+artifact = "dist/server.cjs"
+container_image = "node:22.23.1-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3"
+entrypoint = ["node", "{artifact}"]
+health_check = "/health"
+shutdown_timeout_seconds = 10
+temporary_storage_mb = 64
+host_version = ">=2026.9.15"
+
+[plugin.frontend]
+path = "dist/frontend"
+
+[plugin.marketplace]
+title = "__TITLE__"
+summary = "框架前后端与共享 TypeScript 模型。"
+license = "MIT"
+tags = ["typescript", "fullstack"]
+
+[[plugin.subplugins]]
+id = "__NAME__"
+pages = ["__NAME__"]
+routes = ["api/counter"]

@@ -22,6 +22,7 @@ impl PluginLanguage {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PluginTemplate {
     Fullstack(PluginLanguage),
+    WebFullstack(WebFramework),
     Rust,
     KotlinPages,
     KotlinComponent,
@@ -29,6 +30,22 @@ pub enum PluginTemplate {
     TypeScriptPages,
     TypeScriptComponent,
     TypeScriptService,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WebFramework {
+    Nuxt,
+    Next,
+}
+
+impl WebFramework {
+    pub fn parse(value: &str) -> Result<Self> {
+        match value {
+            "nuxt" => Ok(Self::Nuxt),
+            "next" => Ok(Self::Next),
+            _ => bail!("全栈框架必须是 nuxt 或 next: {value}"),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -74,6 +91,8 @@ impl PluginTemplate {
             Self::Fullstack(PluginLanguage::Rust) => "Rust 全栈插件",
             Self::Fullstack(PluginLanguage::Kotlin) => "Kotlin 全栈插件",
             Self::Fullstack(PluginLanguage::TypeScript) => "TypeScript 全栈插件",
+            Self::WebFullstack(WebFramework::Nuxt) => "Nuxt 全栈插件",
+            Self::WebFullstack(WebFramework::Next) => "Next.js 全栈插件",
             Self::Rust => "Rust 源码插件（Dill/TypeId 自动聚合）",
             Self::KotlinPages => "Kotlin 静态页面",
             Self::KotlinComponent => "Kotlin Wasm Component（预览）",

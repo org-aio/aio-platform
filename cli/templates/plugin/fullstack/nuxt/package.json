@@ -1,0 +1,22 @@
+{
+  "name": "__NAME__",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.2",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build && node scripts/build.mjs",
+    "typecheck": "nuxt typecheck",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "nuxt": "4.5.2",
+    "vue": "3.5.42"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vue-tsc": "3.2.5",
+    "@types/node": "22.15.30"
+  }
+}

@@ -1,0 +1,17 @@
+version = 1
+[prepare]
+inputs = ["package.json", "pnpm-lock.yaml", ".npmrc"]
+command = ["corepack", "pnpm", "install", "--frozen-lockfile", "--prefer-offline"]
+output = "node_modules"
+[frontend]
+inputs = ["frontend", "backend", "shared", "scripts", "nuxt.config.ts", "package.json", "pnpm-lock.yaml"]
+command = ["corepack", "pnpm", "build"]
+output = "dist/frontend"
+[backend]
+inputs = ["backend", "frontend", "shared", "scripts", "nuxt.config.ts", "package.json", "pnpm-lock.yaml"]
+command = ["corepack", "pnpm", "build"]
+output = "dist/server.cjs"
+[run]
+command = ["node", "{debug_args}", "{artifact}"]
+debug_arguments = ["--inspect=127.0.0.1:{debug_port}"]
+health = "/health"

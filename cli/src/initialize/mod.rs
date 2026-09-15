@@ -14,7 +14,7 @@ use std::{
 use anyhow::{Context as _, Result, bail, ensure};
 use az_plugin_manifest::PluginRuntime;
 
-pub use language::{PluginLanguage, PluginTemplate, parse_runtime};
+pub use language::{PluginLanguage, PluginTemplate, WebFramework, parse_runtime};
 pub use network::NetworkProfile;
 
 pub struct ApplicationOptions {
@@ -95,6 +95,9 @@ pub fn repository_plugin(options: RepositoryPluginOptions) -> Result<()> {
     match template {
         PluginTemplate::Fullstack(language) => {
             fullstack::materialize(&options.path, language, &name, &title)?
+        }
+        PluginTemplate::WebFullstack(framework) => {
+            fullstack::materialize_web(&options.path, framework, &name, &title)?
         }
         PluginTemplate::Rust => {
             rust_repository_plugin(&options.path, &name, &title, &client_name, &server_name)?;

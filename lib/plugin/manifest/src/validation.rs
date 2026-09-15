@@ -150,14 +150,21 @@ fn validate_runtime_options(runtime: &crate::RuntimeManifest) -> Result<()> {
                 "process shutdown_timeout_seconds 必须在 1..=60"
             );
         }
+        if let Some(size) = runtime.temporary_storage_mb {
+            ensure!(
+                (16..=128).contains(&size),
+                "process temporary_storage_mb 必须在 16..=128"
+            );
+        }
         return Ok(());
     }
     ensure!(
         runtime.container_image.is_none()
             && runtime.entrypoint.is_empty()
             && runtime.health_check.is_none()
-            && runtime.shutdown_timeout_seconds.is_none(),
-        "container_image、entrypoint、health_check 和 shutdown_timeout_seconds 只能用于 process 插件"
+            && runtime.shutdown_timeout_seconds.is_none()
+            && runtime.temporary_storage_mb.is_none(),
+        "container_image、entrypoint、health_check、shutdown_timeout_seconds 和 temporary_storage_mb 只能用于 process 插件"
     );
     Ok(())
 }

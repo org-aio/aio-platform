@@ -1,0 +1,10 @@
+/node_modules/
+/dist/
+/.aio/
+/.next/
+/.nuxt/
+/.output/
+/frontend/.next/
+/frontend/next-env.d.ts
+/tsconfig.tsbuildinfo
+/.run/AIO_*.run.xml

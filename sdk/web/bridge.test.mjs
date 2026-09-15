@@ -5,6 +5,13 @@ import test from 'node:test';
 import { webcrypto } from 'node:crypto';
 import { mountBridge } from './host.mjs';
 
+function guestContext(window) {
+  return vm.createContext({
+    window, document: { currentScript: { dataset: {} } },
+    crypto: webcrypto, Uint8Array, TextEncoder, TextDecoder, URL, setTimeout, clearTimeout,
+  });
+}
+
 test('clipboard requires a host grant and an active gesture', async () => {
   let listener, reply, copied;
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
@@ -35,7 +42,7 @@ test('guest transports binary bodies and ignores other windows', async () => {
   let sent;
   const parent = { postMessage: message => { sent = message; } };
   const window = { parent, addEventListener: (_kind, listener) => { receive = listener; } };
-  const context = vm.createContext({ window, crypto: webcrypto, Uint8Array, TextEncoder, TextDecoder, URL, setTimeout, clearTimeout });
+  const context = guestContext(window);
   vm.runInContext(readFileSync(new URL('./guest.js', import.meta.url), 'utf8'), context);
   const result = window.aioPlugin.request({ path: '/file', method: 'POST', body: new Uint8Array([0, 255, 128]) });
   assert.deepEqual([...sent.request.body], [0, 255, 128]);
@@ -70,9 +77,7 @@ test('guest JSON handles empty success, structured content and HTTP failure', as
   let receive, sent;
   const parent = { postMessage: message => { sent = message; } };
   const window = { parent, addEventListener: (_kind, listener) => { receive = listener; } };
-  vm.runInContext(readFileSync(new URL('./guest.js', import.meta.url), 'utf8'), vm.createContext({
-    window, crypto: webcrypto, Uint8Array, TextEncoder, TextDecoder, URL, setTimeout, clearTimeout,
-  }));
+  vm.runInContext(readFileSync(new URL('./guest.js', import.meta.url), 'utf8'), guestContext(window));
   const reply = (status, body) => receive({ source: parent, data: {
     protocol: 'aio:plugin@2', kind: 'response', id: sent.id,
     response: { status, headers: [], body: new TextEncoder().encode(body) },
@@ -93,9 +98,7 @@ test('guest splits service URLs into the v2 path and query fields', async () => 
   let receive, sent;
   const parent = {postMessage: message => {sent = message;}};
   const window = {parent, addEventListener: (_, listener) => {receive = listener;}};
-  vm.runInNewContext(readFileSync(new URL('./guest.js', import.meta.url), 'utf8'), {
-    window, crypto: webcrypto, Uint8Array, TextEncoder, TextDecoder, URL, setTimeout, clearTimeout,
-  });
+  vm.runInContext(readFileSync(new URL('./guest.js', import.meta.url), 'utf8'), guestContext(window));
   for (const input of [
     {path: '/graph?spaceId=personal&alias=a%2Bb'},
     {path: '/graph', query: 'spaceId=personal&alias=a%2Bb'},

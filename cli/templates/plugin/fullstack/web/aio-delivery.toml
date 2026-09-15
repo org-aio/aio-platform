@@ -1,0 +1,4 @@
+version = 1
+[build]
+environment = "typescript"
+command = ["sh", "scripts/build.sh"]

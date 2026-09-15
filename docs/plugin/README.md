@@ -61,6 +61,8 @@ health_check = "/health"
 shutdown_timeout_seconds = 10
 ```
 
+`temporary_storage_mb` 可为 process 声明 16..=128 MiB 临时空间，省略时仍为 16 MiB。Next 全栈模板设置 64 MiB 以解包框架服务端，需配套支持此字段的宿主；根文件系统、非执行 tmpfs 和总内存限制不变。
+
 `container_image` 必须锁定 digest，宿主仅使用预置镜像且不在安装期拉取。`{artifact}` 由监督器替换为容器内只读产物路径。进程在固定 `8080` 端口提供 `health_check`、`GET /aio/definition` 和清单声明的业务路由；端口不映射到公网，只由宿主代理。
 
 运行时子插件可通过 `account_actions` 把已有页面加入账户区。动作值必须等于同一仓库的已声明页面 ID；壳从该页面推导标题、图标和权限，动作 ID 会按 Git 来源命名空间化。运行时插件不能用账户动作声明退出、修改权限或其他任意宿主命令。
@@ -205,12 +207,14 @@ rev = "9d0b7d16f9f5a4c5a3b4c0e1e6c43ae8d47aa001"
 
 语言细节见 [Rust 规约](rs-plugin-convention.md)、[Kotlin 规约](kt-plugin-convention.md)、[TypeScript 规约](ts-plugin-convention.md) 和 [在线发布规约](publish.md)。
 
-CLI 可以直接生成七种仓库骨架。前三条是各语言的常规初始化，不需要指定运行目标：
+CLI 默认生成全栈仓库，也支持 TypeScript 框架和高级运行目标：
 
 ```bash
 aio plugin init aio-plugin-rust --language rust
 aio plugin init aio-plugin-kmp --language kotlin
 aio plugin init aio-plugin-ts --language typescript
+aio plugin init aio-plugin-nuxt --framework nuxt
+aio plugin init aio-plugin-next --framework next
 
 # Kotlin/TypeScript 的静态页面或非默认目标
 aio plugin init aio-plugin-kmp-pages --language kotlin --runtime page-definition
@@ -219,7 +223,9 @@ aio plugin init aio-plugin-ts-pages --language typescript --runtime page-definit
 aio plugin init aio-plugin-node --language typescript --runtime process
 ```
 
-省略 `--language` 时使用 Rust。Rust 不暴露运行目标选项；Kotlin/TypeScript 省略 `--runtime` 时分别选择 `process` 和 `wasm-component`。尚未发布的语言/运行目标组合会在创建目录前失败，不生成半成品仓库。
+省略 `--language` 时使用 Rust；指定 `--framework nuxt|next` 时自动使用 TypeScript。各语言默认生成全栈模板，Rust 系统源码模板使用 `--kind system`，Kotlin/TypeScript 可通过 `--runtime` 选择高级运行目标。框架选项不能与其他语言、非全栈种类或运行目标覆盖组合，参数冲突会在创建目录前失败。
+
+Nuxt 模板使用 Nitro 服务端路由，Next 模板使用 App Router Route Handlers。前端本地计数与后端计数共用纯 TypeScript 模型，服务请求经 `window.aioPlugin` 通信桥。框架原生开发服务器可用于独立开发；AIO 内嵌模式发布静态入口和独立框架后端，不要求宿主代理 SSR 或 Server Actions。
 
 提交市场前必须在插件仓库执行语言自身的构建与测试，然后使用宿主共享校验器：
 

@@ -10,6 +10,8 @@ aio init my-app --title "我的应用"
 aio plugin init my-plugin --title "业务插件"
 aio plugin init my-kmp-plugin --title "KMP 服务" --language kotlin
 aio plugin init my-component --title "TS 页面" --language typescript
+aio plugin init my-nuxt-plugin --framework nuxt
+aio plugin init my-next-plugin --framework next
 aio plugin init my-node-plugin --title "Node 服务" --language typescript --runtime process
 cd my-kmp-plugin
 aio plugin dev . --debug
@@ -23,7 +25,9 @@ aio plugin uninstall https://example.com/team/my-plugin.git
 
 需要 Node.js 18 或以上版本。npm 包自动安装当前系统的原生 CLI，发布配置见 [npm 分发](../npm/README.md)。完整的 macOS arm64 / Linux x64 分发还包含同版本开发宿主和 Web 资源；仅从源码安装 CLI 不会自动带入 Web 资源，配套构建步骤见 [开发沙箱](../docs/development/README.md)。
 
-三种语言默认生成全栈插件。Rust 源码插件使用 `--kind system`；Kotlin/TypeScript 可用 `--runtime` 选择静态页面、Component 或进程服务。
+三种语言默认生成全栈插件。`--framework nuxt|next` 选择框架原生全栈示例，自动选择 TypeScript；不能与其他语言、`--runtime` 或非全栈 `--kind` 组合。Nuxt 使用 Nitro 服务端路由，Next.js 使用 App Router Route Handlers。两者包含独立开发、共享模型、真实计数接口、构建、类型检查和接口测试。AIO 内嵌入口是静态页面，通过宿主通信桥调用框架后端，不代理 SSR、Server Actions 或框架客户端路由；Next 模板需要支持 `temporary_storage_mb` 的新版宿主。
+
+Rust 源码插件使用 `--kind system`；Kotlin/TypeScript 可用 `--runtime` 选择静态页面、Component 或进程服务。
 
 初始化完全离线，默认 `--network china`，生成项目级国内依赖源；`--network global` 使用官方源。Kotlin 模板自动复用本机 JDK 25、校验下载工具归档并预置前端工具，详情见生成项目的 `NETWORK.md` 或 [网络与工具链](templates/toolchain/README.md)。不修改全局 JAVA_HOME、npm、Cargo 或代理设置。
 

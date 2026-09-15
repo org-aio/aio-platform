@@ -14,7 +14,7 @@ pub use configuration::{read, validate_relative};
 pub use fingerprint::{fingerprint, source_identity};
 pub use model::*;
 
-pub const HOST_VERSION: &str = "2026.9.14";
+pub const HOST_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;

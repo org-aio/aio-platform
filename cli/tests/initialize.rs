@@ -13,6 +13,8 @@ fn initializes_every_template_without_tools_or_network() {
         ("kotlin", &["--runtime", "page-definition"]),
         ("kotlin", &["--runtime", "wasm-component"]),
         ("typescript", &[]),
+        ("typescript", &["--framework", "nuxt"]),
+        ("typescript", &["--framework", "next"]),
         ("typescript", &["--runtime", "process"]),
         ("typescript", &["--runtime", "page-definition"]),
         ("typescript", &["--runtime", "wasm-component"]),
