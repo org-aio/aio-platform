@@ -34,8 +34,9 @@ pub(super) fn register(binary: &Path) -> Result<()> {
         format!(
             r##"on open location targetURL
   set commandText to {prefix} & quoted form of targetURL
-  set scriptPath to do shell script "/usr/bin/mktemp /tmp/aio-install.XXXXXXXX.command"
-  set scriptText to "#!/bin/sh" & linefeed & commandText & linefeed & "aio_status=$?" & linefeed & "/bin/rm -f -- " & quoted form of scriptPath & linefeed & "exit $aio_status" & linefeed
+  set tempDirectory to do shell script "/usr/bin/mktemp -d /tmp/aio-install.XXXXXXXX"
+  set scriptPath to tempDirectory & "/install.command"
+  set scriptText to "#!/bin/sh" & linefeed & commandText & linefeed & "aio_status=$?" & linefeed & "/bin/rm -f -- " & quoted form of scriptPath & linefeed & "/bin/rmdir -- " & quoted form of tempDirectory & linefeed & "exit $aio_status" & linefeed
   do shell script "/usr/bin/printf %s " & quoted form of scriptText & " > " & quoted form of scriptPath & " && /bin/chmod 700 " & quoted form of scriptPath
   do shell script "/usr/bin/open -a Terminal " & quoted form of scriptPath
 end open location

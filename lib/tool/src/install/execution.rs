@@ -7,11 +7,13 @@ fn command(spec: &CommandSpec) -> Result<Command> {
     let program = {
         let found = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
             .flat_map(|dir| {
-                [
-                    dir.join(&spec.program),
-                    dir.join(format!("{}.exe", spec.program)),
-                    dir.join(format!("{}.cmd", spec.program)),
-                ]
+                if std::path::Path::new(&spec.program).extension().is_some() {
+                    vec![dir.join(&spec.program)]
+                } else {
+                    ["exe", "cmd", "bat"]
+                        .map(|extension| dir.join(format!("{}.{extension}", spec.program)))
+                        .to_vec()
+                }
             })
             .find(|path| path.is_file());
         if let Some(path) = &found
