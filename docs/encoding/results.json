@@ -1,0 +1,22 @@
+[
+  {
+    "name": "desktop",
+    "encoding": "UTF-8",
+    "contentType": "text/html; charset=utf-8",
+    "charsetOffset": 40,
+    "snapshotOffset": 70,
+    "scene": "社区插件",
+    "label": "计数器示例",
+    "errors": []
+  },
+  {
+    "name": "mobile",
+    "encoding": "UTF-8",
+    "contentType": "text/html; charset=utf-8",
+    "charsetOffset": 40,
+    "snapshotOffset": 70,
+    "scene": "社区插件",
+    "label": "计数器示例",
+    "errors": []
+  }
+]

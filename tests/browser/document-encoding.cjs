@@ -40,7 +40,7 @@ async function run() {
       const frame = page.frameLocator('iframe[title="' + target.label + '"]');
       await frame.locator('body').waitFor();
       await frame.getByRole('button').first().waitFor({ timeout: 90000 });
-      assert(!(await page.locator('.application-shell__header').innerText()).includes('\uFFFD'));
+      assert(!(await page.locator('.application-shell').innerText()).includes('\uFFFD'));
       assert.deepEqual(errors, []);
       await page.screenshot({ path: path.join(output, name + '.png') });
       results.push({ name, encoding: await page.evaluate(() => document.characterSet), contentType: response.headers()['content-type'], charsetOffset, snapshotOffset, scene: target.scene.label, label: target.label, errors });

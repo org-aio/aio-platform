@@ -1,0 +1,11 @@
+{
+  "contentType": "text/html",
+  "charsetOffset": 2266,
+  "snapshotOffset": 48,
+  "apiLabels": [
+    "计数器示例",
+    "任务工作台示例"
+  ],
+  "apiScene": "社区插件",
+  "responseContractRegressionFailedBeforeFix": true
+}
