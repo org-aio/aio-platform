@@ -134,10 +134,16 @@ fn parse_plugin_init_arguments(arguments: &[String]) -> Result<RepositoryPluginO
     let mut language = None;
     let mut framework = None;
     let mut kind = None;
+    let mut adopt = false;
     let mut runtime = None;
     let mut network = NetworkProfile::default();
     let mut index = 1;
     while index < arguments.len() {
+        if arguments[index] == "--adopt" {
+            adopt = true;
+            index += 1;
+            continue;
+        }
         let value = arguments
             .get(index + 1)
             .ok_or_else(|| anyhow::anyhow!("选项 {} 缺少值", arguments[index]))?;
@@ -154,7 +160,7 @@ fn parse_plugin_init_arguments(arguments: &[String]) -> Result<RepositoryPluginO
         index += 2;
     }
     let language = language.unwrap_or_else(|| {
-        if framework.is_some() {
+        if framework.is_some() || kind == Some("cli") {
             PluginLanguage::TypeScript
         } else {
             PluginLanguage::default()
@@ -170,17 +176,21 @@ fn parse_plugin_init_arguments(arguments: &[String]) -> Result<RepositoryPluginO
         PluginTemplate::WebFullstack(framework)
     } else {
         match kind {
+            Some("cli") if language == PluginLanguage::TypeScript && runtime.is_none() => {
+                PluginTemplate::Cli
+            }
             None | Some("fullstack") if runtime.is_none() => PluginTemplate::Fullstack(language),
             Some("system") if language == PluginLanguage::Rust && runtime.is_none() => {
                 PluginTemplate::Rust
             }
             None | Some("runtime") => PluginTemplate::resolve(language, runtime)?,
             _ => bail!(
-                "--kind 必须为 fullstack、system（仅 Rust）或 runtime；fullstack/system 不能指定 --runtime"
+                "--kind 必须为 cli（仅 TypeScript）、fullstack、system（仅 Rust）或 runtime；cli/fullstack/system 不能指定 --runtime"
             ),
         }
     };
     Ok(RepositoryPluginOptions {
+        adopt,
         path: PathBuf::from(path),
         name,
         title,
@@ -301,7 +311,7 @@ fn usage() -> &'static str {
 }
 
 fn plugin_init_usage() -> &'static str {
-    "用法:\n  aio plugin init <目录> [--name <包名>] [--title <标题>] [--language <rust|kotlin|typescript>] [--framework <nuxt|next>] [--network <china|global>] [--kind <fullstack|system|runtime>]\n\n默认国内依赖源，初始化不联网；--network global 使用官方源。\n默认生成全栈插件，包含前端、后端、共享模型与自动发布配置。推送默认分支后自动构建上架。\n  --kind system   Rust 系统源码插件，使用 trait + Dill/TypeId\n\nTypeScript 全栈框架（自动选择 TypeScript）:\n  --framework nuxt   Nuxt 全栈示例\n  --framework next   Next.js 全栈示例\n\n高级模板覆盖（Kotlin/TypeScript）:\n  --runtime page-definition   静态页面\n  --runtime wasm-component    Component\n  --runtime process           JVM/Node 服务"
+    "用法:\n  aio plugin init <目录> [--name <包名>] [--title <标题>] [--language <rust|kotlin|typescript>] [--framework <nuxt|next>] [--network <china|global>] [--kind <cli|fullstack|system|runtime>] [--adopt]\n\n默认国内依赖源，初始化不联网；--network global 使用官方源。\n默认生成全栈插件，包含前端、后端、共享模型与自动发布配置。推送默认分支后自动构建上架。\n  --kind cli      TypeScript 本机 CLI，生成 npm 与 AIO 市场自动发布工作流\n  --adopt         将已有 npm CLI 接入 AIO，不覆盖源码\n  --kind system   Rust 系统源码插件，使用 trait + Dill/TypeId\n\nTypeScript 全栈框架（自动选择 TypeScript）:\n  --framework nuxt   Nuxt 全栈示例\n  --framework next   Next.js 全栈示例\n\n高级模板覆盖（Kotlin/TypeScript）:\n  --runtime page-definition   静态页面\n  --runtime wasm-component    Component\n  --runtime process           JVM/Node 服务"
 }
 fn plugin_publish_usage() -> &'static str {
     "用法:\n  aio plugin publish [<目录或文件.aio-plugin>] [--git <HTTPS Git>] [--version <SemVer>]\n\n默认直接发布到官方插件中心，不依赖 CI。目录可从自己的 origin 推导来源，并从 Cargo.toml 或 package.json 推导版本。已有插件包保留包内来源和版本。\n\n环境变量:\n  AIO_PLUGIN_PUBLISH_TOKEN   插件市场创建的来源绑定发布凭证\n  AIO_PLUGIN_PUBLISH_URL     可选，覆盖官方插件中心发布接口\n\n发布前校验包的清单、版本和内容摘要。构建产物不需要提交到 Git。"

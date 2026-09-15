@@ -1,6 +1,7 @@
 mod controller;
 mod documents;
 mod model;
+mod publication;
 #[cfg(test)]
 mod registration_tests;
 mod storage;
@@ -20,6 +21,7 @@ pub(super) fn router() -> Router<RuntimeState> {
     Router::new()
         .route("/api/runtime/tools/access", get(controller::access))
         .route("/api/runtime/tools/register", post(controller::register))
+        .route("/api/runtime/tools/publish", post(publication::publish))
         .route(
             "/api/runtime/tools/{id}/details",
             get(controller::details).patch(controller::update),

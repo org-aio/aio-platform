@@ -1,6 +1,6 @@
 {
   "name": "@zjarlin/aio",
-  "version": "2026.9.15",
+  "version": "2026.9.16",
   "description": "AIO application and plugin CLI",
   "license": "MIT OR Apache-2.0",
   "homepage": "https://github.com/zjarlin/aio-platform",
@@ -27,11 +27,11 @@
     "test": "node scripts/check-release.cjs && node --test test/*.test.cjs"
   },
   "optionalDependencies": {
-    "@zjarlin/aio-darwin-arm64": "2026.9.15",
-    "@zjarlin/aio-darwin-x64": "2026.9.15",
-    "@zjarlin/aio-linux-arm64": "2026.9.15",
-    "@zjarlin/aio-linux-x64": "2026.9.15",
-    "@zjarlin/aio-win32-x64": "2026.9.15"
+    "@zjarlin/aio-darwin-arm64": "2026.9.16",
+    "@zjarlin/aio-darwin-x64": "2026.9.16",
+    "@zjarlin/aio-linux-arm64": "2026.9.16",
+    "@zjarlin/aio-linux-x64": "2026.9.16",
+    "@zjarlin/aio-win32-x64": "2026.9.16"
   },
   "publishConfig": {
     "access": "public",

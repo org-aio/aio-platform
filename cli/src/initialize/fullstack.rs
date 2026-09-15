@@ -46,7 +46,12 @@ pub(super) fn materialize(
     materialize_directory(root, template, name, title)
 }
 
-fn materialize_directory(root: &Path, template: &Dir<'_>, name: &str, title: &str) -> Result<()> {
+pub(super) fn materialize_directory(
+    root: &Path,
+    template: &Dir<'_>,
+    name: &str,
+    title: &str,
+) -> Result<()> {
     let identifier = name.replace('-', "_");
     let title_json = serde_json::to_string(title)?;
     let escaped_title = &title_json[1..title_json.len() - 1];
@@ -63,6 +68,7 @@ fn materialize_directory(root: &Path, template: &Dir<'_>, name: &str, title: &st
             let content = std::str::from_utf8(file.contents())?
                 .replace("__TITLE__", title)
                 .replace("__NAME__", name)
+                .replace("__AIO_VERSION__", env!("CARGO_PKG_VERSION"))
                 .replace("dioxus-fullstack-counter", name)
                 .replace("kmp-fullstack", name)
                 .replace("Dioxus Fullstack Counter", title)

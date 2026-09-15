@@ -1,5 +1,6 @@
 mod link;
 mod model;
+pub mod publication;
 pub mod registration;
 mod validation;
 

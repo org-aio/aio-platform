@@ -21,6 +21,25 @@ npx -y @zjarlin/aio helper uninstall
 
 安装前会展示计划，必须在本机终端输入 `yes`。链接不能传入命令、来源地址或自动确认标记。浏览器可能询问是否打开 AIO Helper。
 
+## 初始化 CLI 并自动发布
+
+以后新建 CLI 使用 AIO 初始化，当前默认 TypeScript + Node.js，核心功能和命令入口分离：
+
+```sh
+npx -y @zjarlin/aio@2026.9.16 plugin init my-cli --kind cli
+cd my-cli
+npm ci
+npm test
+```
+
+生成源码、锁文件、测试、README、`aio-cli.json` 与 `.github/workflows/aio-cli.yml`。CLI 不需要宿主前后端或 AIO 运行时依赖。已有 npm CLI 可在其目录执行 `aio plugin init . --kind cli --adopt`；仅增加交付文件，不覆盖源码、原 CLI 命令或现有 README。
+
+将项目推送到 GitHub，并在目录执行一次 `aio tool release setup`。它从 origin 识别仓库，npm 包尚不存在时先测试并创建公开包，再配置 npm Trusted Publisher。首次需要 npm 包写权限与二次验证，这是 npm 的账户要求；绑定后日常推送通过 OIDC 自动发布，无需逐次验证。
+
+默认分支推送先通过 Linux/Windows 测试，再生成开发版本，发布 npm `next`，最后更新 AIO 同一市场条目及对应提交的 README。版本为基础版本的下一补丁 `x.y.z-dev.<run>.g<sha>`；`vX.Y.Z` 标签必须与 package.json 正式版本一致，并发布 npm `latest`。失败保留旧市场版本，同一次发布可重跑，不覆盖已发布的不同内容。
+
+市场接收端读取 npm 精确版本，并校验 GitHub 签名、发布 owner、工作流、源码提交和仓库绑定；使用已配置的 `AIO_DELIVERY_OWNER` 发布者范围。市场安装固定精确版本，本机已安装 CLI 不会静默升级。npm 正式版本不会被开发分支替换。
+
 ## Codex 模型同步与 Auto Router
 
 市场内置登记 `codex-model-sync 0.4.1`，支持 macOS、Linux 和 Windows。安装依次执行 `npm install --global codex-model-sync@0.4.1` 和 `codex-model-sync setup`，默认仍是同步模型及后台更新；直接使用 `npx -y codex-model-sync` 的旧用法不变。

@@ -1,0 +1,8 @@
+{
+  "id": "__NAME__",
+  "title": "__TITLE__",
+  "command": "__NAME__",
+  "platforms": ["macos", "linux", "windows"],
+  "setup": [],
+  "uninstall": []
+}

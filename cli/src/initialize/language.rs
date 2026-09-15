@@ -21,6 +21,7 @@ impl PluginLanguage {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PluginTemplate {
+    Cli,
     Fullstack(PluginLanguage),
     WebFullstack(WebFramework),
     Rust,
@@ -88,6 +89,7 @@ impl PluginTemplate {
 
     pub fn label(self) -> &'static str {
         match self {
+            Self::Cli => "TypeScript CLI（npm 与插件市场自动发布）",
             Self::Fullstack(PluginLanguage::Rust) => "Rust 全栈插件",
             Self::Fullstack(PluginLanguage::Kotlin) => "Kotlin 全栈插件",
             Self::Fullstack(PluginLanguage::TypeScript) => "TypeScript 全栈插件",

@@ -1,3 +1,4 @@
+mod cli;
 mod fullstack;
 mod kotlin;
 mod language;
@@ -26,6 +27,7 @@ pub struct ApplicationOptions {
 
 #[derive(Debug)]
 pub struct RepositoryPluginOptions {
+    pub adopt: bool,
     pub path: PathBuf,
     pub name: Option<String>,
     pub title: Option<String>,
@@ -91,8 +93,16 @@ pub fn repository_plugin(options: RepositoryPluginOptions) -> Result<()> {
     let template = options.template;
     let client_name = format!("{name}-client");
     let server_name = format!("{name}-server");
-    prepare_directory(&options.path)?;
+    if options.adopt {
+        ensure!(
+            template == PluginTemplate::Cli,
+            "--adopt 仅用于接入现有 CLI"
+        );
+    } else {
+        prepare_directory(&options.path)?;
+    }
     match template {
+        PluginTemplate::Cli => cli::materialize(&options.path, &name, &title, options.adopt)?,
         PluginTemplate::Fullstack(language) => {
             fullstack::materialize(&options.path, language, &name, &title)?
         }
@@ -139,12 +149,14 @@ pub fn repository_plugin(options: RepositoryPluginOptions) -> Result<()> {
         | PluginTemplate::KotlinService => PluginLanguage::Kotlin,
         _ => PluginLanguage::TypeScript,
     };
-    network::configure(
-        &options.path,
-        language,
-        options.network,
-        matches!(template, PluginTemplate::Fullstack(PluginLanguage::Kotlin)),
-    )?;
+    if !options.adopt {
+        network::configure(
+            &options.path,
+            language,
+            options.network,
+            matches!(template, PluginTemplate::Fullstack(PluginLanguage::Kotlin)),
+        )?;
+    }
     println!(
         "已初始化插件: {} ({})",
         options.path.display(),
@@ -290,6 +302,7 @@ mod tests {
         let path = root.path().join("hello-plugin");
 
         repository_plugin(RepositoryPluginOptions {
+            adopt: false,
             path: path.clone(),
             name: None,
             title: Some("问候".to_owned()),
@@ -318,6 +331,7 @@ mod tests {
         let path = root.path().join("hello-kotlin");
 
         repository_plugin(RepositoryPluginOptions {
+            adopt: false,
             path: path.clone(),
             name: None,
             title: Some("Kotlin 问候".to_owned()),
@@ -354,6 +368,7 @@ mod tests {
         let path = root.path().join("hello-kotlin-pages");
 
         repository_plugin(RepositoryPluginOptions {
+            adopt: false,
             path: path.clone(),
             name: None,
             title: Some("Kotlin 页面".to_owned()),
@@ -383,6 +398,7 @@ mod tests {
         let path = root.path().join("hello-kotlin-component");
 
         repository_plugin(RepositoryPluginOptions {
+            adopt: false,
             path: path.clone(),
             name: None,
             title: Some("Kotlin Component 问候".to_owned()),
@@ -413,6 +429,7 @@ mod tests {
         let path = root.path().join("hello-typescript");
 
         repository_plugin(RepositoryPluginOptions {
+            adopt: false,
             path: path.clone(),
             name: None,
             title: Some("TypeScript 问候".to_owned()),
@@ -440,6 +457,7 @@ mod tests {
         let path = root.path().join("hello-node");
 
         repository_plugin(RepositoryPluginOptions {
+            adopt: false,
             path: path.clone(),
             name: None,
             title: Some("Node 问候".to_owned()),
@@ -465,6 +483,7 @@ mod tests {
         let path = root.path().join("hello-ts-pages");
 
         repository_plugin(RepositoryPluginOptions {
+            adopt: false,
             path: path.clone(),
             name: None,
             title: Some("TypeScript 页面".to_owned()),

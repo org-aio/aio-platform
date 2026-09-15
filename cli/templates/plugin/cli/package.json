@@ -1,0 +1,17 @@
+{
+  "name": "__NAME__",
+  "version": "0.1.0",
+  "description": "__TITLE__",
+  "type": "module",
+  "license": "MIT",
+  "bin": { "__NAME__": "dist/cli.mjs" },
+  "files": ["dist", "README.md"],
+  "engines": { "node": ">=22.14.0" },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "npm run build && node --test",
+    "prepack": "npm run build"
+  },
+  "devDependencies": { "esbuild": "0.28.2" },
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org" }
+}

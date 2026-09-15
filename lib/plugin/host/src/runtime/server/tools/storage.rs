@@ -6,6 +6,7 @@ use sqlx::PgPool;
 pub(in crate::runtime::server) async fn migrate(pool: &PgPool) -> Result<()> {
     sqlx::raw_sql("CREATE TABLE IF NOT EXISTS marketplace_tools (id TEXT NOT NULL, version TEXT NOT NULL, manifest JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY(id, version))").execute(pool).await?;
     sqlx::raw_sql("CREATE TABLE IF NOT EXISTS marketplace_tool_details (id TEXT PRIMARY KEY, document JSONB NOT NULL)").execute(pool).await?;
+    sqlx::raw_sql("CREATE TABLE IF NOT EXISTS marketplace_tool_publications (id TEXT NOT NULL, version TEXT NOT NULL, git TEXT NOT NULL, source_revision TEXT NOT NULL, integrity TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY(id,version), FOREIGN KEY(id,version) REFERENCES marketplace_tools(id,version))").execute(pool).await?;
     import(
         pool,
         include_str!("../../../../../../../tools/registry/codex-model-sync-0.4.1.json"),

@@ -7,6 +7,17 @@ use az_tool::{
 pub(super) fn run(arguments: &[String]) -> Result<()> {
     let arguments = arguments.iter().map(String::as_str).collect::<Vec<_>>();
     match arguments.as_slice() {
+        [
+            "tool",
+            "release",
+            action @ ("setup" | "prepare" | "publish" | "sync"),
+        ] => {
+            let status = std::process::Command::new("node")
+                .args(["-e", include_str!("release.cjs"), action])
+                .status()?;
+            anyhow::ensure!(status.success(), "CLI 发布步骤失败: {action}");
+            Ok(())
+        }
         ["helper", "install"] => az_tool::protocol::register(&std::env::current_exe()?),
         ["helper", "uninstall"] => az_tool::protocol::unregister(),
         ["tool", "install", id, "--version", version] => install_link(InstallLink::parse(

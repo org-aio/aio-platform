@@ -23,7 +23,7 @@ jobs:
           node-version: 24
       - run: cargo fmt --all --check
       - run: node scripts/check-boundaries.mjs
-      - run: node --test sdk/web/bridge.test.mjs
+      - run: node --test sdk/web/bridge.test.mjs cli/src/tools/release.test.cjs
       - run: cargo test --workspace
       - run: cargo build --manifest-path lib/plugin/runtime/tests/fixture/Cargo.toml --locked --release --target wasm32-wasip2 --target-dir target/fixture/healthy
       - run: cargo build --manifest-path lib/plugin/runtime/tests/fixture/Cargo.toml --locked --release --target wasm32-wasip2 --features unhealthy --target-dir target/fixture/unhealthy
