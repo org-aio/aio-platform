@@ -2,7 +2,7 @@ use super::*;
 
 fn sample() -> ToolManifest {
     serde_json::from_str(include_str!(
-        "../../../tools/registry/codex-model-sync-0.1.4.json"
+        "../../../tools/registry/codex-model-sync-0.4.1.json"
     ))
     .unwrap()
 }

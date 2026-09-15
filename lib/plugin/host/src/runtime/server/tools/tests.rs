@@ -27,7 +27,7 @@ async fn cli_versions_are_persistent_immutable_and_share_the_marketplace_shape()
 async fn exercise(pool: &PgPool) -> Result<()> {
     super::migrate(pool).await?;
     super::migrate(pool).await?;
-    let original = super::storage::get(pool, "codex-model-sync", "0.1.4")
+    let original = super::storage::get(pool, "codex-model-sync", "0.4.1")
         .await?
         .unwrap();
     assert!(
@@ -36,7 +36,7 @@ async fn exercise(pool: &PgPool) -> Result<()> {
             .is_none()
     );
     let mut next = original.clone();
-    next.version = "0.1.10".into();
+    next.version = "0.4.10".into();
     sqlx::query("INSERT INTO marketplace_tools(id,version,manifest) VALUES($1,$2,$3)")
         .bind(&next.id)
         .bind(&next.version)
@@ -46,7 +46,7 @@ async fn exercise(pool: &PgPool) -> Result<()> {
     let entries = super::entries(pool).await?;
     let values = serde_json::to_value(entries)?;
     assert_eq!(values.as_array().unwrap().len(), 1);
-    assert_eq!(values[0]["rev"], "0.1.10");
+    assert_eq!(values[0]["rev"], "0.4.10");
     assert_eq!(values[0]["cli"]["id"], "codex-model-sync");
     assert_eq!(values[0]["installed"], false);
     assert!(
@@ -57,7 +57,7 @@ async fn exercise(pool: &PgPool) -> Result<()> {
             .any(|tag| tag == "cli")
     );
     assert_eq!(
-        super::storage::get(pool, "codex-model-sync", "0.1.4").await?,
+        super::storage::get(pool, "codex-model-sync", "0.4.1").await?,
         Some(original)
     );
     Ok(())

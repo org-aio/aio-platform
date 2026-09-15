@@ -1,0 +1,208 @@
+{
+  "id": "codex-model-sync",
+  "version": "0.4.1",
+  "title": "Codex 模型同步与 Auto Router",
+  "summary": "从 Codex 配置的 /v1/models 动态同步模型，默认保留原有同步用法；可选 Auto Router 按任务难度、Git 与运行意图选择模型，成功率辅助同梯队筛选。",
+  "homepage": "https://github.com/zjarlin/codex-model-sync",
+  "license": "MIT",
+  "tags": [
+    "cli",
+    "codex",
+    "models",
+    "auto-router"
+  ],
+  "platforms": {
+    "macos": {
+      "requirements": [
+        {
+          "label": "Node.js",
+          "check": {
+            "program": "node",
+            "args": [
+              "--version"
+            ]
+          },
+          "version": ">=20.0.0",
+          "help": "请先安装 Node.js 20 或更新版本：https://nodejs.org/"
+        },
+        {
+          "label": "npm",
+          "check": {
+            "program": "npm",
+            "args": [
+              "--version"
+            ]
+          },
+          "version": null,
+          "help": "请安装 npm 并确保终端可以运行 npm。"
+        }
+      ],
+      "install": [
+        {
+          "program": "npm",
+          "args": [
+            "install",
+            "--global",
+            "codex-model-sync@0.4.1"
+          ]
+        },
+        {
+          "program": "codex-model-sync",
+          "args": [
+            "setup"
+          ]
+        }
+      ],
+      "uninstall": [
+        {
+          "program": "codex-model-sync",
+          "args": [
+            "uninstall"
+          ]
+        },
+        {
+          "program": "npm",
+          "args": [
+            "uninstall",
+            "--global",
+            "codex-model-sync"
+          ]
+        }
+      ],
+      "detect": {
+        "program": "codex-model-sync",
+        "args": [
+          "--version"
+        ]
+      }
+    },
+    "linux": {
+      "requirements": [
+        {
+          "label": "Node.js",
+          "check": {
+            "program": "node",
+            "args": [
+              "--version"
+            ]
+          },
+          "version": ">=20.0.0",
+          "help": "请先安装 Node.js 20 或更新版本：https://nodejs.org/"
+        },
+        {
+          "label": "npm",
+          "check": {
+            "program": "npm",
+            "args": [
+              "--version"
+            ]
+          },
+          "version": null,
+          "help": "请安装 npm 并确保终端可以运行 npm。"
+        }
+      ],
+      "install": [
+        {
+          "program": "npm",
+          "args": [
+            "install",
+            "--global",
+            "codex-model-sync@0.4.1"
+          ]
+        },
+        {
+          "program": "codex-model-sync",
+          "args": [
+            "setup"
+          ]
+        }
+      ],
+      "uninstall": [
+        {
+          "program": "codex-model-sync",
+          "args": [
+            "uninstall"
+          ]
+        },
+        {
+          "program": "npm",
+          "args": [
+            "uninstall",
+            "--global",
+            "codex-model-sync"
+          ]
+        }
+      ],
+      "detect": {
+        "program": "codex-model-sync",
+        "args": [
+          "--version"
+        ]
+      }
+    },
+    "windows": {
+      "requirements": [
+        {
+          "label": "Node.js",
+          "check": {
+            "program": "node",
+            "args": [
+              "--version"
+            ]
+          },
+          "version": ">=20.0.0",
+          "help": "请先安装 Node.js 20 或更新版本：https://nodejs.org/"
+        },
+        {
+          "label": "npm",
+          "check": {
+            "program": "npm",
+            "args": [
+              "--version"
+            ]
+          },
+          "version": null,
+          "help": "请安装 npm 并确保终端可以运行 npm。"
+        }
+      ],
+      "install": [
+        {
+          "program": "npm",
+          "args": [
+            "install",
+            "--global",
+            "codex-model-sync@0.4.1"
+          ]
+        },
+        {
+          "program": "codex-model-sync",
+          "args": [
+            "setup"
+          ]
+        }
+      ],
+      "uninstall": [
+        {
+          "program": "codex-model-sync",
+          "args": [
+            "uninstall"
+          ]
+        },
+        {
+          "program": "npm",
+          "args": [
+            "uninstall",
+            "--global",
+            "codex-model-sync"
+          ]
+        }
+      ],
+      "detect": {
+        "program": "codex-model-sync",
+        "args": [
+          "--version"
+        ]
+      }
+    }
+  }
+}

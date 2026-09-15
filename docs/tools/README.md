@@ -13,7 +13,7 @@ npx -y @zjarlin/aio helper install
 macOS 注册用户目录中的 AIO Helper.app，Windows 注册 HKCU，Linux 注册 xdg desktop entry。助手保存独立二进制，npx 缓存清理不影响链接。后续更新 CLI 后重新执行此命令更新助手。Linux 桌面需要 xdg-mime 和可用终端；macOS 需要系统自带的 osacompile、codesign。
 
 ```sh
-npx -y @zjarlin/aio tool install codex-model-sync --version 0.1.4
+npx -y @zjarlin/aio tool install codex-model-sync --version 0.4.1
 npx -y @zjarlin/aio tool list
 npx -y @zjarlin/aio tool uninstall codex-model-sync
 npx -y @zjarlin/aio helper uninstall
@@ -21,9 +21,22 @@ npx -y @zjarlin/aio helper uninstall
 
 安装前会展示计划，必须在本机终端输入 `yes`。链接不能传入命令、来源地址或自动确认标记。浏览器可能询问是否打开 AIO Helper。
 
+## Codex 模型同步与 Auto Router
+
+市场内置登记 `codex-model-sync 0.4.1`，支持 macOS、Linux 和 Windows。安装依次执行 `npm install --global codex-model-sync@0.4.1` 和 `codex-model-sync setup`，默认仍是同步模型及后台更新；直接使用 `npx -y codex-model-sync` 的旧用法不变。
+
+需要自动路由时，在 macOS 本机显式开启桌面桥接和 hooks，然后完全退出并重新打开 Codex：
+
+```sh
+codex-model-sync router setup
+codex-model-sync router status
+```
+
+候选模型来自本机 Codex 配置对应的 `/v1/models`，不写死模型名称。路由先根据任务难度与模型能力梯队选池，再用成本和成功率辅助筛选；Git 操作、“跑起来看看”和项目技术栈 CLI 意图可优先走低成本任务路径。当前使用规则路由，不包含训练后的 RouterLLM 分类器。详细配置及实际模型选择的查看方法见 [项目 README](https://github.com/zjarlin/codex-model-sync#readme)。
+
 ## 用命令上架 CLI
 
-平台发布者登录插件市场，点击 **添加 CLI**。只需填写安装命令，例如 `npx -y codex-model-sync@0.1.4 setup`；Git 仓库地址可选，不要求编写 JSON 或 AIO 插件包。
+平台发布者登录插件市场，点击 **添加 CLI**。只需填写安装命令，例如 `npx -y codex-model-sync@0.4.1 setup`；Git 仓库地址可选，不要求编写 JSON 或 AIO 插件包。
 
 - 系统自动使用仓库名或命令中的工具名作为标题，补充默认备注和 `cli` 标签；在详情页可随时 **编辑标题和备注**。
 - 默认识别当前电脑系统，也可选择 macOS、Windows、Linux 或多个系统。命令需与所选系统匹配：macOS/Linux 使用 Bash（启用 pipefail），Windows 使用 PowerShell。
@@ -37,7 +50,7 @@ HTTP `POST /api/runtime/tools/register` 接收共享 `Registration` 模型；`PA
 
 ## 导入完整安装描述
 
-需要按平台编排多个步骤时，仍可按照 `tools/registry/codex-model-sync-0.1.4.json` 创建 JSON。在宿主设置 `AIO_TOOL_REGISTRY_DIR` 指向目录，启动时验证并导入 PostgreSQL。市场显示每个工具最高 SemVer；同 ID、同版本的执行方案不会覆盖，变更步骤需递增版本。展示标题、备注和 Git 文档资料可独立编辑。
+需要按平台编排多个步骤时，仍可按照 `tools/registry/codex-model-sync-0.4.1.json` 创建 JSON。在宿主设置 `AIO_TOOL_REGISTRY_DIR` 指向目录，启动时验证并导入 PostgreSQL。市场显示每个工具最高 SemVer；同 ID、同版本的执行方案不会覆盖，变更步骤需递增版本。展示标题、备注和 Git 文档资料可独立编辑。
 
 ## 状态与恢复
 

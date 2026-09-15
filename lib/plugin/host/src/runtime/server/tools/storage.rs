@@ -8,7 +8,7 @@ pub(in crate::runtime::server) async fn migrate(pool: &PgPool) -> Result<()> {
     sqlx::raw_sql("CREATE TABLE IF NOT EXISTS marketplace_tool_details (id TEXT PRIMARY KEY, document JSONB NOT NULL)").execute(pool).await?;
     import(
         pool,
-        include_str!("../../../../../../../tools/registry/codex-model-sync-0.1.4.json"),
+        include_str!("../../../../../../../tools/registry/codex-model-sync-0.4.1.json"),
     )
     .await?;
     if let Some(directory) = std::env::var_os("AIO_TOOL_REGISTRY_DIR") {
