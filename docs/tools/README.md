@@ -32,7 +32,7 @@ npm ci
 npm test
 ```
 
-生成源码、锁文件、测试、README、`aio-cli.json` 与 `.github/workflows/aio-cli.yml`。CLI 不需要宿主前后端或 AIO 运行时依赖。已有 npm CLI 可在其目录执行 `aio plugin init . --kind cli --adopt`；仅增加交付文件，不覆盖源码、原 CLI 命令或现有 README。
+生成源码、锁文件、测试、README、`aio-cli.json` 与 `.github/workflows/aio-cli.yml`。CLI 不需要宿主前后端或 AIO 运行时依赖。已有 npm CLI 可在其目录执行 `aio plugin init . --kind cli --adopt --name my-cli`；仅增加交付文件，不覆盖源码、原 CLI 命令或现有 README。
 
 将项目推送到 GitHub，并在目录执行一次 `aio tool release setup`。它从 origin 识别仓库，npm 包尚不存在时先测试并创建公开包，再配置 npm Trusted Publisher。首次需要 npm 包写权限与二次验证，这是 npm 的账户要求；绑定后日常推送通过 OIDC 自动发布，无需逐次验证。
 

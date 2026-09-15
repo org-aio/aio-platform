@@ -58,7 +58,7 @@ pub(super) fn run(arguments: &[String]) -> Result<()> {
             Ok(())
         }
         _ => bail!(
-            "用法：aio helper install|uninstall；aio tool install <id> --version <版本>；aio tool uninstall <id>；aio tool list"
+            "用法：aio helper install|uninstall；aio tool install <id> --version <版本>；aio tool uninstall <id>；aio tool list；aio tool release setup|prepare|publish|sync"
         ),
     }
 }

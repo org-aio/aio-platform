@@ -307,7 +307,7 @@ fn is_help(argument: &str) -> bool {
 }
 
 fn usage() -> &'static str {
-    "用法:\n  aio helper install|uninstall\n  aio tool install <id> --version <版本>\n  aio tool uninstall <id>\n  aio tool list\n  aio open <aio://install/id?version=版本>\n  aio init <目录> [--name <包名>] [--title <标题>] [--network <china|global>]\n  aio plugin init <目录> [--name <包名>] [--title <插件标题>] [--language <rust|kotlin|typescript>] [--framework <nuxt|next>] [--network <china|global>]\n  aio plugin init --help\n  aio plugin install <git> [--rev <分支、标签或提交>]\n  aio plugin package <目录> --version <SemVer> [--git <HTTPS Git>] [-o <文件.aio-plugin>]\n  aio plugin publish [<目录或文件.aio-plugin>] [--git <HTTPS Git>] [--version <SemVer>]\n  aio plugin uninstall <git>\n  aio plugin sync\n  aio plugin list\n  aio plugin validate [<仓库目录>]\n  aio plugin schema [<输出目录>]"
+    "用法:\n  aio helper install|uninstall\n  aio tool install <id> --version <版本>\n  aio tool uninstall <id>\n  aio tool list\n  aio tool release setup|prepare|publish|sync\n  aio open <aio://install/id?version=版本>\n  aio init <目录> [--name <包名>] [--title <标题>] [--network <china|global>]\n  aio plugin init <目录> [--name <包名>] [--title <插件标题>] [--language <rust|kotlin|typescript>] [--framework <nuxt|next>] [--network <china|global>]\n  aio plugin init --help\n  aio plugin install <git> [--rev <分支、标签或提交>]\n  aio plugin package <目录> --version <SemVer> [--git <HTTPS Git>] [-o <文件.aio-plugin>]\n  aio plugin publish [<目录或文件.aio-plugin>] [--git <HTTPS Git>] [--version <SemVer>]\n  aio plugin uninstall <git>\n  aio plugin sync\n  aio plugin list\n  aio plugin validate [<仓库目录>]\n  aio plugin schema [<输出目录>]"
 }
 
 fn plugin_init_usage() -> &'static str {

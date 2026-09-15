@@ -124,9 +124,9 @@ async function identity() {
   return value;
 }
 
-async function sync() {
+async function sync(wait = ms => new Promise(resolve => setTimeout(resolve, ms))) {
   const release=read(stateFile);
-  for(let attempt=0;attempt<12;attempt++) {
+  for(let attempt=0;attempt<60;attempt++) {
     const value=await metadata(release.package,release.version);
     if(value && !sameRelease(value,release,release.integrity)) fail('npm 版本来源或完整性与本次构建不一致');
     if(value) {
@@ -134,12 +134,13 @@ async function sync() {
       if(response.ok) {console.log(`已发布 npm 并更新 AIO 市场：${release.package}@${release.version}`);return;}
       if(response.status<500 && response.status!==404) fail(`市场拒绝发布：HTTP ${response.status} ${(await response.text()).slice(0,1200)}`);
     }
-    if(attempt<11) await new Promise(resolve=>setTimeout(resolve,10000));
+    if(attempt===0 || (attempt+1)%6===0) console.log(`等待 npm 与市场更新：第 ${attempt+1} 次检查`);
+    if(attempt<59) await wait(10000);
   }
   fail('npm 或市场尚未就绪；重新运行相同工作流可继续同步，无需更改版本');
 }
 
-module.exports={versionFor,configuration,sameRelease,prepare};
+module.exports={versionFor,configuration,sameRelease,prepare,sync};
 if(!module.parent) {
   const mode=process.argv[1];
   Promise.resolve().then(()=>{

@@ -1,6 +1,6 @@
 [package]
 name = "az-plugin-development"
-version = "2026.9.16"
+version = "2026.9.17"
 edition.workspace = true
 license.workspace = true
 
