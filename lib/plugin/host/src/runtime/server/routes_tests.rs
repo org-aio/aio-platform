@@ -57,6 +57,7 @@ fn preserves_market_metadata_until_an_installed_manifest_overrides_it() {
         summary: "Summary".to_owned(),
         license: "MIT".to_owned(),
         tags: vec!["example".to_owned()],
+        menu_hidden: false,
         installed: false,
         source_id: None,
         state: None,

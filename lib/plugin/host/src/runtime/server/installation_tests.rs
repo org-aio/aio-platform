@@ -15,6 +15,7 @@ fn published_entry(git: &str, revision: &str) -> MarketplaceEntry {
         summary: "数据库已发布插件".to_owned(),
         license: "MIT".to_owned(),
         tags: vec!["test".to_owned()],
+        menu_hidden: false,
         installed: false,
         source_id: None,
         state: None,

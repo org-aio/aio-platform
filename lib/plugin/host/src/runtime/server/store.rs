@@ -122,6 +122,7 @@ impl PluginStore {
         super::package_store::migrate(&self.pool).await?;
         super::delivery::migrate(&self.pool).await?;
         page_state::migrate(&self.pool).await?;
+        super::navigation::migrate(&self.pool).await?;
         self.migrate_published_source_ids().await?;
         Ok(())
     }
@@ -250,6 +251,7 @@ impl PluginStore {
             },
             user,
             pages,
+            hidden_pages: Vec::new(),
             account_items,
             plugins,
         })

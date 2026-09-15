@@ -41,3 +41,5 @@ CREATE TABLE IF NOT EXISTS component_process_actors (
     user_id TEXT NOT NULL,
     PRIMARY KEY(source_id,tenant_id,user_id)
 );
+
+ALTER TABLE component_versions ADD COLUMN IF NOT EXISTS permissions TEXT[];

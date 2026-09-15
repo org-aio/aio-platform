@@ -122,6 +122,7 @@ impl PluginStore {
             summary: metadata.summary,
             license: metadata.license,
             tags: metadata.tags,
+            menu_hidden: false,
             installed: false,
             source_id: None,
             state: None,

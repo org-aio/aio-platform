@@ -1,8 +1,11 @@
+#[cfg(test)]
+mod access_tests;
 mod catalog;
 mod controller;
 mod development;
 mod frontend;
 mod model;
+mod permissions;
 pub(in crate::runtime::server) mod process;
 mod process_lifecycle;
 mod services;
@@ -53,6 +56,7 @@ impl Components {
         sqlx::raw_sql(include_str!("schema.sql"))
             .execute(&pool)
             .await?;
+        permissions::backfill(&pool).await?;
         let provisioner = DatabaseProvisioner::connect(database).await?;
         let keyring = Arc::new(load_keyring(key_path)?);
         let engine = ComponentEngine::with_cache(
@@ -216,21 +220,12 @@ impl Components {
         let grants = bundle.verify()?.manifest().plugin.capabilities.clone();
         let slot = self.slot(source, tenant).await?;
         let previous = slot.stored().await?;
-        let permissions: Vec<_> = bundle
-            .verify()?
-            .manifest()
-            .plugin
-            .permissions
-            .iter()
-            .map(|name| services::permission(source, name))
-            .collect();
         slot.activate(&self.engine, bundle.clone(), grants, resources)
             .await?;
         let result=async {
             let mut tx=self.pool.begin().await?;
             sqlx::query("INSERT INTO component_installations(tenant_id,source_id,digest,generation) VALUES($1,$2,$3,$4) ON CONFLICT(tenant_id,source_id) DO UPDATE SET digest=EXCLUDED.digest,enabled=true,generation=EXCLUDED.generation")
                 .bind(tenant).bind(source).bind(&bundle.digest).bind(Uuid::new_v4()).execute(&mut *tx).await?;
-            self.identity.install_permissions(tenant, &permissions).await?;
             tx.commit().await?;
             anyhow::Ok(())
         }.await;

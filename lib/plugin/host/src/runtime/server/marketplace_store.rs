@@ -107,6 +107,7 @@ fn marketplace_entry_from_row(row: PgRow) -> Result<MarketplaceEntry> {
         summary: row.try_get("summary")?,
         license: row.try_get("license")?,
         tags: serde_json::from_value(row.try_get("tags")?)?,
+        menu_hidden: false,
         installed: false,
         source_id: None,
         state: None,

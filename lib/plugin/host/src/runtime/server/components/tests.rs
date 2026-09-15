@@ -2,7 +2,7 @@ use super::*;
 use std::fs;
 
 #[derive(Default)]
-struct TestIdentity(std::sync::Mutex<Vec<String>>);
+struct TestIdentity;
 #[async_trait::async_trait]
 impl crate::identity::IdentityProvider for TestIdentity {
     async fn can_publish(&self, _: &crate::identity::SessionContext) -> anyhow::Result<bool> {
@@ -20,13 +20,14 @@ impl crate::identity::IdentityProvider for TestIdentity {
     async fn session_active(&self, _: &str, _: &str, _: &str) -> Result<bool> {
         Ok(false)
     }
-    async fn install_permissions(&self, _: &str, permissions: &[String]) -> Result<()> {
-        self.0.lock().unwrap().extend_from_slice(permissions);
-        Ok(())
-    }
 }
 
-fn package(root: &Path, git: &str, parent: Option<&str>, version: &str) -> Result<Bundle> {
+pub(super) fn package(
+    root: &Path,
+    git: &str,
+    parent: Option<&str>,
+    version: &str,
+) -> Result<Bundle> {
     fs::create_dir_all(root.join("frontend"))?;
     fs::write(
         root.join("frontend/index.html"),
@@ -91,7 +92,7 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
     );
     assert!(components.install(&tenant, &child_git, None).await.is_err());
     components.install(&tenant, &git, None).await?;
-    let grants = identity.0.lock().unwrap().clone();
+    let grants = components.permissions(&tenant).await?;
     assert!(grants.contains(&services::permission(parent, "fixture.view")));
     assert!(!grants.contains(&"fixture.view".to_owned()));
     assert!(

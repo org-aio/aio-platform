@@ -19,6 +19,7 @@ mod installation;
 mod lifecycle;
 mod management;
 mod marketplace_store;
+mod navigation;
 mod official_market;
 mod package_repository;
 mod package_store;

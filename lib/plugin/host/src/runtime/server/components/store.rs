@@ -73,8 +73,8 @@ impl Components {
         let archive = bundle.encode()?;
         let mut tx = self.pool.begin().await?;
         sqlx::query("INSERT INTO component_sources(id,git,parent_git) VALUES($1,$2,$3) ON CONFLICT(git) DO NOTHING").bind(source).bind(&bundle.git).bind(&metadata.parent).execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO component_versions(digest,source_id,archive,version,source_commit,description,metadata,readme,capabilities) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(digest) DO NOTHING")
-            .bind(&bundle.digest).bind(source).bind(archive).bind(&bundle.version).bind(&bundle.commit).bind(serde_json::to_value(description)?).bind(serde_json::to_value(metadata)?).bind(readme).bind(serde_json::to_value(&verified.manifest().plugin.capabilities)?).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO component_versions(digest,source_id,archive,version,source_commit,description,metadata,readme,capabilities,permissions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(digest) DO NOTHING")
+            .bind(&bundle.digest).bind(source).bind(archive).bind(&bundle.version).bind(&bundle.commit).bind(serde_json::to_value(description)?).bind(serde_json::to_value(metadata)?).bind(readme).bind(serde_json::to_value(&verified.manifest().plugin.capabilities)?).bind(&verified.manifest().plugin.permissions).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO component_publications(source_id,digest) VALUES($1,$2) ON CONFLICT(source_id) DO UPDATE SET digest=EXCLUDED.digest,published_at=now()").bind(source).bind(&bundle.digest).execute(&mut *tx).await?;
         tx.commit().await?;
         Ok(source)

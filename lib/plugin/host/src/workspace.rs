@@ -76,7 +76,8 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
         "session_context": catalog.session_context,
         "context": catalog.context,
         "pages": catalog.pages.iter().filter(|page| {
-            matches!(page.body, runtime::PageBody::Frontend { .. })
+            !catalog.hidden_pages.contains(&page.id)
+                && matches!(page.body, runtime::PageBody::Frontend { .. })
                 && page.required_permission.as_deref().is_none_or(|permission| snapshot.permissions.iter().any(|item| item == permission))
         }).map(|page| serde_json::json!({ "id": page.id, "version": catalog.page_versions.get(&page.id) })).collect::<Vec<_>>()
     }).to_string();
@@ -102,14 +103,16 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
             .account_items
             .into_iter()
             .filter(|item| {
-                item.required_permission
-                    .as_deref()
-                    .is_none_or(|permission| {
-                        snapshot
-                            .permissions
-                            .iter()
-                            .any(|candidate| candidate == permission)
-                    })
+                !catalog.hidden_pages.contains(&item.page_id)
+                    && item
+                        .required_permission
+                        .as_deref()
+                        .is_none_or(|permission| {
+                            snapshot
+                                .permissions
+                                .iter()
+                                .any(|candidate| candidate == permission)
+                        })
             })
             .map(|item| ApplicationAccountItem {
                 id: item.id,
@@ -123,6 +126,7 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
     let runtime_pages = catalog
         .pages
         .into_iter()
+        .filter(|page| !catalog.hidden_pages.contains(&page.id))
         .map(|page| ApplicationRuntimePage {
             id: page.id,
             label: page.label,

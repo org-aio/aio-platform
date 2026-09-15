@@ -73,6 +73,7 @@ impl RepositoryInstaller {
             summary: metadata.summary.clone(),
             license: metadata.license.clone(),
             tags: metadata.tags.clone(),
+            menu_hidden: false,
             installed: false,
             source_id: None,
             state: None,

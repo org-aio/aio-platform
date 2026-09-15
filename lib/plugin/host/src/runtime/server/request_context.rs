@@ -15,11 +15,37 @@ pub(super) async fn authenticate(
     state: &RuntimeState,
     headers: &HeaderMap,
 ) -> Result<SessionContext, RuntimeError> {
-    state
-        .identity
-        .authenticate(headers)
+    authenticate_optional(state, headers)
         .await?
         .ok_or_else(|| RuntimeError::unauthorized("会话无效或已过期"))
+}
+
+pub(super) async fn authenticate_optional(
+    state: &RuntimeState,
+    headers: &HeaderMap,
+) -> Result<Option<SessionContext>, RuntimeError> {
+    let Some(mut session) = state.identity.authenticate(headers).await? else {
+        return Ok(None);
+    };
+    if !state
+        .identity
+        .member_active(&session.tenant_id, &session.user_id)
+        .await?
+    {
+        return Ok(None);
+    }
+    // 插件权限只从当前安装版本派生，历史角色授权不能复活已停用的能力。
+    session
+        .permissions
+        .retain(|permission| !permission.starts_with("component:"));
+    if let Some(components) = &state.components {
+        session
+            .permissions
+            .extend(components.permissions(&session.tenant_id).await?);
+    }
+    session.permissions.sort();
+    session.permissions.dedup();
+    Ok(Some(session))
 }
 
 pub(super) async fn authenticate_manager(
@@ -144,6 +170,7 @@ pub(super) async fn catalog_value(
     catalog
         .account_items
         .retain(|item| permitted(item.required_permission.as_deref(), &session.permissions));
+    super::navigation::apply(state, &session.tenant_id, &mut catalog).await?;
     catalog.session_context = session_context(session);
     catalog.context = tenant_context(session)?;
     catalog

@@ -23,9 +23,7 @@ impl IdentityProvider for DevelopmentIdentity {
     async fn session_active(&self, session: &str, tenant: &str, user: &str) -> Result<bool> {
         Ok(session == "development" && self.member_active(tenant, user).await?)
     }
-    async fn install_permissions(&self, _: &str, _: &[String]) -> Result<()> {
-        Ok(())
-    }
+
     async fn authenticate(&self, _: &axum::http::HeaderMap) -> Result<Option<SessionContext>> {
         Ok(Some(SessionContext {
             session_id: "development".into(),

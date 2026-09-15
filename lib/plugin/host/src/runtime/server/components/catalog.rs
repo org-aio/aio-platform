@@ -23,6 +23,7 @@ impl Components {
                     summary: metadata.summary,
                     license: metadata.license,
                     tags: metadata.tags,
+                    menu_hidden: false,
                     installed: active_revision.is_some(),
                     source_id: Some(row.try_get::<Uuid, _>("id")?.to_string()),
                     state: active_revision.as_ref().map(|_| {

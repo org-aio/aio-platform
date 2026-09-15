@@ -31,9 +31,6 @@ impl IdentityProvider for Identity {
     async fn session_active(&self, _: &str, _: &str, _: &str) -> Result<bool> {
         Ok(true)
     }
-    async fn install_permissions(&self, _: &str, _: &[String]) -> Result<()> {
-        Ok(())
-    }
 }
 
 #[tokio::test]

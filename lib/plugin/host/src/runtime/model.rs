@@ -22,6 +22,8 @@ pub struct RuntimeCatalog {
     pub user: UserView,
     pub pages: Vec<PageDefinition>,
     #[serde(default)]
+    pub hidden_pages: Vec<String>,
+    #[serde(default)]
     pub account_items: Vec<RuntimeAccountItem>,
     pub plugins: Vec<InstalledPluginView>,
 }
@@ -138,6 +140,8 @@ pub struct MarketplaceEntry {
     pub tags: Vec<String>,
     #[serde(default)]
     pub installed: bool,
+    #[serde(default)]
+    pub menu_hidden: bool,
     #[serde(default)]
     pub source_id: Option<String>,
     #[serde(default)]

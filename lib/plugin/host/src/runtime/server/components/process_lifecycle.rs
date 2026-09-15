@@ -5,7 +5,7 @@ use az_plugin_runtime::bindings::aio::plugin::transport::{Request, Response};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use super::{Components, services};
+use super::Components;
 
 impl Components {
     pub(super) async fn installed_bundle(
@@ -32,10 +32,8 @@ impl Components {
         };
         let result = async {
             self.processes.activate(source, tenant, &bundle).await?;
-            let permissions: Vec<_> = bundle.verify()?.manifest().plugin.permissions.iter().map(|name| services::permission(source, name)).collect();
             let mut tx = self.pool.begin().await?;
             sqlx::query("INSERT INTO component_installations(tenant_id,source_id,digest,generation) VALUES($1,$2,$3,$4) ON CONFLICT(tenant_id,source_id) DO UPDATE SET digest=EXCLUDED.digest,enabled=true,generation=EXCLUDED.generation").bind(tenant).bind(source).bind(&bundle.digest).bind(Uuid::new_v4()).execute(&mut *tx).await?;
-            self.identity.install_permissions(tenant, &permissions).await?;
             tx.commit().await?;
             Ok(())
         }.await;

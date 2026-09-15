@@ -26,8 +26,4 @@ pub trait IdentityProvider: Send + Sync {
 
     async fn session_active(&self, session: &str, tenant: &str, user: &str)
     -> anyhow::Result<bool>;
-
-    /// 宿主声明新增权限，身份实现决定授予哪些管理角色；重复调用必须幂等。
-    async fn install_permissions(&self, tenant: &str, permissions: &[String])
-    -> anyhow::Result<()>;
 }

@@ -92,6 +92,7 @@ pub fn router(state: RuntimeState) -> Router {
         .merge(super::delivery::router())
         .merge(super::components::router(state.clone()))
         .merge(super::bootstrap::router())
+        .merge(super::navigation::router())
         .merge(super::tools::router())
         .with_state(state)
 }
@@ -603,6 +604,7 @@ async fn marketplace(
             entries.push(unlisted_entry(plugin));
         }
     }
+    super::navigation::enrich_entries(&state.store.pool, &session.tenant_id, &mut entries).await?;
     let mut items = entries
         .into_iter()
         .map(super::tools::MarketplaceItem::Plugin)
@@ -654,6 +656,7 @@ fn unlisted_entry(plugin: &crate::runtime::InstalledPluginView) -> MarketplaceEn
         summary: "此插件已安装在当前工作区，未收录于官方市场。".to_owned(),
         license: "未收录".to_owned(),
         tags: vec!["unlisted".to_owned()],
+        menu_hidden: false,
         installed: true,
         source_id: Some(plugin.source_id.clone()),
         state: Some(plugin.state),
