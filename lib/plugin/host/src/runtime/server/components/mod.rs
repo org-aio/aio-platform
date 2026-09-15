@@ -242,7 +242,7 @@ impl Components {
             } else {
                 slot.deactivate().await?;
             }
-            return Err(error.into());
+            return Err(error);
         }
         Ok(())
     }

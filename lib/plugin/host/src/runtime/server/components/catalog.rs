@@ -87,6 +87,8 @@ impl Components {
     }
 }
 
+// 参数对应安装记录的独立字段，保持数据库与开发态共用同一目录映射。
+#[allow(clippy::too_many_arguments)]
 fn append(
     catalog: &mut RuntimeCatalog,
     source: Uuid,

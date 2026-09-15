@@ -185,16 +185,14 @@ fn requirements(text: &str) -> Result<Vec<RepositoryDependency>> {
         .and_then(|plugin| plugin.get("marketplace"))
         .and_then(|marketplace| marketplace.get("parent"))
         .and_then(|parent| parent.as_str())
-    {
-        if !dependencies
+        && !dependencies
             .iter()
             .any(|dependency| dependency.git == parent)
-        {
-            dependencies.push(RepositoryDependency {
-                git: parent.into(),
-                version: "*".into(),
-            });
-        }
+    {
+        dependencies.push(RepositoryDependency {
+            git: parent.into(),
+            version: "*".into(),
+        });
     }
     az_plugin_manifest::validate_dependencies(&dependencies)?;
     Ok(dependencies)

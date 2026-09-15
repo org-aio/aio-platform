@@ -24,7 +24,7 @@ pub(super) async fn collect(state: &RuntimeState) -> Result<()> {
             snapshots.push((entry.metadata()?.modified()?, name, entry.path()));
         }
     }
-    snapshots.sort_by(|a, b| b.0.cmp(&a.0));
+    snapshots.sort_by_key(|item| std::cmp::Reverse(item.0));
     // 保留最近十次构建，以及仍在运行或被浏览器引用的版本。
     for (_, revision, path) in snapshots.into_iter().skip(10) {
         if protected.contains(&revision) {

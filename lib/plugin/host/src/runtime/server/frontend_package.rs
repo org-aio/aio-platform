@@ -65,10 +65,10 @@ pub(super) async fn prepare(
             .map(|(path, asset)| (path, asset.sha256))
             .collect(),
     });
-    if cache.len() >= 64 {
-        if let Some(oldest) = cache.keys().next().cloned() {
-            cache.remove(&oldest);
-        }
+    if cache.len() >= 64
+        && let Some(oldest) = cache.keys().next().cloned()
+    {
+        cache.remove(&oldest);
     }
     cache.insert(revision.to_owned(), metadata.clone());
     Ok(metadata)

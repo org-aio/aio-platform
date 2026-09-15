@@ -306,6 +306,42 @@ fn render(
     Ok(output)
 }
 
+pub(super) async fn request(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Path(token): Path<String>,
+    Json(request): Json<model::Request>,
+) -> Result<Json<RuntimeResponse<model::Response>>, RuntimeError> {
+    let session = authenticate(&state, &headers).await?;
+    let _permit = state.frontend.request_slot()?;
+    let grant = validate(&state, &session, &token).await?;
+    let components = state.components()?;
+    let authorization = components.services.enter(&session)?;
+    let response = components
+        .handle(
+            Uuid::parse_str(&grant.source_id).context("来源无效")?,
+            &session.tenant_id,
+            &grant.revision,
+            request.try_into()?,
+            authorization.context.clone(),
+        )
+        .await?;
+    Ok(Json(RuntimeResponse {
+        data: response.into(),
+    }))
+}
+
+pub(super) async fn renew(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Path(token): Path<String>,
+) -> Result<StatusCode, RuntimeError> {
+    let session = authenticate(&state, &headers).await?;
+    validate(&state, &session, &token).await?;
+    state.frontend.renew(&token)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,40 +392,4 @@ mod tests {
         );
         Ok(())
     }
-}
-
-pub(super) async fn request(
-    State(state): State<RuntimeState>,
-    headers: HeaderMap,
-    Path(token): Path<String>,
-    Json(request): Json<model::Request>,
-) -> Result<Json<RuntimeResponse<model::Response>>, RuntimeError> {
-    let session = authenticate(&state, &headers).await?;
-    let _permit = state.frontend.request_slot()?;
-    let grant = validate(&state, &session, &token).await?;
-    let components = state.components()?;
-    let authorization = components.services.enter(&session)?;
-    let response = components
-        .handle(
-            Uuid::parse_str(&grant.source_id).context("来源无效")?,
-            &session.tenant_id,
-            &grant.revision,
-            request.try_into()?,
-            authorization.context.clone(),
-        )
-        .await?;
-    Ok(Json(RuntimeResponse {
-        data: response.into(),
-    }))
-}
-
-pub(super) async fn renew(
-    State(state): State<RuntimeState>,
-    headers: HeaderMap,
-    Path(token): Path<String>,
-) -> Result<StatusCode, RuntimeError> {
-    let session = authenticate(&state, &headers).await?;
-    validate(&state, &session, &token).await?;
-    state.frontend.renew(&token)?;
-    Ok(StatusCode::NO_CONTENT)
 }

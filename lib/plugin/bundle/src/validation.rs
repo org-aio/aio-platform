@@ -144,7 +144,7 @@ pub(crate) fn verify_artifacts(
             frontend_assets.insert(
                 path[frontend_prefix.len()..].to_owned(),
                 crate::FrontendAsset {
-                    digest: format!("{:x}", Sha256::digest(&bytes)),
+                    digest: format!("{:x}", Sha256::digest(bytes)),
                     size: bytes.len(),
                 },
             );
@@ -158,7 +158,7 @@ pub(crate) fn verify_artifacts(
             );
             ensure!(bytes.len() <= 1024 * 1024, "单个迁移文件超过配额");
             ensure!(
-                !std::str::from_utf8(&bytes)?.trim().is_empty(),
+                !std::str::from_utf8(bytes)?.trim().is_empty(),
                 "迁移文件不能为空"
             );
             migration_count += 1;

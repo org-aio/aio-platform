@@ -118,6 +118,12 @@ fn order(selected: &BTreeMap<String, DependencyCandidate>) -> Option<Vec<Depende
     Some(result)
 }
 
+/// `*` 接受所有已经发布成功的版本，包括自动交付生成的 dev 版本。
+/// 有范围的要求继续遵循 semver 对预发布版本的显式选择规则。
+pub fn matches_requirement(requirement: &semver::VersionReq, version: &semver::Version) -> bool {
+    requirement.comparators.is_empty() || requirement.matches(version)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,10 +181,4 @@ mod tests {
             .is_err()
         );
     }
-}
-
-/// `*` 接受所有已经发布成功的版本，包括自动交付生成的 dev 版本。
-/// 有范围的要求继续遵循 semver 对预发布版本的显式选择规则。
-pub fn matches_requirement(requirement: &semver::VersionReq, version: &semver::Version) -> bool {
-    requirement.comparators.is_empty() || requirement.matches(version)
 }

@@ -100,16 +100,15 @@ pub(super) fn dependencies(
     parent: Option<&str>,
 ) -> Result<()> {
     let mut requirements = dependencies.to_vec();
-    if let Some(parent) = parent {
-        if !requirements
+    if let Some(parent) = parent
+        && !requirements
             .iter()
             .any(|dependency| dependency.git == parent)
-        {
-            requirements.push(az_plugin_manifest::RepositoryDependency {
-                git: parent.into(),
-                version: "*".into(),
-            });
-        }
+    {
+        requirements.push(az_plugin_manifest::RepositoryDependency {
+            git: parent.into(),
+            version: "*".into(),
+        });
     }
     for requirement in requirements {
         let locked = session

@@ -47,10 +47,10 @@ pub(in crate::runtime::server) async fn get(
             .fetch_optional(pool)
             .await?;
     let mut manifest = value.map(decode).transpose()?;
-    if let Some(manifest) = manifest.as_mut() {
-        if let Some(doc) = documentation(pool, id).await? {
-            apply_metadata(manifest, &doc);
-        }
+    if let Some(manifest) = manifest.as_mut()
+        && let Some(doc) = documentation(pool, id).await?
+    {
+        apply_metadata(manifest, &doc);
     }
     Ok(manifest)
 }

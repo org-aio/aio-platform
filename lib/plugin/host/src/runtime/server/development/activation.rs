@@ -230,7 +230,7 @@ pub(super) async fn prepare(
     let text = std::fs::read_to_string(workspace.join("aio-plugin.toml"))?;
     let manifest: toml::Value = toml::from_str(&text)?;
     if manifest.get("schema_version").and_then(|v| v.as_integer()) == Some(2) {
-        let root = super::snapshot::prepare(&state, &artifact)?;
+        let root = super::snapshot::prepare(state, &artifact)?;
         let bundle = az_plugin_bundle::VerifiedBundle::from_development_directory(
             &root,
             artifact.content_digest.clone(),

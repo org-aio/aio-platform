@@ -53,7 +53,7 @@ pub(super) async fn load(
     headers: &HeaderMap,
 ) -> Result<(LoadedApplication, HeaderValue), RuntimeError> {
     let start = Instant::now();
-    let session = state.identity.authenticate(&headers).await?;
+    let session = state.identity.authenticate(headers).await?;
     let authenticated = Instant::now();
     let snapshot = match session {
         Some(session) => Some(ApplicationSnapshot {

@@ -94,9 +94,9 @@ fn collect_directory(
 fn read_artifacts(root: &Path, manifest: &str, limit: usize) -> Result<BTreeMap<String, Vec<u8>>> {
     let parsed = BundleManifest::parse(manifest)?;
     let mut paths = vec![parsed.plugin.runtime.artifact.clone()];
-    collect_directory(&root, &parsed.plugin.frontend.path, &mut paths, 0)?;
+    collect_directory(root, &parsed.plugin.frontend.path, &mut paths, 0)?;
     if let Some(database) = &parsed.plugin.database {
-        for entry in fs::read_dir(checked_path(&root, &database.migrations)?)? {
+        for entry in fs::read_dir(checked_path(root, &database.migrations)?)? {
             let entry = entry?;
             if entry
                 .path()
@@ -116,7 +116,7 @@ fn read_artifacts(root: &Path, manifest: &str, limit: usize) -> Result<BTreeMap<
     let mut remaining = limit;
     let mut files = BTreeMap::new();
     for path in paths {
-        let bytes = read_file(&root, &path, remaining)?;
+        let bytes = read_file(root, &path, remaining)?;
         remaining -= bytes.len();
         ensure!(files.insert(path, bytes).is_none(), "产物路径重复");
     }

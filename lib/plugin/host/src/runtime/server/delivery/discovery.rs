@@ -199,7 +199,7 @@ pub(super) async fn run(state: RuntimeState) {
         .timeout(Duration::from_secs(30))
         .build()
         .expect("构建发现客户端");
-    tokio::join!(discover(&state, &client, &owner), poll(&state, &client));
+    tokio::join!(discover(&state, &client, owner), poll(&state, &client));
 }
 
 async fn discover(state: &RuntimeState, client: &Client, owner: &str) {
