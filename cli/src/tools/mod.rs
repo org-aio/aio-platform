@@ -10,7 +10,11 @@ pub(super) fn run(arguments: &[String]) -> Result<()> {
         ["helper", "install"] => az_tool::protocol::register(&std::env::current_exe()?),
         ["helper", "uninstall"] => az_tool::protocol::unregister(),
         ["tool", "install", id, "--version", version] => install_link(InstallLink::parse(
-            &format!("aio://install/{id}?version={version}"),
+            &InstallLink {
+                id: (*id).into(),
+                version: (*version).into(),
+            }
+            .to_string(),
         )?),
         ["open", url] => {
             let result = InstallLink::parse(url).and_then(install_link);
