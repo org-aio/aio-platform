@@ -570,7 +570,7 @@ async fn run_git(directory: Option<&Path>, arguments: &[&str]) -> Result<()> {
     Ok(())
 }
 
-async fn run_git_bounded(
+pub(super) async fn run_git_bounded(
     directory: Option<&Path>,
     arguments: &[&str],
     quota_root: &Path,
@@ -615,7 +615,7 @@ async fn run_git_bounded(
     }
 }
 
-async fn git_output(directory: &Path, arguments: &[&str]) -> Result<String> {
+pub(super) async fn git_output(directory: &Path, arguments: &[&str]) -> Result<String> {
     let mut command = Command::new("git");
     command
         .args(arguments)

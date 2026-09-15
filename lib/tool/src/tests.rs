@@ -31,11 +31,11 @@ fn links_cannot_change_commands_origins_or_confirmation() {
 }
 
 #[test]
-fn cli_requires_valid_platform_and_uninstall_plan() {
+fn cli_accepts_optional_uninstall_but_rejects_invalid_identifiers() {
     let mut value = sample();
     value.validate().unwrap();
     value.platforms.get_mut("macos").unwrap().uninstall.clear();
-    assert!(value.validate().is_err());
+    value.validate().unwrap();
     let mut value = sample();
     value.id = "../escape".into();
     assert!(value.validate().is_err());
@@ -72,7 +72,7 @@ fn failed_install_keeps_original_uninstall_plan_and_stops_following_steps() -> a
     plan.requirements.clear();
     plan.install = vec![write, fail.clone()];
     plan.uninstall = vec![remove];
-    plan.detect = fail;
+    plan.detect = Some(fail);
     let store = install::Store::new(directory.path().join("state"))?;
     assert!(store.install(manifest.clone()).is_err());
     assert!(marker.exists());
@@ -101,7 +101,7 @@ fn successful_commands_require_detection_before_install_is_marked_complete() -> 
     };
     plan.install = vec![succeed.clone()];
     plan.uninstall = vec![succeed.clone()];
-    plan.detect = succeed;
+    plan.detect = Some(succeed);
     let store = install::Store::new(directory.path().join("state"))?;
     store.install(manifest.clone())?;
     assert_eq!(store.read(&manifest.id)?.unwrap().state, "installed");
@@ -127,7 +127,7 @@ fn uninstall_retry_does_not_repeat_completed_restore_steps() -> anyhow::Result<(
         program: "node".into(),
         args: vec!["--version".into()],
     }];
-    plan.detect = plan.install[0].clone();
+    plan.detect = Some(plan.install[0].clone());
     plan.uninstall = vec![
         node(
             "require('fs').writeFileSync(process.argv[1], 'restored', {flag:'wx'})",

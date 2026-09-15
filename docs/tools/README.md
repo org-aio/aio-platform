@@ -21,15 +21,27 @@ npx -y @zjarlin/aio helper uninstall
 
 安装前会展示计划，必须在本机终端输入 `yes`。链接不能传入命令、来源地址或自动确认标记。浏览器可能询问是否打开 AIO Helper。
 
-## 发布 CLI 条目
+## 用命令上架 CLI
 
-按照 `tools/registry/codex-model-sync-0.1.4.json` 创建 JSON，声明平台、依赖、安装、检测和卸载命令。在宿主设置 `AIO_TOOL_REGISTRY_DIR` 指向 JSON 目录，启动时验证并导入 PostgreSQL。市场显示每个工具最高 SemVer；各历史版本仍可通过固定链接获取。同 ID、同版本不会覆盖，变更安装步骤必须递增版本。
+平台发布者登录插件市场，点击 **添加 CLI**。只需填写安装命令，例如 `npx -y codex-model-sync@0.1.4 setup`；Git 仓库地址可选，不要求编写 JSON 或 AIO 插件包。
 
-正式描述接口为 `GET https://aio.addzero.site/api/runtime/tools/<id>/<version>`，只读、公开、不接收命令。助手只请求官方 HTTPS 来源且不跟随重定向。AIO 不镜像或重打包第三方 CLI，安装描述调用其原生分发方式。
+- 系统自动使用仓库名或命令中的工具名作为标题，补充默认备注和 `cli` 标签；在详情页可随时 **编辑标题和备注**。
+- 默认识别当前电脑系统，也可选择 macOS、Windows、Linux 或多个系统。命令需与所选系统匹配：macOS/Linux 使用 Bash（启用 pipefail），Windows 使用 PowerShell。
+- **保存并安装** 先登记条目，再唤起本机助手。取消勾选「保存后打开本机助手安装」即可只上架。
+- Git 地址支持不含凭据的公网 HTTPS 仓库，自动读取默认分支根目录的 README/README.md/README.markdown 作为插件说明。说明按提交缓存，可点击 **刷新 README**；读取失败不阻止上架，界面显示原因及仓库链接。
+- 标题、备注、检测命令和卸载命令均为可选高级项。不会从 README 生成并执行安装或卸载脚本。
+
+HTTP `POST /api/runtime/tools/register` 接收共享 `Registration` 模型；`PATCH /api/runtime/tools/{id}/details` 编辑展示资料并重新读取文档。两者复用平台发布权限，普通工作区管理员不能修改全局市场。相同安装命令、适用系统、检测和卸载步骤重复提交返回已有条目，不覆盖资料；不同执行方案生成新条目。
+
+助手通过公开只读 `GET https://aio.addzero.site/api/runtime/tools/<id>/<version>` 获取已登记的安装描述。链接不能携带原始命令；服务器只保存命令，不执行它。AIO 不镜像或重打包第三方 CLI，直接使用工具自身的分发方式。
+
+## 导入完整安装描述
+
+需要按平台编排多个步骤时，仍可按照 `tools/registry/codex-model-sync-0.1.4.json` 创建 JSON。在宿主设置 `AIO_TOOL_REGISTRY_DIR` 指向目录，启动时验证并导入 PostgreSQL。市场显示每个工具最高 SemVer；同 ID、同版本的执行方案不会覆盖，变更步骤需递增版本。展示标题、备注和 Git 文档资料可独立编辑。
 
 ## 状态与恢复
 
-安装步骤开始前保存原始描述；安装和检测都成功才记为 installed。安装失败保留记录，卸载使用保存的版本，先恢复配置再移除包。卸载失败保留进度，重试从下一未完成步骤继续。各工具通过当前用户目录中的锁串行操作。
+安装步骤开始前保存原始描述；提供检测命令时，安装和检测都成功才记为 installed；没有检测命令时仅记为 executed，表示命令执行成功。安装失败保留记录。卸载使用保存的版本；没有卸载步骤时拒绝自动卸载并保留记录，有配置恢复需求的工具应将恢复步骤放在包删除之前。卸载失败保留进度，重试从下一未完成步骤继续。各工具通过当前用户目录中的锁串行操作。
 
 网页无法直接读取本机安装情况，因此 CLI 不计入宿主的“已安装”。查看本机结果使用 `tool list`，不会把点击链接当作安装成功。首次发布需要同时交付宿主、市场前端和新版 npm CLI，旧 npm 版本不包含 helper/tool 命令。
 

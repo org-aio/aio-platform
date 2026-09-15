@@ -20,8 +20,9 @@ pub struct InstallationPlan {
     #[serde(default)]
     pub requirements: Vec<Requirement>,
     pub install: Vec<CommandSpec>,
+    #[serde(default)]
     pub uninstall: Vec<CommandSpec>,
-    pub detect: CommandSpec,
+    pub detect: Option<CommandSpec>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

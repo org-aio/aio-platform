@@ -49,6 +49,10 @@ pub fn confirm(manifest: &ToolManifest, uninstall: bool) -> Result<bool> {
         .platforms
         .get(std::env::consts::OS)
         .context("此工具不支持当前系统")?;
+    ensure!(
+        !uninstall || !plan.uninstall.is_empty(),
+        "未提供卸载命令，请按照项目说明手动卸载；安装记录将保留"
+    );
     println!(
         "{} {} · {}",
         manifest.title, manifest.version, manifest.homepage
@@ -60,7 +64,7 @@ pub fn confirm(manifest: &ToolManifest, uninstall: bool) -> Result<bool> {
             .requirements
             .iter()
             .map(|r| &r.check)
-            .chain([&plan.detect])
+            .chain(plan.detect.iter())
         {
             println!(
                 "  {} {}",
@@ -84,11 +88,7 @@ pub fn confirm(manifest: &ToolManifest, uninstall: bool) -> Result<bool> {
     ensure!(io::stdin().is_terminal(), "请在终端运行此操作并确认");
     print!(
         "确认{}？输入 yes：",
-        if uninstall {
-            "恢复配置并卸载"
-        } else {
-            "安装"
-        }
+        if uninstall { "卸载" } else { "安装" }
     );
     io::stdout().flush()?;
     let mut answer = String::new();
@@ -106,7 +106,8 @@ impl Store {
             .context("此工具不支持当前系统")?;
         if let Some(previous) = self.read(&manifest.id)? {
             ensure!(
-                previous.manifest == manifest,
+                previous.manifest.version == manifest.version
+                    && previous.manifest.platforms == manifest.platforms,
                 "已有其他版本或未完成安装，请先执行 aio tool uninstall {} 恢复配置",
                 manifest.id
             );
@@ -123,21 +124,39 @@ impl Store {
                 record.state = "failed".into();
                 self.save(&record)?;
                 return Err(error.context(format!(
-                    "安装未完成；运行 aio tool uninstall {} 可恢复配置",
-                    manifest.id
+                    "安装未完成；{}",
+                    if plan.uninstall.is_empty() {
+                        "请按照项目说明手动处理，安装记录已保留".into()
+                    } else {
+                        format!("运行 aio tool uninstall {} 可执行卸载步骤", manifest.id)
+                    }
                 )));
             }
             record.completed_steps += 1;
             self.save(&record)?;
         }
-        if let Err(error) = execution::run(&plan.detect) {
+        if let Some(detect) = &plan.detect
+            && let Err(error) = execution::run(detect)
+        {
             record.state = "failed".into();
             self.save(&record)?;
             return Err(error.context("安装命令已结束，但检测未通过"));
         }
-        record.state = "installed".into();
+        record.state = if plan.detect.is_some() {
+            "installed"
+        } else {
+            "executed"
+        }
+        .into();
         self.save(&record)?;
-        println!("已安装并验证 {} {}", manifest.id, manifest.version);
+        if plan.detect.is_some() {
+            println!("已安装并验证 {} {}", manifest.id, manifest.version);
+        } else {
+            println!(
+                "安装命令执行成功 {} {}；条目未提供额外检测",
+                manifest.id, manifest.version
+            );
+        }
         Ok(())
     }
 
@@ -151,6 +170,10 @@ impl Store {
             .context("安装记录的平台不匹配")?
             .uninstall
             .clone();
+        ensure!(
+            !commands.is_empty(),
+            "未提供卸载命令，请按照项目说明手动卸载；安装记录将保留"
+        );
         // 重试卸载时从上次完成的位置继续，防止重复恢复已经撤销的配置。
         if record.state != "uninstalling" {
             record.completed_steps = 0;
@@ -163,7 +186,7 @@ impl Store {
             self.save(&record)?;
         }
         self.remove(id)?;
-        println!("已恢复配置并卸载 {id}");
+        println!("已执行卸载步骤 {id}");
         Ok(())
     }
 }

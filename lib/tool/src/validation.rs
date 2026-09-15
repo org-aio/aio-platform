@@ -25,17 +25,19 @@ impl ToolManifest {
             "版本必须是明确的 SemVer"
         );
         ensure!(
-            !self.title.trim().is_empty() && !self.summary.trim().is_empty(),
-            "名称和介绍不能为空"
+            !self.title.trim().is_empty() && self.title.len() <= 200 && self.summary.len() <= 4000,
+            "名称不能为空，名称与备注不能超过长度限制"
         );
-        let homepage = url::Url::parse(&self.homepage)?;
-        ensure!(
-            homepage.scheme() == "https"
-                && homepage.host_str().is_some()
-                && homepage.username().is_empty()
-                && homepage.password().is_none(),
-            "主页必须是 HTTPS 地址"
-        );
+        if !self.homepage.is_empty() {
+            let homepage = url::Url::parse(&self.homepage)?;
+            ensure!(
+                homepage.scheme() == "https"
+                    && homepage.host_str().is_some()
+                    && homepage.username().is_empty()
+                    && homepage.password().is_none(),
+                "主页必须是 HTTPS 地址"
+            );
+        }
         ensure!(
             self.tags.iter().any(|tag| tag == "cli"),
             "工具条目必须包含 cli 标签"
@@ -46,10 +48,7 @@ impl ToolManifest {
                 ["macos", "linux", "windows"].contains(&platform.as_str()),
                 "不支持的平台: {platform}"
             );
-            ensure!(
-                !plan.install.is_empty() && !plan.uninstall.is_empty(),
-                "必须同时声明安装与卸载步骤"
-            );
+            ensure!(!plan.install.is_empty(), "必须声明安装步骤");
             ensure!(
                 plan.install.len() <= 20
                     && plan.uninstall.len() <= 20
@@ -60,7 +59,7 @@ impl ToolManifest {
                 .install
                 .iter()
                 .chain(&plan.uninstall)
-                .chain([&plan.detect])
+                .chain(plan.detect.iter())
                 .chain(plan.requirements.iter().map(|r| &r.check))
             {
                 command.validate()?;

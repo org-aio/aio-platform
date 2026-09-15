@@ -1,5 +1,6 @@
 mod link;
 mod model;
+pub mod registration;
 mod validation;
 
 pub use link::InstallLink;
