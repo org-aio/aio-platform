@@ -26,7 +26,7 @@ npx -y @zjarlin/aio helper uninstall
 以后新建 CLI 使用 AIO 初始化，当前默认 TypeScript + Node.js，核心功能和命令入口分离：
 
 ```sh
-npx -y @zjarlin/aio@2026.9.16 plugin init my-cli --kind cli
+npx -y @zjarlin/aio@2026.9.17 plugin init my-cli --kind cli
 cd my-cli
 npm ci
 npm test
