@@ -23,6 +23,12 @@ async fn cache_headers(request: Request, next: Next) -> Response {
         .headers()
         .get(header::CONTENT_TYPE)
         .is_some_and(|value| value.as_bytes().starts_with(b"text/html"));
+    if html {
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/html; charset=utf-8"),
+        );
+    }
     let cache = if immutable && !html && response.status().is_success() {
         "public, max-age=31536000, immutable"
     } else {
@@ -98,9 +104,11 @@ mod tests {
             );
             assert_eq!(response.bytes().await?.as_ref(), compressed);
             for path in ["/", "/assets/missing-dxh12345678.js"] {
+                let response = client.get(format!("{base}{path}")).send().await?;
+                assert_eq!(response.headers()["cache-control"], "no-cache");
                 assert_eq!(
-                    client.get(format!("{base}{path}")).send().await?.headers()["cache-control"],
-                    "no-cache"
+                    response.headers()["content-type"],
+                    "text/html; charset=utf-8"
                 );
             }
             anyhow::Ok(())

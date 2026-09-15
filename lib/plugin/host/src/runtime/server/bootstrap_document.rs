@@ -71,7 +71,7 @@ fn render(html: &[u8], snapshot: &LoadedApplication) -> Result<Vec<u8>> {
         .select_first("head")
         .map_err(|_| anyhow::anyhow!("首页缺少 head"))?;
     let fragment = kuchikiki::parse_html()
-        .one("<script id='aio-startup-snapshot' type='application/json'></script>")
+        .one("<meta charset='utf-8'><script id='aio-startup-snapshot' type='application/json'></script>")
         .document_node;
     let script = fragment
         .select_first("script")
@@ -82,6 +82,19 @@ fn render(html: &[u8], snapshot: &LoadedApplication) -> Result<Vec<u8>> {
     let node = script.as_node().clone();
     node.detach();
     head.as_node().prepend(node);
+    // 快照可能超过浏览器的字符集预扫描范围，编码声明必须在快照之前。
+    for meta in document
+        .select("meta[charset]")
+        .expect("有效的字符集选择器")
+    {
+        meta.as_node().detach();
+    }
+    let charset = fragment
+        .select_first("meta[charset]")
+        .map_err(|_| anyhow::anyhow!("创建首页字符集声明失败"))?;
+    let charset = charset.as_node().clone();
+    charset.detach();
+    head.as_node().prepend(charset);
     let mut output = Vec::new();
     document.serialize(&mut output).context("序列化首页失败")?;
     Ok(output)
@@ -90,6 +103,39 @@ fn render(html: &[u8], snapshot: &LoadedApplication) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn large_chinese_snapshot_keeps_utf8_declaration_within_prescan() -> Result<()> {
+        let snapshot = LoadedApplication {
+            snapshot: None,
+            etag: Some("社区插件：计数器示例、任务工作台、工作空间".repeat(100)),
+        };
+        for head in [
+            "<meta charset='UTF-8'><title>AIO</title>",
+            "<title>AIO</title>",
+        ] {
+            let source = format!("<!doctype html><head>{head}</head><body></body>");
+            let bytes = render(source.as_bytes(), &snapshot)?;
+            let prefix = std::str::from_utf8(&bytes[..100])?;
+            assert!(prefix.contains("<meta charset=\"utf-8\">"));
+            let document = kuchikiki::parse_html()
+                .one(String::from_utf8(bytes)?)
+                .document_node;
+            assert_eq!(document.select("meta[charset]").unwrap().count(), 1);
+            assert_eq!(
+                document.select_first("title").unwrap().text_contents(),
+                "AIO"
+            );
+            let embedded: LoadedApplication = serde_json::from_str(
+                &document
+                    .select_first("#aio-startup-snapshot")
+                    .unwrap()
+                    .text_contents(),
+            )?;
+            assert_eq!(embedded.etag, snapshot.etag);
+        }
+        Ok(())
+    }
 
     #[test]
     fn snapshot_json_cannot_close_its_script_element() -> Result<()> {

@@ -11,3 +11,5 @@ AIO_TEST_KMP_FRONTEND=/absolute/path/to/compose/frontend node tests/browser/prep
 ```
 
 测试覆盖资源缓存、通信来源隔离、保活、版本替换、会话变化、准备实例及桌面/移动内容区尺寸。结果保存在 `target/` 各测试目录。协议夹具不替代真实数据库和服务端测试。`AIO_TEST_SHELL` 可指定消费同一宿主实现的产品 Web 产物，验证产品装配；默认使用平台自带开发壳。
+
+`AIO_URL=https://your-host AIO_COOKIE_FILE=/private/test-cookies.txt node tests/browser/document-encoding.cjs` 使用 Netscape 格式的验收会话文件，检查首页 UTF-8 响应头、前 1024 字节内的字符集声明，以及桌面 / 移动壳中与目录一致的中文场景和插件名称。报告保存在 `target/encoding-regression/live/`；`AIO_TEST_OUTPUT` 可覆盖输出目录。
