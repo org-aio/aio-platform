@@ -473,6 +473,7 @@ dependencies = [
  "anyhow",
  "serde",
  "serde_json",
+ "url",
  "wit-parser 0.244.0",
 ]
 

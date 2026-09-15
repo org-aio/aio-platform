@@ -156,17 +156,8 @@ impl BundleManifest {
                 "process 授权超过配额"
             );
             for endpoint in &process.endpoints {
-                let url = url::Url::parse(endpoint)?;
-                ensure!(
-                    url.scheme() == "https"
-                        && url.host_str().is_some()
-                        && url.username().is_empty()
-                        && url.password().is_none()
-                        && url.query().is_none()
-                        && url.fragment().is_none()
-                        && !endpoint.ends_with('/'),
-                    "模型出站必须是无凭据的完整 HTTPS 基址"
-                );
+                az_plugin_contract::process::model_endpoint(endpoint)
+                    .map_err(anyhow::Error::msg)?;
             }
             for service in &process.services {
                 ensure!(

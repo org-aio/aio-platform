@@ -20,8 +20,13 @@ image = "node:22@sha256:{}"
 #[test]
 fn process_requires_immutable_image_and_explicit_https_services() {
     assert!(BundleManifest::parse(&manifest("endpoints = ['https://api.openai.com/v1']\nservices = ['https://github.com/zjarlin/aio-plugin-agent-memory.git']")).is_ok());
+    assert!(
+        BundleManifest::parse(&manifest("endpoints = ['http://192.168.31.252:18080/v1']")).is_ok()
+    );
     for extra in [
         "endpoints = ['http://127.0.0.1']",
+        "endpoints = ['http://169.254.169.254/latest']",
+        "endpoints = ['http://example.com/v1']",
         "endpoints = ['https://user:secret@host/v1']",
         "endpoints = ['https://host/v1?key=value']",
         "services = ['file:///tmp/service']",
