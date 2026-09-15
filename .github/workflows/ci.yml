@@ -14,6 +14,7 @@ jobs:
           submodules: true
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
+          toolchain: nightly-2026-05-25
           components: clippy, rustfmt
           targets: wasm32-wasip2
       - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
@@ -28,8 +29,8 @@ jobs:
       - run: cargo build --manifest-path lib/plugin/runtime/tests/fixture/Cargo.toml --locked --release --target wasm32-wasip2 --features unhealthy --target-dir target/fixture/unhealthy
       - run: cargo test -p az-plugin-runtime --test release -- --ignored
         env:
-          AIO_TEST_HEALTHY_COMPONENT: target/fixture/healthy/wasm32-wasip2/release/release_fixture.wasm
-          AIO_TEST_UNHEALTHY_COMPONENT: target/fixture/unhealthy/wasm32-wasip2/release/release_fixture.wasm
+          AIO_TEST_HEALTHY_COMPONENT: ${{ github.workspace }}/target/fixture/healthy/wasm32-wasip2/release/release_fixture.wasm
+          AIO_TEST_UNHEALTHY_COMPONENT: ${{ github.workspace }}/target/fixture/unhealthy/wasm32-wasip2/release/release_fixture.wasm
       - run: npm test --prefix npm/aio
       - run: cargo run -q -p az-aio-cli -- plugin schema docs/plugin/schema
       - run: git diff --exit-code docs/plugin/schema
