@@ -76,8 +76,8 @@ pub(crate) fn PersonalConfigPanel(on_close: EventHandler<()>) -> Element {
                                         small{class:"break-all",{scope_label(&entry.layer,&devices)}" · 版本 {entry.revision}" if entry.deleted{" · 已删除"}}
                                         div{class:"flex flex-wrap gap-2",
                                             if !entry.deleted{Button{variant:ButtonVariant::Outline,disabled:busy(),onclick:{let entry=entry.clone();move |_|{let entry=entry.clone();busy.set(true);spawn(async move{match request::<Content>("GET",&format!("/api/runtime/personal-config/entries/{}",entry.id),None::<&()>).await{Ok(value)=>if entry.kind=="asset"{asset.set(Some(value))}else{editor.set(Some((entry.kind,Some(value))))},Err(e)=>error.set(Some(e))}busy.set(false);});}},if entry.kind=="asset"{"恢复到设备"}else{"编辑"}}}
-                                            Button{variant:ButtonVariant::Ghost,onclick:{let entry=entry.clone();move |_|history.set(Some(entry.clone()))},"历史版本"}
-                                            if !entry.deleted{Button{variant:ButtonVariant::Ghost,onclick:{let entry=entry.clone();move |_|deleting.set(Some(entry.clone()))},"删除"}}
+                                            Button{variant:ButtonVariant::Ghost,disabled:busy()||!catalog.finished(),onclick:{let entry=entry.clone();move |_|history.set(Some(entry.clone()))},"历史版本"}
+                                            if !entry.deleted{Button{variant:ButtonVariant::Ghost,disabled:busy()||!catalog.finished(),onclick:{let entry=entry.clone();move |_|deleting.set(Some(entry.clone()))},"删除"}}
                                         }
                                     }
                                 }}
@@ -92,7 +92,7 @@ pub(crate) fn PersonalConfigPanel(on_close: EventHandler<()>) -> Element {
         if let Some((kind,initial))=editor(){super::entry_form::EntryForm{kind,initial,workers:devices.clone(),on_close:move |_|editor.set(None),on_saved:saved}}
         if let Some(entry)=history(){super::history_view::HistoryView{entry,on_close:move |_|history.set(None),on_saved:saved}}
         if let Some(value)=asset(){super::assets_view::AssetRestore{asset:value,workers:devices,on_close:move |_|asset.set(None)}}
-        if let Some(entry)=deleting(){Dialog{open:true,on_open_change:move|open:bool|if !open{deleting.set(None)},DialogTitle{"删除配置"}p{class:"break-all","确认删除 {entry.target}？同步设备会移除此项，已有文件先备份；历史版本仍可恢复。资源仅移除目录记录，不删除归档。"}Button{disabled:busy(),onclick:move |_|{let entry=entry.clone();busy.set(true);spawn(async move{let write=WriteEntry{id:entry.id,expected:Some(entry.revision),kind:entry.kind,target:entry.target,layer:entry.layer,format:entry.format,secret:entry.secret,executable:entry.executable,deleted:true,content:String::new()};match request::<Entry>("POST","/api/runtime/personal-config/entries",Some(&write)).await{Ok(_)=>{deleting.set(None);catalog.restart();notice.set(Some("已删除，在线设备将自动同步。".into()));},Err(e)=>error.set(Some(e))}busy.set(false);});},"确认删除"}}}
+        if let Some(entry)=deleting(){Dialog{open:true,on_open_change:move|open:bool|if !open{deleting.set(None)},DialogTitle{"删除配置"}p{class:"break-all","确认删除 {entry.target}？同步设备会移除此项，已有文件先备份；历史版本仍可恢复。资源仅移除目录记录，不删除归档。"}if let Some(message)=error(){p{role:"alert","{message}"}}Button{disabled:busy(),onclick:move |_|{let entry=entry.clone();busy.set(true);spawn(async move{let write=WriteEntry{id:entry.id,expected:Some(entry.revision),kind:entry.kind,target:entry.target,layer:entry.layer,format:entry.format,secret:entry.secret,executable:entry.executable,deleted:true,content:String::new()};match request::<Entry>("POST","/api/runtime/personal-config/entries",Some(&write)).await{Ok(_)=>{deleting.set(None);catalog.restart();notice.set(Some("已删除，在线设备将自动同步。".into()));},Err(e)=>error.set(Some(e))}busy.set(false);});},"确认删除"}}}
     }
 }
 fn scope_label(layer: &str, workers: &[Worker]) -> String {
