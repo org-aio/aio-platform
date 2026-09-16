@@ -55,7 +55,7 @@ impl Components {
     }
 
     pub async fn append_catalog(&self, tenant: &str, catalog: &mut RuntimeCatalog) -> Result<()> {
-        let rows=sqlx::query("SELECT s.id,s.git,i.digest,i.enabled,i.generation::TEXT,v.description,v.capabilities FROM component_sources s JOIN component_installations i ON i.source_id=s.id JOIN component_versions v ON v.digest=i.digest WHERE i.tenant_id=$1").bind(tenant).fetch_all(&self.pool).await?;
+        let rows=sqlx::query("SELECT s.id,s.git,i.digest,i.enabled,i.generation::TEXT,v.description,v.capabilities,v.metadata->>'title' AS title FROM component_sources s JOIN component_installations i ON i.source_id=s.id JOIN component_versions v ON v.digest=i.digest WHERE i.tenant_id=$1").bind(tenant).fetch_all(&self.pool).await?;
         for row in rows {
             append(
                 catalog,
@@ -64,6 +64,7 @@ impl Components {
                 row.try_get("digest")?,
                 row.try_get("generation")?,
                 row.try_get("enabled")?,
+                row.try_get("title")?,
                 serde_json::from_value(row.try_get("description")?)?,
                 row.try_get::<serde_json::Value, _>("capabilities")?["database"]
                     .as_bool()
@@ -79,6 +80,14 @@ impl Components {
                     instance.bundle.digest().into(),
                     instance.generation.clone(),
                     true,
+                    instance
+                        .bundle
+                        .manifest()
+                        .plugin
+                        .marketplace
+                        .as_ref()
+                        .map(|metadata| metadata.title.clone())
+                        .unwrap_or_else(|| instance.description.label.clone()),
                     instance.description.clone(),
                     instance.bundle.manifest().plugin.capabilities.database,
                 );
@@ -97,6 +106,7 @@ fn append(
     digest: String,
     generation: String,
     enabled: bool,
+    title: String,
     description: Description,
     database: bool,
 ) {
@@ -137,7 +147,7 @@ fn append(
                 .plugin_settings
                 .push(crate::runtime::PluginSettingsPage {
                     source_id: source.to_string(),
-                    label: description.label.clone(),
+                    label: title.clone(),
                     page_id: id.clone(),
                 });
         } else if p.surface != "workspace" {
@@ -170,5 +180,40 @@ fn append(
             required_permission: permission,
             body: PageBody::Frontend { entry: p.entry },
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_source_uses_the_installed_marketplace_title() -> Result<()> {
+        let mut catalog: RuntimeCatalog = serde_json::from_value(serde_json::json!({
+            "session_context": "session", "context": "workspace", "page_versions": {},
+            "tenant": {"id": "tenant", "label": "工作区"},
+            "user": {"label": "用户", "handle": "user", "initials": "U"},
+            "pages": [], "plugins": []
+        }))?;
+        let description = serde_json::from_value(serde_json::json!({
+            "label": "Internal agent runtime",
+            "pages": [{"id": "settings", "label": "配置", "entry": "settings.html",
+                "scene": null, "menu_path": [], "permission": null, "surface": "settings"}]
+        }))?;
+        append(
+            &mut catalog,
+            Uuid::nil(),
+            "plugin.git".into(),
+            "revision".into(),
+            "generation".into(),
+            true,
+            "用户看到的插件标题".into(),
+            description,
+            false,
+        );
+        assert_eq!(catalog.plugin_settings.len(), 1);
+        assert_eq!(catalog.plugin_settings[0].label, "用户看到的插件标题");
+        assert_eq!(catalog.pages[0].label, "配置");
+        Ok(())
     }
 }
