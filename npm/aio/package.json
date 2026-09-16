@@ -3,13 +3,13 @@
   "version": "2026.9.18",
   "description": "AIO application and plugin CLI",
   "license": "MIT OR Apache-2.0",
-  "homepage": "https://github.com/zjarlin/aio-platform",
+  "homepage": "https://github.com/org-aio/aio-platform",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zjarlin/aio-platform.git",
+    "url": "git+https://github.com/org-aio/aio-platform.git",
     "directory": "npm/aio"
   },
-  "bugs": "https://github.com/zjarlin/aio-platform/issues",
+  "bugs": "https://github.com/org-aio/aio-platform/issues",
   "bin": {
     "aio": "bin/aio.cjs"
   },

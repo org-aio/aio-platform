@@ -2,6 +2,11 @@ name: npm release
 
 on:
   workflow_dispatch:
+    inputs:
+      artifacts_run_id:
+        description: "复用已成功构建的工作流 ID（仅允许 npm 元数据变更）"
+        required: false
+        type: string
   push:
     tags:
       - "v*"
@@ -12,6 +17,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   verify:
@@ -41,6 +47,7 @@ jobs:
           git merge-base --is-ancestor "$tag_commit" refs/remotes/origin/main
 
   build:
+    if: inputs.artifacts_run_id == ''
     name: 构建 ${{ matrix.id }}
     needs: verify
     strategy:
@@ -117,23 +124,34 @@ jobs:
 
   publish:
     name: 发布 npm 包
-    needs: build
+    needs: [verify, build]
+    if: always() && needs.verify.result == 'success' && (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.artifacts_run_id != ''))
     runs-on: ubuntu-24.04
     environment: npm
     permissions:
       contents: read
       id-token: write
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
+          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+      - name: 校验复用构建产物
+        if: inputs.artifacts_run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACTS_RUN_ID: ${{ inputs.artifacts_run_id }}
+        run: node npm/aio/scripts/verify-reuse.cjs
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           path: npm/artifacts
+          run-id: ${{ inputs.artifacts_run_id || github.run_id }}
+          github-token: ${{ github.token }}
       - name: 校验发布版本
         run: node npm/aio/scripts/check-release.cjs
       - name: 测试 npm 入口

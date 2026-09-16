@@ -31,3 +31,5 @@ npx -y @zjarlin/aio tool list
 ## CLI 随包技能
 
 2026.9.18 起，`aio tool install <id> --version <version>` 自动将 npm 包内 `skills/<name>/` 安装到 `~/.agents/skills/<name>/`。`aio plugin init --kind cli` 默认生成使用技能；已有 CLI 使用 `--adopt` 接入时补齐缺失技能。卸载只清理 AIO 安装且内容未被用户修改的文件。
+
+维护者修正 npm 元数据后，可手动运行 `npm release` 并指定 `artifacts_run_id` 复用同版本构建。工作流验证五个平台已构建成功、产物未过期，且源码、前端、依赖和子模块均未变化；否则必须重新构建。
