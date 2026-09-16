@@ -40,7 +40,7 @@ toml = { version = "0.9.5", optional = true }
 tower-http = { version = "0.6.2", features = ["fs", "compression-gzip"], optional = true }
 uuid = { version = "1.18.1", features = ["v4", "v5"], optional = true }
 wasmtime = { version = "48.0.0", default-features = false, features = ["anyhow", "component-model", "cranelift", "gc-drc", "runtime", "std"], optional = true }
-web-sys = { version = "0.3.77", features = ["AbortSignal", "Document", "Element", "Node", "Location", "Window"], optional = true }
+web-sys = { version = "0.3.77", features = ["AbortSignal", "Document", "Element", "Node", "History", "Location", "Url", "UrlSearchParams", "Window"], optional = true }
 
 [features]
 test-support = ["server"]

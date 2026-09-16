@@ -18,6 +18,12 @@ pub(crate) async fn request<T: DeserializeOwned>(
         None => request.send().await,
     }
     .map_err(|e| e.to_string())?;
+    decode_response(response).await
+}
+
+pub(super) async fn decode_response<T: DeserializeOwned>(
+    response: gloo_net::http::Response,
+) -> Result<T, String> {
     if !response.ok() {
         return Err(format!(
             "请求失败（HTTP {}）：{}",
@@ -32,13 +38,18 @@ pub(crate) async fn request<T: DeserializeOwned>(
 
 /// 登录后挂载的设备管理弹窗，授权始终使用当前 AIO 账号会话。
 #[component]
-pub(crate) fn WorkerPanel(pairing: Option<String>, on_close: EventHandler<()>) -> Element {
+pub(crate) fn WorkerPanel(pairing: Signal<Option<String>>, on_close: EventHandler<()>) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut busy = use_signal(|| false);
     let mut selected = use_signal(|| None::<(Worker, String)>);
     let mut revoke = use_signal(|| None::<Worker>);
     let mut desktop = use_signal(|| None::<Worker>);
-    let mut code = use_signal(move || pairing);
+    let code = pairing;
+    let mut notice = use_signal(|| None::<String>);
+    let mut close = move |()| match super::pairing::finish(code) {
+        Ok(()) => on_close.call(()),
+        Err(message) => error.set(Some(message)),
+    };
     let mut workers = use_resource(move || async {
         request::<Vec<Worker>>("GET", "/api/runtime/workers", None::<&()>).await
     });
@@ -46,18 +57,17 @@ pub(crate) fn WorkerPanel(pairing: Option<String>, on_close: EventHandler<()>) -
         request::<Vec<Task>>("GET", "/api/runtime/workers/tasks", None::<&()>).await
     });
     let pending = use_resource(move || {
-        let code = code();
+        let value = code();
         async move {
-            match code {
-                Some(code) => request::<Worker>(
-                    "GET",
-                    &format!("/api/runtime/workers/pairings/{code}"),
-                    None::<&()>,
-                )
-                .await
-                .map(Some),
-                None => Ok(None),
+            let Some(value) = value else {
+                return Ok(None);
+            };
+            let worker = super::pairing::lookup(&value).await?;
+            if worker.is_none() {
+                super::pairing::finish(code)?;
+                notice.set(Some(super::pairing::UNAVAILABLE.into()));
             }
+            Ok::<_, String>(worker)
         }
     });
     use_future(move || async move {
@@ -71,19 +81,20 @@ pub(crate) fn WorkerPanel(pairing: Option<String>, on_close: EventHandler<()>) -
         }
     });
     rsx! {
-        Dialog{open:true,on_open_change:move|open:bool|if !open{on_close.call(())},
+        Dialog{open:true,on_open_change:move|open:bool|if !open{close(())},
             div{class:"grid gap-4",
-                div{class:"flex items-center justify-between gap-2",DialogTitle{"我的设备"}Button{variant:ButtonVariant::Ghost,onclick:move |_|on_close.call(()),"关闭"}}
+                div{class:"flex items-center justify-between gap-2",DialogTitle{"我的设备"}Button{variant:ButtonVariant::Ghost,onclick:move |_|close(()),"关闭"}}
                 p{"登录当前账号即可管理自己的电脑和服务器。设备主动连接 AIO，无需开放本机端口。"}
                 if let Some(Ok(Some(worker)))=pending.read().as_ref(){
                     section{class:"grid gap-2",
                         h3{"配对新设备：{worker.label}"}
                         p{"系统：{worker.platform}"}
                         p{"允许能力：" {worker.capabilities.join("、")}}
-                        Button{disabled:busy(),onclick:move |_|{let Some(value)=code() else{return;};busy.set(true);spawn(async move{match request::<()>("POST",&format!("/api/runtime/workers/pairings/{value}"),Some(&serde_json::json!({}))).await{Ok(())=>{code.set(None);workers.restart();},Err(e)=>error.set(Some(e))}busy.set(false);});},"授权这台设备"}
+                        Button{disabled:busy(),onclick:move |_|{let Some(value)=code() else{return;};busy.set(true);spawn(async move{match super::pairing::approve(&value).await{Ok(approved)=>{match super::pairing::finish(code){Ok(())=>{notice.set(Some(if approved{"设备已配对，后续自动连接，无需再次使用配对链接。"}else{super::pairing::UNAVAILABLE}.into()));error.set(None);},Err(e)=>error.set(Some(e))}workers.restart();},Err(e)=>error.set(Some(e))}busy.set(false);});},"授权这台设备"}
                     }
                 }
                 if let Some(Err(e))=pending.read().as_ref(){p{role:"alert","{e}"}}
+                if let Some(message)=notice(){p{role:"status","{message}"}}
                 if let Some(message)=error(){p{role:"alert","{message}"}}
                 match workers.read().as_ref(){
                     Some(Ok(items))=>rsx!{

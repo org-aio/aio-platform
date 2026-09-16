@@ -192,7 +192,7 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
         for context in [catalog.session_context] {
           az_ui_components::appearance::AppearanceScope { key: "{context}", user_key: catalog.user.handle.clone(),
           if worker_open() {
-              crate::generated::worker::view::WorkerPanel { pairing: worker_pair(), on_close: move |_| { worker_open.set(false); worker_pair.set(None); } }
+              crate::generated::worker::view::WorkerPanel { pairing: worker_pair, on_close: move |_| { worker_open.set(false); worker_pair.set(None); } }
           }
           runtime::settings::PluginSettingsHost { pages: catalog.plugin_settings.clone(), versions: catalog.page_versions.clone(), context: catalog.context.clone(),
           PluginApplication {

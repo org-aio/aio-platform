@@ -3,6 +3,8 @@ mod archive;
 #[cfg(feature = "server")]
 pub(crate) mod controller;
 pub mod model;
+#[cfg(any(feature = "web", feature = "desktop"))]
+mod pairing;
 #[cfg(feature = "server")]
 mod service;
 #[cfg(feature = "server")]
