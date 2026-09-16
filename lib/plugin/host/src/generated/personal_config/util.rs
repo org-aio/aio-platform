@@ -52,6 +52,17 @@ pub(super) fn validate(request: &WriteEntry) -> Result<(), RuntimeError> {
                 }
             }
         }
+        "function" => {
+            if !valid_function(&request.target)
+                || request.format != "bash"
+                || !request.secret
+                || request.executable
+                || request.content.len() > 32 * 1024
+                || request.content.contains('\0')
+            {
+                return Err(RuntimeError::bad_request("Bash 函数名称、正文或属性无效"));
+            }
+        }
         "command" => {
             if !request.target.as_bytes()[0].is_ascii_alphanumeric()
                 || request.target.len() > 80
@@ -108,6 +119,17 @@ pub(super) fn valid_env(value: &str) -> bool {
         .next()
         .is_some_and(|b| b.is_ascii_uppercase() || b == b'_')
         && bytes.all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+}
+pub(super) fn valid_function(value: &str) -> bool {
+    if matches!(value, "__proto__" | "constructor" | "prototype") {
+        return false;
+    }
+    let mut bytes = value.bytes();
+    bytes
+        .next()
+        .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+        && value.len() <= 80
+        && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 pub(super) fn valid_path(path: &str) -> bool {
     !path.starts_with('/')

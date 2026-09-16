@@ -51,7 +51,7 @@ pub(crate) fn PersonalConfigPanel(on_close: EventHandler<()>) -> Element {
             div{class:"grid gap-3",
                 div{class:"flex items-center justify-between gap-2",DialogTitle{"个人配置"}Button{variant:ButtonVariant::Ghost,onclick:move |_|on_close.call(()),"关闭"}}
                 p{class:"text-sm","在自己的设备间同步配置。共享、系统和单设备设置逐层覆盖；数据只属于当前租户下的当前账号。"}
-                div{class:"flex flex-wrap gap-2",role:"tablist",aria_label:"个人配置分类",for (value,label) in [("file","配置文件"),("env","环境变量"),("command","应用命令"),("asset","个人资源"),("devices","同步设备")]{Button{variant:if tab()==value{ButtonVariant::Primary}else{ButtonVariant::Outline},role:"tab",aria_selected:tab()==value,onclick:move |_|{tab.set(value.into());page.set(0);search.set(String::new());},"{label}"}}}
+                div{class:"flex flex-wrap gap-2",role:"tablist",aria_label:"个人配置分类",for (value,label) in [("file","配置文件"),("env","环境变量"),("function","Bash 函数"),("command","应用命令"),("asset","个人资源"),("devices","同步设备")]{Button{variant:if tab()==value{ButtonVariant::Primary}else{ButtonVariant::Outline},role:"tab",aria_selected:tab()==value,onclick:move |_|{tab.set(value.into());page.set(0);search.set(String::new());},"{label}"}}}
                 if let Some(message)=error(){p{role:"alert","{message}"}}
                 if let Some(message)=notice(){p{role:"status","{message}"}}
                 if tab()!="devices"{

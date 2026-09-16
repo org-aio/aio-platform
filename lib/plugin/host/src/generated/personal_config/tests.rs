@@ -37,6 +37,36 @@ impl IdentityProvider for Identity {
         Ok(true)
     }
 }
+#[test]
+fn bash_function_contract_rejects_invalid_names_and_attributes() {
+    use super::{model::WriteEntry, util};
+    let mut entry = WriteEntry {
+        id: uuid::Uuid::new_v4().to_string(),
+        expected: None,
+        kind: "function".into(),
+        target: "open_app".into(),
+        layer: "shared".into(),
+        format: "bash".into(),
+        secret: true,
+        executable: false,
+        deleted: false,
+        content: "printf '%s\\n' hello".into(),
+    };
+    assert!(util::validate(&entry).is_ok());
+    for name in ["2bad", "bad-name", "bad;touch", ""] {
+        entry.target = name.into();
+        assert!(util::validate(&entry).is_err());
+    }
+    entry.target = "open_app".into();
+    entry.executable = true;
+    assert!(util::validate(&entry).is_err());
+    entry.executable = false;
+    entry.format = "text".into();
+    assert!(util::validate(&entry).is_err());
+    entry.format = "bash".into();
+    entry.content = "x".repeat(32 * 1024 + 1);
+    assert!(util::validate(&entry).is_err());
+}
 #[tokio::test]
 #[ignore = "需要 AIO_TEST_DATABASE_URL 和 AIO_SPACE_TEST_CLI，使用隔离 schema 和设备目录"]
 async fn personal_configuration_devices_isolation_revisions_and_sync() -> Result<()> {
@@ -319,6 +349,50 @@ async fn personal_configuration_devices_isolation_revisions_and_sync() -> Result
         )?;
         assert_eq!(env["EDITOR"], if index == 0 { "shared" } else { "mini" });
     }
+    command(
+        &cli,
+        &profiles[0],
+        &[
+            "function-set",
+            "--name",
+            "where_aio",
+            "--value",
+            "printf '%s' '{{aio.home}}'",
+        ],
+    )
+    .await?;
+    for index in [0, 1] {
+        assert_eq!(
+            command(&cli, &profiles[index], &["config-sync"]).await?["phase"],
+            "complete"
+        );
+        let source = homes[index].join(".config/aio-space/functions.bash");
+        let output = tokio::process::Command::new("bash")
+            .args([
+                "--noprofile",
+                "--norc",
+                "-c",
+                ". \"$1\"; where_aio",
+                "check",
+            ])
+            .arg(source)
+            .output()
+            .await?;
+        assert!(output.status.success());
+        let canonical_home = tokio::fs::canonicalize(&homes[index]).await?;
+        assert_eq!(output.stdout, canonical_home.to_string_lossy().as_bytes());
+    }
+    let function_id: String = sqlx::query_scalar(
+        "SELECT id FROM personal_config_entries WHERE tenant_id='test' AND user_id='owner' AND kind='function' AND target='where_aio'",
+    )
+    .fetch_one(&state.store.pool)
+    .await?;
+    let ciphertext: Vec<u8> =
+        sqlx::query_scalar("SELECT ciphertext FROM personal_config_entries WHERE id=$1")
+            .bind(function_id)
+            .fetch_one(&state.store.pool)
+            .await?;
+    assert!(!ciphertext.windows(8).any(|part| part == b"aio.home"));
     let revision: Value = client
         .get(format!("{browser}/catalog"))
         .header("x-test-user", "owner")

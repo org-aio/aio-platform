@@ -60,6 +60,7 @@ pub(super) fn EntryForm(
     let target_label = match kind.as_str() {
         "file" => "相对用户目录的文件路径",
         "command" => "启动命令",
+        "function" => "Bash 函数名",
         "env" | "paths" => "环境变量名（PATH 表示附加目录）",
         _ => "名称",
     };
@@ -73,6 +74,7 @@ pub(super) fn EntryForm(
                     label{r#for:"personal-content","配置内容"}
                     Textarea{id:"personal-content",aria_label:"配置内容",rows:"12",value:content(),oninput:move|e:FormEvent|content.set(e.value())}
                     if kind=="env"||kind=="paths"{p{class:"text-sm","变量值按原文保存；PATH 填写目录的 JSON 数组。新终端加载后生效。"}}
+                    if kind=="function"{p{class:"text-sm","填写函数体，不含名称和外层大括号；仅新启动的 Bash 会话加载。代码会在调用函数时以本机账号权限执行。"}}
                     if kind=="file"{p{class:"text-sm","用户主目录可写成 {{aio.home}}；保存后同步至已启用的设备，冲突会保留待处理。"}}
                 }
                 if let Some(message)=error(){p{role:"alert","{message}"}}
@@ -83,8 +85,8 @@ pub(super) fn EntryForm(
                             let actual_kind=if kind=="env"&&target=="PATH"{"paths"}else{&kind}.to_owned();
                             let body=if actual_kind=="command"{serde_json::json!({"darwin":content}).to_string()}else{content};
                             let id=match &initial{Some(value)=>value.entry.id.clone(),None=>document::eval("return crypto.randomUUID();").await.map_err(|e|e.to_string())?.as_str().ok_or("无法生成 ID")?.to_owned()};
-                            let format=if actual_kind=="file"&&(target.ends_with(".json")||target.ends_with(".jsonc")){"jsonc"}else{"text"};
-                            let write=WriteEntry{id,expected:initial.as_ref().map(|v|v.entry.revision),kind:actual_kind,target,layer,format:format.into(),secret:initial.as_ref().is_none_or(|v|v.entry.secret),executable:initial.as_ref().is_some_and(|v|v.entry.executable),deleted:false,content:body};
+                            let format=if actual_kind=="function"{"bash"}else if actual_kind=="file"&&(target.ends_with(".json")||target.ends_with(".jsonc")){"jsonc"}else{"text"};
+                            let write=WriteEntry{id,expected:initial.as_ref().map(|v|v.entry.revision),kind:actual_kind.clone(),target,layer,format:format.into(),secret:actual_kind=="function"||initial.as_ref().is_none_or(|v|v.entry.secret),executable:actual_kind!="function"&&initial.as_ref().is_some_and(|v|v.entry.executable),deleted:false,content:body};
                             request::<Entry>("POST","/api/runtime/personal-config/entries",Some(&write)).await
                         }.await;
                         match result{Ok(_)=>on_saved.call(()),Err(e)=>error.set(Some(e))}busy.set(false);

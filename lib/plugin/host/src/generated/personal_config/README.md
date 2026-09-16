@@ -13,7 +13,7 @@
 - `POST /report`：设备同步报告，不含正文；`POST /resolve`：网页按双方哈希确认冲突选择。
 - `PUT /self` 和 `/devices/{id}`：设备本机启用/停用；网页仅可停用自己的设备。
 
-类型：`file` 文本/JSONC，`env` 单个变量，`paths` PATH 附加目录 JSON 数组，`command` macOS bundle ID，`asset` restic 归档引用。层级：`shared < os:darwin/linux < device:UUID`，最高层完整覆盖同名条目。删除记录保留墓碑，避免离线旧设备复活已删除配置；删除覆盖层代表隐藏该配置，回到共享配置需编辑覆盖项或明确恢复历史版本。
+类型：`file` 文本/JSONC，`env` 单个变量，`paths` PATH 附加目录 JSON 数组，`function` Bash 函数体，`command` macOS bundle ID，`asset` restic 归档引用。函数名遵循 Bash 标识符规则，函数体最多 32 KiB，`format=bash`、`secret=true`、`executable=false`；设备本机用 `bash -n` 校验后生成 Bash 专用脚本。层级：`shared < os:darwin/linux < device:UUID`，最高层完整覆盖同名条目。删除记录保留墓碑，避免离线旧设备复活已删除配置；删除覆盖层代表隐藏该配置，回到共享配置需编辑覆盖项或明确恢复历史版本。
 
 正文及历史正文通过宿主 Keyring 加密，AAD 包含租户、账号、条目。元数据和同步报告可查询，但不得放入密码或正文。每条正文上限 256 KiB、每账号当前配置上限 32 MiB/4096 项。必须连同宿主 keyring 备份数据库；仅有数据库无法解密。`secret` 标记不改变加密策略，所有正文均加密。
 
