@@ -50,6 +50,19 @@ pub(super) fn run(spec: &CommandSpec) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn output(spec: &CommandSpec) -> Result<String> {
+    let output = command(spec)?
+        .output()
+        .with_context(|| format!("无法运行 {}", spec.program))?;
+    ensure!(
+        output.status.success(),
+        "{} 返回失败状态 {}",
+        spec.program,
+        output.status
+    );
+    Ok(String::from_utf8(output.stdout)?)
+}
+
 pub(super) fn requirements(requirements: &[Requirement]) -> Result<()> {
     for requirement in requirements {
         let check = || -> Result<()> {

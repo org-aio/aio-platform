@@ -1,4 +1,5 @@
 mod execution;
+mod skills;
 mod storage;
 
 use crate::{InstallLink, ToolManifest};
@@ -104,7 +105,8 @@ impl Store {
             .platforms
             .get(std::env::consts::OS)
             .context("此工具不支持当前系统")?;
-        if let Some(previous) = self.read(&manifest.id)? {
+        let previous = self.read(&manifest.id)?;
+        if let Some(previous) = &previous {
             ensure!(
                 previous.manifest.version == manifest.version
                     && previous.manifest.platforms == manifest.platforms,
@@ -117,6 +119,7 @@ impl Store {
             manifest: manifest.clone(),
             state: "installing".into(),
             completed_steps: 0,
+            skills: previous.map(|record| record.skills).unwrap_or_default(),
         };
         self.save(&record)?;
         for command in &plan.install {
@@ -141,6 +144,11 @@ impl Store {
             record.state = "failed".into();
             self.save(&record)?;
             return Err(error.context("安装命令已结束，但检测未通过"));
+        }
+        if let Err(error) = skills::install(self, plan, &mut record) {
+            record.state = "failed".into();
+            self.save(&record)?;
+            return Err(error.context("CLI 已安装，但随包技能安装未完成"));
         }
         record.state = if plan.detect.is_some() {
             "installed"
@@ -185,6 +193,7 @@ impl Store {
             record.completed_steps += 1;
             self.save(&record)?;
         }
+        skills::uninstall(self, &record)?;
         self.remove(id)?;
         println!("已执行卸载步骤 {id}");
         Ok(())

@@ -60,6 +60,7 @@ pub(super) fn materialize_directory(
             let relative = file
                 .path()
                 .to_string_lossy()
+                .replace("__NAME__", name)
                 .replace("/example/", &format!("/{identifier}/"));
             let destination = root.join(relative);
             if let Some(parent) = destination.parent() {

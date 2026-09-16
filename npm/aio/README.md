@@ -27,3 +27,7 @@ npx -y @zjarlin/aio tool list
 ```
 
 注册一次本机助手后，在插件市场选择 CLI 并点击“安装到本机”。助手会在终端展示计划并等待确认。卸载使用 `npx -y @zjarlin/aio tool uninstall <id>`，先恢复工具配置，再移除包。
+
+## CLI 随包技能
+
+2026.9.18 起，`aio tool install <id> --version <version>` 自动将 npm 包内 `skills/<name>/` 安装到 `~/.agents/skills/<name>/`。`aio plugin init --kind cli` 默认生成使用技能；已有 CLI 使用 `--adopt` 接入时补齐缺失技能。卸载只清理 AIO 安装且内容未被用户修改的文件。

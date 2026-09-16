@@ -13,9 +13,9 @@ npx -y @zjarlin/aio helper install
 macOS 注册用户目录中的 AIO Helper.app，Windows 注册 HKCU，Linux 注册 xdg desktop entry。助手保存独立二进制，npx 缓存清理不影响链接。后续更新 CLI 后重新执行此命令更新助手。Linux 桌面需要 xdg-mime 和可用终端；macOS 需要系统自带的 osacompile、codesign。
 
 ```sh
-npx -y @zjarlin/aio tool install codex-model-sync --version 0.4.1
+npx -y @zjarlin/aio tool install codex-buddy --version 0.7.0
 npx -y @zjarlin/aio tool list
-npx -y @zjarlin/aio tool uninstall codex-model-sync
+npx -y @zjarlin/aio tool uninstall codex-buddy
 npx -y @zjarlin/aio helper uninstall
 ```
 
@@ -26,13 +26,13 @@ npx -y @zjarlin/aio helper uninstall
 以后新建 CLI 使用 AIO 初始化，当前默认 TypeScript + Node.js，核心功能和命令入口分离：
 
 ```sh
-npx -y @zjarlin/aio@2026.9.17 plugin init my-cli --kind cli
+npx -y @zjarlin/aio@2026.9.18 plugin init my-cli --kind cli
 cd my-cli
 npm ci
 npm test
 ```
 
-生成源码、锁文件、测试、README、`aio-cli.json` 与 `.github/workflows/aio-cli.yml`。CLI 不需要宿主前后端或 AIO 运行时依赖。已有 npm CLI 可在其目录执行 `aio plugin init . --kind cli --adopt --name my-cli`；仅增加交付文件，不覆盖源码、原 CLI 命令或现有 README。
+生成源码、锁文件、测试、README、随包 `skills/<name>/SKILL.md`、`aio-cli.json` 与 `.github/workflows/aio-cli.yml`。CLI 不需要宿主前后端或 AIO 运行时依赖。已有 npm CLI 可在其目录执行 `aio plugin init . --kind cli --adopt --name my-cli`；增加交付文件和缺失的使用技能，将 `skills` 加入显式 npm `files`；保留源码、原 CLI 命令、现有 README 和已有技能。
 
 将项目推送到 GitHub，并在目录执行一次 `aio tool release setup`。它从 origin 识别仓库，npm 包尚不存在时先测试并创建公开包，再配置 npm Trusted Publisher。首次需要 npm 包写权限与二次验证，这是 npm 的账户要求；绑定后日常推送通过 OIDC 自动发布，无需逐次验证。
 
@@ -40,22 +40,22 @@ npm test
 
 市场接收端读取 npm 精确版本，并校验 GitHub 签名、发布 owner、工作流、源码提交和仓库绑定；使用已配置的 `AIO_DELIVERY_OWNER` 发布者范围。市场安装固定精确版本，本机已安装 CLI 不会静默升级。npm 正式版本不会被开发分支替换。
 
-## Codex 模型同步与 Auto Router
+## Codex Buddy
 
-市场内置登记 `codex-model-sync 0.4.1`，支持 macOS、Linux 和 Windows。安装依次执行 `npm install --global codex-model-sync@0.4.1` 和 `codex-model-sync setup`，默认仍是同步模型及后台更新；直接使用 `npx -y codex-model-sync` 的旧用法不变。
+`codex-buddy` 从原 `codex-model-sync` 改名而来，使用新的市场 ID 和 npm 包名，支持 macOS、Linux 和 Windows。安装依次执行 `npm install --global codex-buddy@0.7.0` 和 `codex-buddy setup`，默认仍是同步模型及后台更新；直接使用 `npx -y codex-buddy` 的旧用法不变。
 
 需要自动路由时，在 macOS 本机显式开启桌面桥接和 hooks，然后完全退出并重新打开 Codex：
 
 ```sh
-codex-model-sync router setup
-codex-model-sync router status
+codex-buddy router setup
+codex-buddy router status
 ```
 
-候选模型来自本机 Codex 配置对应的 `/v1/models`，不写死模型名称。路由先根据任务难度与模型能力梯队选池，再用成本和成功率辅助筛选；Git 操作、“跑起来看看”和项目技术栈 CLI 意图可优先走低成本任务路径。当前使用规则路由，不包含训练后的 RouterLLM 分类器。详细配置及实际模型选择的查看方法见 [项目 README](https://github.com/zjarlin/codex-model-sync#readme)。
+候选模型来自本机 Codex 配置对应的 `/v1/models`，不写死模型名称。路由先根据任务难度与模型能力梯队选池，再用成本和成功率辅助筛选；Git 操作、“跑起来看看”和项目技术栈 CLI 意图可优先走低成本任务路径。当前使用规则路由，不包含训练后的 RouterLLM 分类器。详细配置及实际模型选择的查看方法见 [项目 README](https://github.com/zjarlin/codex-buddy#readme)。
 
 ## 用命令上架 CLI
 
-平台发布者登录插件市场，点击 **添加 CLI**。只需填写安装命令，例如 `npx -y codex-model-sync@0.4.1 setup`；Git 仓库地址可选，不要求编写 JSON 或 AIO 插件包。
+平台发布者登录插件市场，点击 **添加 CLI**。只需填写安装命令，例如 `npx -y codex-buddy@0.7.0 setup`；Git 仓库地址可选，不要求编写 JSON 或 AIO 插件包。
 
 - 系统自动使用仓库名或命令中的工具名作为标题，补充默认备注和 `cli` 标签；在详情页可随时 **编辑标题和备注**。
 - 默认识别当前电脑系统，也可选择 macOS、Windows、Linux 或多个系统。命令需与所选系统匹配：macOS/Linux 使用 Bash（启用 pipefail），Windows 使用 PowerShell。
@@ -69,7 +69,7 @@ HTTP `POST /api/runtime/tools/register` 接收共享 `Registration` 模型；`PA
 
 ## 导入完整安装描述
 
-需要按平台编排多个步骤时，仍可按照 `tools/registry/codex-model-sync-0.4.1.json` 创建 JSON。在宿主设置 `AIO_TOOL_REGISTRY_DIR` 指向目录，启动时验证并导入 PostgreSQL。市场显示每个工具最高 SemVer；同 ID、同版本的执行方案不会覆盖，变更步骤需递增版本。展示标题、备注和 Git 文档资料可独立编辑。
+需要按平台编排多个步骤时，仍可按照 历史示例 `tools/registry/codex-model-sync-0.4.1.json` 创建 JSON。在宿主设置 `AIO_TOOL_REGISTRY_DIR` 指向目录，启动时验证并导入 PostgreSQL。市场显示每个工具最高 SemVer；同 ID、同版本的执行方案不会覆盖，变更步骤需递增版本。展示标题、备注和 Git 文档资料可独立编辑。
 
 ## 状态与恢复
 
@@ -80,3 +80,9 @@ HTTP `POST /api/runtime/tools/register` 接收共享 `Registration` 模型；`PA
 ## 边界
 
 这一版提供安装、失败重试、原版本卸载和协议注册。更换版本前必须先卸载原版本，防止覆盖原始恢复描述；依赖缺失时提供修复说明，不自动安装整套包管理器。安装步骤退出成功只能代表条目声明的检测通过，第三方工具的配置恢复语义由其卸载命令负责。
+
+## 自动附带 CLI 技能
+
+从 AIO 2026.9.18 开始，`aio tool install` 在 CLI 安装和检测后，将已安装 npm 包的 `skills/<技能名>/` 复制到 `~/.agents/skills/<技能名>/`。新建 CLI 默认生成技能；已有 CLI 通过 `--adopt` 接入时补齐缺失的技能并维护打包目录。
+
+技能包含 YAML `name`、`description` 与使用指南，可附带引用文档和脚本；安装器只复制文件，不执行技能附件。AIO 记录哈希，拒绝覆盖其他来源的同名目录，卸载保留用户修改。没有 skills 目录的旧包继续正常安装。此规则针对结构化 npm 安装计划，任意 shell 安装命令不推断包目录；直接 `npm install` / `npx` 不会隐式修改个人技能目录。

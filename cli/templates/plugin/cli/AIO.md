@@ -21,3 +21,7 @@ AIO 市场校验 GitHub 签名身份，发布者须属于平台配置的 GitHub 
 市场显示已登记的最高 SemVer，安装命令固定精确版本。npm `latest` 不会被开发版改写。本机已安装版本不自动替换；升级前按市场说明卸载旧版本，再安装新版本。
 
 CLI 必须支持 `--version`，返回打包版本。需要恢复配置时，将相应命令参数写入 `aio-cli.json` 的 `uninstall`，AIO 会先恢复配置，再卸载 npm 包。
+
+## 随 CLI 分发技能
+
+维护 `skills/__NAME__/SKILL.md`，目录名必须与 frontmatter 的 `name` 一致。npm 的 `files` 包含 `skills`。AIO 2026.9.18+ 通过 `aio tool install` 完成安装和检测后自动复制到 `~/.agents/skills`，随安装记录保存文件归属；卸载保留用户修改。直接 npm/npx 不执行写入技能目录的安装钩子。

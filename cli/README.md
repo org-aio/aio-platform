@@ -38,3 +38,5 @@ Rust 源码插件由应用编译期装配；页面扩展实现 `ApplicationPlugi
 ## 插件市场中的 CLI
 
 运行 `aio helper install` 注册 `aio://install/<id>?version=<版本>`；网页点击后在本机终端确认安装。`aio tool install <id> --version <版本>`、`aio tool list`、`aio tool uninstall <id>` 使用共享安装库。完整发布、依赖检查和恢复说明见 [本机 CLI 市场](../docs/tools/README.md)。
+
+AIO 2026.9.18+ 的 CLI 模板默认携带 `skills/<name>/SKILL.md`，市场安装后自动复制到 `~/.agents/skills`；技能与 CLI 使用同一版本发布，用户修改不会被卸载覆盖。

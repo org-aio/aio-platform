@@ -3,6 +3,7 @@ use anyhow::{Context as _, Result, ensure};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeMap,
     fs::{self, File, OpenOptions},
     path::{Path, PathBuf},
 };
@@ -12,10 +13,13 @@ pub struct Installation {
     pub manifest: ToolManifest,
     pub state: String,
     pub completed_steps: usize,
+    #[serde(default)]
+    pub(super) skills: BTreeMap<String, String>,
 }
 
 pub struct Store {
     root: PathBuf,
+    pub(super) skills_root: PathBuf,
 }
 
 pub fn data_root() -> Result<PathBuf> {
@@ -28,7 +32,11 @@ pub fn data_root() -> Result<PathBuf> {
 
 impl Store {
     pub fn user() -> Result<Self> {
-        Self::new(data_root()?.join("tools"))
+        let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+            .context("无法定位当前用户的技能目录")?;
+        let mut store = Self::new(data_root()?.join("tools"))?;
+        store.skills_root = PathBuf::from(home).join(".agents/skills");
+        Ok(store)
     }
     pub fn new(root: PathBuf) -> Result<Self> {
         fs::create_dir_all(&root)?;
@@ -37,7 +45,8 @@ impl Store {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&root, fs::Permissions::from_mode(0o700))?;
         }
-        Ok(Self { root })
+        let skills_root = root.join("skills");
+        Ok(Self { root, skills_root })
     }
     fn path(&self, id: &str) -> Result<PathBuf> {
         ensure!(crate::validation::identifier(id), "工具 ID 无效");
