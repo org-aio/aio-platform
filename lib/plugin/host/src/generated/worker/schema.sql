@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS worker_tasks (
  created_at TIMESTAMPTZ NOT NULL DEFAULT now(), completed_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS worker_task_queue ON worker_tasks(worker_id,state,created_at);
+ALTER TABLE worker_tasks ADD COLUMN IF NOT EXISTS claim_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS worker_task_claim ON worker_tasks(worker_id,claim_id) WHERE claim_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS worker_vaults (
  tenant_id TEXT NOT NULL,user_id TEXT NOT NULL,ciphertext BYTEA NOT NULL,
  PRIMARY KEY(tenant_id,user_id)

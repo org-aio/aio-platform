@@ -176,7 +176,7 @@ impl WorkerService for WorkerServiceImpl {
         tx.commit().await?;
         Ok(())
     }
-    async fn claim(&self, device: &DeviceIdentity) -> Result<Option<Task>> {
+    async fn claim(&self, device: &DeviceIdentity, request_id: &str) -> Result<Option<Task>> {
         self.expire().await?;
         let mut tx = self.pool.begin().await?;
         let active: Option<String> = sqlx::query_scalar(
@@ -186,6 +186,19 @@ impl WorkerService for WorkerServiceImpl {
         .fetch_optional(&mut *tx)
         .await?;
         ensure!(active.is_some(), "设备已撤销");
+        let previous = sqlx::query("SELECT *,lease_until>now() AS valid_lease,(extract(epoch FROM created_at)*1000)::bigint AS created_at_ms FROM worker_tasks WHERE worker_id=$1 AND claim_id=$2")
+            .bind(&device.id).bind(request_id).fetch_optional(&mut *tx).await?;
+        if let Some(row) = previous {
+            let running = row.try_get::<String, _>("state")? == "running";
+            let valid = row
+                .try_get::<Option<bool>, _>("valid_lease")?
+                .unwrap_or(false);
+            return if running && valid {
+                Ok(Some(task(row)?))
+            } else {
+                Ok(None)
+            };
+        }
         let busy: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM worker_tasks WHERE worker_id=$1 AND state='running')",
         )
@@ -196,8 +209,8 @@ impl WorkerService for WorkerServiceImpl {
             return Ok(None);
         }
         let lease = secret()?;
-        let row=sqlx::query("WITH next AS (SELECT id FROM worker_tasks WHERE worker_id=$1 AND state='queued' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE worker_tasks t SET state='running',lease=$2,lease_until=now()+interval '2 minutes' FROM next WHERE t.id=next.id RETURNING t.*,(extract(epoch FROM t.created_at)*1000)::bigint AS created_at_ms")
-            .bind(&device.id).bind(lease).fetch_optional(&mut *tx).await?;
+        let row=sqlx::query("WITH next AS (SELECT id FROM worker_tasks WHERE worker_id=$1 AND state='queued' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE worker_tasks t SET state='running',lease=$2,claim_id=$3,lease_until=now()+interval '2 minutes' FROM next WHERE t.id=next.id RETURNING t.*,(extract(epoch FROM t.created_at)*1000)::bigint AS created_at_ms")
+            .bind(&device.id).bind(lease).bind(request_id).fetch_optional(&mut *tx).await?;
         tx.commit().await?;
         row.map(task).transpose()
     }

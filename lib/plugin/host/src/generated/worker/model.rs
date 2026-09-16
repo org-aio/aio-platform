@@ -55,6 +55,14 @@ pub struct Lease {
     pub lease: String,
 }
 
+/// 同一次领取重试复用请求 ID，避免响应丢失后遗失任务租约。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClaimRequest {
+    pub request_id: String,
+    pub wait_seconds: u8,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DesktopAccess {
     pub enabled: bool,

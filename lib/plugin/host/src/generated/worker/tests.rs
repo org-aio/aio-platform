@@ -89,9 +89,15 @@ async fn worker_pairing_tasks_archives_and_revocation_end_to_end() -> Result<()>
     let token = pair["token"].as_str().context("缺少设备凭据")?;
     let device = pair["device_id"].as_str().context("缺少设备 ID")?;
     assert_eq!(
-        post(&client, &base, "/claim", Some(token), json!({}))
-            .await?
-            .status(),
+        post(
+            &client,
+            &base,
+            "/claim",
+            Some(token),
+            json!({"request_id":uuid::Uuid::new_v4().to_string(),"wait_seconds":0})
+        )
+        .await?
+        .status(),
         401
     );
     assert_eq!(
@@ -170,12 +176,32 @@ async fn worker_pairing_tasks_archives_and_revocation_end_to_end() -> Result<()>
         .fetch_one(&state.store.pool)
         .await?;
     assert_eq!(count, 1);
-    let app_claim: Value = post(&client, &base, "/claim", Some(token), json!({}))
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    let claim_id = uuid::Uuid::new_v4().to_string();
+    let app_claim: Value = post(
+        &client,
+        &base,
+        "/claim",
+        Some(token),
+        json!({"request_id":claim_id,"wait_seconds":0}),
+    )
+    .await?
+    .error_for_status()?
+    .json()
+    .await?;
     assert_eq!(app_claim["data"]["id"], app_id);
+    // 模拟领取响应丢失，原请求不能分配第二个任务或更换租约。
+    let repeated: Value = post(
+        &client,
+        &base,
+        "/claim",
+        Some(token),
+        json!({"request_id":claim_id,"wait_seconds":0}),
+    )
+    .await?
+    .error_for_status()?
+    .json()
+    .await?;
+    assert_eq!(repeated["data"], app_claim["data"]);
     let task_url = format!("{base}/api/runtime/workers/tasks/{app_id}");
     assert!(
         client
@@ -339,9 +365,34 @@ async fn worker_pairing_tasks_archives_and_revocation_end_to_end() -> Result<()>
         .send()
         .await?
         .error_for_status()?;
+    // 已结束的旧领取请求不能领取后来排队的任务。
+    let old: Value = post(
+        &client,
+        &base,
+        "/claim",
+        Some(token),
+        json!({"request_id":claim_id,"wait_seconds":0}),
+    )
+    .await?
+    .error_for_status()?
+    .json()
+    .await?;
+    assert!(old["data"].is_null());
     let (a, b) = tokio::join!(
-        post(&client, &base, "/claim", Some(token), json!({})),
-        post(&client, &base, "/claim", Some(token), json!({}))
+        post(
+            &client,
+            &base,
+            "/claim",
+            Some(token),
+            json!({"request_id":uuid::Uuid::new_v4().to_string(),"wait_seconds":0})
+        ),
+        post(
+            &client,
+            &base,
+            "/claim",
+            Some(token),
+            json!({"request_id":uuid::Uuid::new_v4().to_string(),"wait_seconds":0})
+        )
     );
     let a: Value = a?.json().await?;
     let b: Value = b?.json().await?;
@@ -379,6 +430,79 @@ async fn worker_pairing_tasks_archives_and_revocation_end_to_end() -> Result<()>
         .status()
         .is_client_error()
     );
+    // 空闲长轮询等待完整窗口；下一次等待中入队任务，最多一个轮询周期内返回。
+    let start = std::time::Instant::now();
+    let empty: Value = post(
+        &client,
+        &base,
+        "/claim",
+        Some(token),
+        json!({"request_id":uuid::Uuid::new_v4().to_string(),"wait_seconds":2}),
+    )
+    .await?
+    .error_for_status()?
+    .json()
+    .await?;
+    assert!(empty["data"].is_null());
+    assert!(start.elapsed() >= std::time::Duration::from_secs(2));
+    let pending_id = uuid::Uuid::new_v4().to_string();
+    let wait = post(
+        &client,
+        &base,
+        "/claim",
+        Some(token),
+        json!({"request_id":uuid::Uuid::new_v4().to_string(),"wait_seconds":10}),
+    );
+    let enqueue = async {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        client
+            .post(format!("{base}/api/runtime/workers/tasks"))
+            .header("x-test-user", "owner")
+            .json(&json!({"id":pending_id,"worker_id":device,"capability":"space.scan","input":{}}))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok::<(), anyhow::Error>(())
+    };
+    let start = std::time::Instant::now();
+    let (received, queued) = tokio::join!(wait, enqueue);
+    queued?;
+    let received: Value = received?.error_for_status()?.json().await?;
+    assert_eq!(received["data"]["id"], pending_id);
+    assert!(start.elapsed() < std::time::Duration::from_secs(3));
+    let completion = json!({"lease":received["data"]["lease"],"result":{"completed":true}});
+    for _ in 0..2 {
+        post(
+            &client,
+            &base,
+            &format!("/tasks/{pending_id}/complete"),
+            Some(token),
+            completion.clone(),
+        )
+        .await?
+        .error_for_status()?;
+    }
+    // 长轮询中撤销权限必须终止等待，不把离线误作注销。
+    let waiting = post(
+        &client,
+        &base,
+        "/claim",
+        Some(token),
+        json!({"request_id":uuid::Uuid::new_v4().to_string(),"wait_seconds":10}),
+    );
+    let revoking = async {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        client
+            .delete(format!("{base}/api/runtime/workers/{device}"))
+            .header("x-test-user", "owner")
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok::<(), anyhow::Error>(())
+    };
+    let (response, revoked) = tokio::join!(waiting, revoking);
+    revoked?;
+    assert_eq!(response?.status(), 401);
     client
         .delete(format!("{base}/api/runtime/workers/{device}"))
         .header("x-test-user", "owner")
@@ -386,9 +510,15 @@ async fn worker_pairing_tasks_archives_and_revocation_end_to_end() -> Result<()>
         .await?
         .error_for_status()?;
     assert_eq!(
-        post(&client, &base, "/claim", Some(token), json!({}))
-            .await?
-            .status(),
+        post(
+            &client,
+            &base,
+            "/claim",
+            Some(token),
+            json!({"request_id":uuid::Uuid::new_v4().to_string(),"wait_seconds":0})
+        )
+        .await?
+        .status(),
         401
     );
     assert_eq!(

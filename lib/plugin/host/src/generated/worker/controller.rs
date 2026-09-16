@@ -59,7 +59,13 @@ pub(crate) async fn device(
         .workers
         .identity(&token(headers)?)
         .await
-        .map_err(|_| RuntimeError::unauthorized("设备尚未配对或已撤销"))?;
+        .map_err(|error| {
+            if error.downcast_ref::<sqlx::Error>().is_some() {
+                RuntimeError::unavailable("设备认证服务暂不可用")
+            } else {
+                RuntimeError::unauthorized("设备尚未配对或已撤销")
+            }
+        })?;
     if !state
         .identity
         .member_active(&identity.tenant, &identity.user)
@@ -132,10 +138,45 @@ async fn tasks(
 async fn claim(
     State(state): State<RuntimeState>,
     headers: HeaderMap,
+    Json(request): Json<ClaimRequest>,
 ) -> Result<Json<RuntimeResponse<Option<Task>>>, RuntimeError> {
-    let device = device(&state, &headers).await?;
-    state.workers.heartbeat(&device, None).await?;
-    Ok(response(state.workers.claim(&device).await?))
+    uuid::Uuid::parse_str(&request.request_id)?;
+    if request.wait_seconds > 25 {
+        return Err(RuntimeError::bad_request("长轮询最长等待 25 秒"));
+    }
+    let deadline = tokio::time::Instant::now()
+        + std::time::Duration::from_secs(u64::from(request.wait_seconds));
+    let connected = device(&state, &headers).await?;
+    state
+        .workers
+        .heartbeat(&connected, None)
+        .await
+        .map_err(worker_error)?;
+    loop {
+        // 每轮重新鉴权，等待中的连接在撤权后也不能收到任务。
+        let device = device(&state, &headers).await?;
+        let task = state
+            .workers
+            .claim(&device, &request.request_id)
+            .await
+            .map_err(worker_error)?;
+        if task.is_some() || tokio::time::Instant::now() >= deadline {
+            return Ok(response(task));
+        }
+        tokio::time::sleep_until(std::cmp::min(
+            deadline,
+            tokio::time::Instant::now() + std::time::Duration::from_secs(1),
+        ))
+        .await;
+    }
+}
+
+fn worker_error(error: anyhow::Error) -> RuntimeError {
+    if error.downcast_ref::<sqlx::Error>().is_some() {
+        RuntimeError::unavailable("设备任务服务暂不可用")
+    } else {
+        error.into()
+    }
 }
 
 async fn task(
@@ -165,7 +206,11 @@ async fn heartbeat(
     headers: HeaderMap,
 ) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
     let device = device(&state, &headers).await?;
-    state.workers.heartbeat(&device, None).await?;
+    state
+        .workers
+        .heartbeat(&device, None)
+        .await
+        .map_err(worker_error)?;
     Ok(response(()))
 }
 async fn renew(
@@ -178,7 +223,8 @@ async fn renew(
     state
         .workers
         .heartbeat(&device, Some((&id, &request.lease)))
-        .await?;
+        .await
+        .map_err(worker_error)?;
     Ok(response(()))
 }
 async fn complete(
@@ -188,6 +234,10 @@ async fn complete(
     Json(request): Json<CompleteTask>,
 ) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
     let device = device(&state, &headers).await?;
-    state.workers.complete(&device, &id, request).await?;
+    state
+        .workers
+        .complete(&device, &id, request)
+        .await
+        .map_err(worker_error)?;
     Ok(response(()))
 }
