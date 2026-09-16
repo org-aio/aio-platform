@@ -146,13 +146,13 @@ impl BundleManifest {
         validate_relative_path(&plugin.runtime.artifact)?;
         if let Some(process) = &plugin.runtime.process {
             ensure!(
-                process.worker_capabilities.len() <= 2
+                process.worker_capabilities.len() <= 3
                     && process
                         .worker_capabilities
                         .iter()
                         .all(|capability| matches!(
                             capability.as_str(),
-                            "desktop.open-app" | "skills.sync"
+                            "desktop.open-app" | "skills.sync" | "workspace.execute"
                         )),
                 "process 设备能力未开放"
             );

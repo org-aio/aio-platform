@@ -40,6 +40,23 @@ fn process_requires_immutable_image_and_explicit_https_services() {
 }
 
 #[test]
+fn process_accepts_workspace_execution_without_opening_arbitrary_capabilities() {
+    assert!(
+        BundleManifest::parse(&manifest(
+            "worker_capabilities = ['desktop.open-app', 'skills.sync', 'workspace.execute']"
+        ))
+        .is_ok()
+    );
+    for extra in [
+        "worker_capabilities = ['shell.execute']",
+        "worker_capabilities = ['*']",
+        "worker_capabilities = ['desktop.open-app', 'skills.sync', 'workspace.execute', 'shell.execute']",
+    ] {
+        assert!(BundleManifest::parse(&manifest(extra)).is_err());
+    }
+}
+
+#[test]
 fn process_archive_binds_executable_and_rejects_other_platforms() -> anyhow::Result<()> {
     let mut binary = vec![0; 64];
     binary[..6].copy_from_slice(b"\x7fELF\x02\x01");
