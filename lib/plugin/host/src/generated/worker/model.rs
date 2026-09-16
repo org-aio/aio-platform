@@ -67,6 +67,12 @@ pub struct ClaimRequest {
 pub struct DesktopAccess {
     pub enabled: bool,
 }
+/// 本地 CLI 使用设备凭据开关工作区执行，不允许指定其他设备或能力。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceAccess {
+    pub enabled: bool,
+}
 #[derive(Clone)]
 pub struct DeviceIdentity {
     pub id: String,

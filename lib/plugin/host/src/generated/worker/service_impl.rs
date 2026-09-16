@@ -116,6 +116,9 @@ impl WorkerService for WorkerServiceImpl {
             serde_json::to_vec(&request.input)?.len() <= 32_768,
             "任务输入过大"
         );
+        if request.capability == "workspace.execute" {
+            validate_workspace_input(&request.input)?;
+        }
         let mut tx = self.pool.begin().await?;
         let row=sqlx::query("SELECT capabilities FROM worker_devices WHERE id=$1 AND tenant_id=$2 AND user_id=$3 AND state='active' FOR UPDATE")
             .bind(&request.worker_id).bind(&session.tenant_id).bind(&session.user_id).fetch_optional(&mut *tx).await?.context("设备不存在或已撤销")?;
@@ -153,6 +156,50 @@ impl WorkerService for WorkerServiceImpl {
             .bind(id).bind(&session.tenant_id).bind(&session.user_id)
             .fetch_optional(&self.pool).await?.context("任务不存在")?;
         task(row)
+    }
+    async fn cancel_task(&self, session: &SessionContext, id: &str) -> Result<Task> {
+        uuid::Uuid::parse_str(id)?;
+        let mut tx = self.pool.begin().await?;
+        let exists: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM worker_tasks WHERE id=$1 AND tenant_id=$2 AND user_id=$3 FOR UPDATE",
+        )
+        .bind(id)
+        .bind(&session.tenant_id)
+        .bind(&session.user_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        ensure!(exists.is_some(), "任务不存在");
+        // 与完成回执竞争时由任务行锁决定终态，重复取消不改写已保存结果。
+        sqlx::query("UPDATE worker_tasks SET state='cancelled',lease=NULL,lease_until=NULL,completed_at=now(),error='用户已取消任务' WHERE id=$1 AND state IN ('queued','running')")
+            .bind(id).execute(&mut *tx).await?;
+        let row = sqlx::query("SELECT *,NULL::text AS lease,(extract(epoch FROM created_at)*1000)::bigint AS created_at_ms FROM worker_tasks WHERE id=$1")
+            .bind(id).fetch_one(&mut *tx).await?;
+        let value = task(row)?;
+        tx.commit().await?;
+        Ok(value)
+    }
+    async fn workspace_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let existing: Option<serde_json::Value> = sqlx::query_scalar("SELECT capabilities FROM worker_devices WHERE id=$1 AND tenant_id=$2 AND user_id=$3 AND state='active' FOR UPDATE")
+            .bind(&device.id).bind(&device.tenant).bind(&device.user)
+            .fetch_optional(&mut *tx).await?;
+        let mut capabilities: Vec<String> =
+            serde_json::from_value(existing.context("设备不存在或已撤销")?)?;
+        capabilities.retain(|capability| capability != "workspace.execute");
+        if enabled {
+            capabilities.push("workspace.execute".into());
+        }
+        sqlx::query("UPDATE worker_devices SET capabilities=$2 WHERE id=$1")
+            .bind(&device.id)
+            .bind(serde_json::to_value(capabilities)?)
+            .execute(&mut *tx)
+            .await?;
+        if !enabled {
+            sqlx::query("UPDATE worker_tasks SET state='cancelled',lease=NULL,lease_until=NULL,completed_at=now(),error='工作区执行授权已关闭' WHERE worker_id=$1 AND capability='workspace.execute' AND state IN ('queued','running')")
+                .bind(&device.id).execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+        Ok(())
     }
     async fn desktop(&self, session: &SessionContext, id: &str, enabled: bool) -> Result<()> {
         let mut tx = self.pool.begin().await?;

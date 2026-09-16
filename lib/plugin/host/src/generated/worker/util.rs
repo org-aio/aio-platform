@@ -22,6 +22,23 @@ pub(super) fn validate_capability(value: &str) -> Result<()> {
     );
     Ok(())
 }
+/// 宿主只验证批次协议；命令、路径和并行执行由设备本机授权与处理。
+pub(super) fn validate_workspace_input(input: &serde_json::Value) -> Result<()> {
+    match input.get("action").and_then(serde_json::Value::as_str) {
+        Some("describe") => Ok(()),
+        Some("run") => {
+            ensure!(
+                input
+                    .get("jobs")
+                    .and_then(serde_json::Value::as_array)
+                    .is_some_and(|jobs| (1..=8).contains(&jobs.len())),
+                "工作区批次需要 1 至 8 个任务"
+            );
+            Ok(())
+        }
+        _ => anyhow::bail!("工作区操作无效"),
+    }
+}
 pub(super) fn worker(row: sqlx::postgres::PgRow) -> Result<Worker> {
     Ok(Worker {
         id: row.try_get("id")?,

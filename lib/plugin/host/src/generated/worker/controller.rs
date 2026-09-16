@@ -23,6 +23,11 @@ pub(crate) fn router() -> Router<RuntimeState> {
         .route("/api/runtime/workers/{id}/desktop", put(desktop))
         .route("/api/runtime/workers/tasks", get(tasks).post(enqueue))
         .route("/api/runtime/workers/tasks/{id}", get(task))
+        .route("/api/runtime/workers/tasks/{id}/cancel", post(cancel_task))
+        .route(
+            "/api/runtime/workers/workspaces/access",
+            post(workspace_access),
+        )
         .route("/api/runtime/workers/claim", post(claim))
         .route("/api/runtime/workers/heartbeat", post(heartbeat))
         .route("/api/runtime/workers/tasks/{id}/heartbeat", post(renew))
@@ -186,6 +191,36 @@ async fn task(
 ) -> Result<Json<RuntimeResponse<Task>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
     Ok(response(state.workers.task(&session, &id).await?))
+}
+
+async fn cancel_task(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<RuntimeResponse<Task>>, RuntimeError> {
+    let session = authenticate(&state, &headers).await?;
+    Ok(response(state.workers.cancel_task(&session, &id).await?))
+}
+
+async fn workspace_access(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Json(request): Json<WorkspaceAccess>,
+) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
+    if !headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("Bearer "))
+    {
+        return Err(RuntimeError::unauthorized("缺少设备 Bearer 凭据"));
+    }
+    let device = device(&state, &headers).await?;
+    state
+        .workers
+        .workspace_access(&device, request.enabled)
+        .await
+        .map_err(worker_error)?;
+    Ok(response(()))
 }
 
 async fn desktop(

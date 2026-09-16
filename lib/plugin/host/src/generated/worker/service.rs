@@ -16,6 +16,10 @@ pub(crate) trait WorkerService: Any + Send + Sync {
     async fn enqueue(&self, session: &SessionContext, request: SubmitTask) -> Result<Task>;
     async fn tasks(&self, session: &SessionContext) -> Result<Vec<Task>>;
     async fn task(&self, session: &SessionContext, id: &str) -> Result<Task>;
+    /// 登录用户取消本人任务，已结束任务保持原结果并幂等返回。
+    async fn cancel_task(&self, session: &SessionContext, id: &str) -> Result<Task>;
+    /// 本机设备凭据只管理自己的工作区执行能力。
+    async fn workspace_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()>;
     async fn desktop(&self, session: &SessionContext, id: &str, enabled: bool) -> Result<()>;
     async fn claim(&self, device: &DeviceIdentity, request_id: &str) -> Result<Option<Task>>;
     async fn heartbeat(&self, device: &DeviceIdentity, id: Option<(&str, &str)>) -> Result<()>;
