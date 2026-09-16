@@ -56,6 +56,8 @@ pub struct ProcessManifest {
     pub endpoints: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub http_endpoints: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub worker_capabilities: Vec<String>,
     #[serde(default)]
     pub services: Vec<String>,
 }
@@ -143,6 +145,14 @@ impl BundleManifest {
         }
         validate_relative_path(&plugin.runtime.artifact)?;
         if let Some(process) = &plugin.runtime.process {
+            ensure!(
+                process.worker_capabilities.len() <= 1
+                    && process
+                        .worker_capabilities
+                        .iter()
+                        .all(|capability| capability == "desktop.open-app"),
+                "process 设备能力未开放"
+            );
             let (image, digest) = process
                 .image
                 .split_once("@sha256:")

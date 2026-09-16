@@ -15,6 +15,8 @@ pub(crate) trait WorkerService: Any + Send + Sync {
     async fn revoke(&self, session: &SessionContext, id: &str) -> Result<()>;
     async fn enqueue(&self, session: &SessionContext, request: SubmitTask) -> Result<Task>;
     async fn tasks(&self, session: &SessionContext) -> Result<Vec<Task>>;
+    async fn task(&self, session: &SessionContext, id: &str) -> Result<Task>;
+    async fn desktop(&self, session: &SessionContext, id: &str, enabled: bool) -> Result<()>;
     async fn claim(&self, device: &DeviceIdentity) -> Result<Option<Task>>;
     async fn heartbeat(&self, device: &DeviceIdentity, id: Option<(&str, &str)>) -> Result<()>;
     async fn complete(

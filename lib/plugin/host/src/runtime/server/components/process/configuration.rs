@@ -51,6 +51,16 @@ impl Processes {
             "process 模型地址未获宿主授权"
         );
         let approved_http = std::env::var("AIO_PROCESS_HTTP_ENDPOINTS").unwrap_or_default();
+        let approved_workers = std::env::var("AIO_PROCESS_WORKER_CAPABILITIES").unwrap_or_default();
+        ensure!(
+            local
+                || process.worker_capabilities.iter().all(|capability| {
+                    approved_workers
+                        .split(',')
+                        .any(|approved| approved == capability)
+                }),
+            "process 设备能力未获宿主授权"
+        );
         ensure!(
             local
                 || process
@@ -185,6 +195,7 @@ impl Processes {
             },
             endpoints: process.endpoints.clone(),
             http_endpoints: process.http_endpoints.clone(),
+            worker_capabilities: process.worker_capabilities.clone(),
             services: process.services.clone(),
         };
         replace_file(
@@ -205,6 +216,7 @@ impl Processes {
             token: configuration.ingress_token.clone(),
             endpoints: configuration.endpoints.clone(),
             http_endpoints: configuration.http_endpoints.clone(),
+            worker_capabilities: configuration.worker_capabilities.clone(),
             services: configuration.services.clone(),
             client: reqwest::Client::builder()
                 .no_proxy()

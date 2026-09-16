@@ -147,6 +147,35 @@ impl WorkerService for WorkerServiceImpl {
             })
             .collect()
     }
+    async fn task(&self, session: &SessionContext, id: &str) -> Result<Task> {
+        self.expire().await?;
+        let row = sqlx::query("SELECT *,NULL::text AS lease,(extract(epoch FROM created_at)*1000)::bigint AS created_at_ms FROM worker_tasks WHERE id=$1 AND tenant_id=$2 AND user_id=$3")
+            .bind(id).bind(&session.tenant_id).bind(&session.user_id)
+            .fetch_optional(&self.pool).await?.context("任务不存在")?;
+        task(row)
+    }
+    async fn desktop(&self, session: &SessionContext, id: &str, enabled: bool) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let existing: Option<serde_json::Value> = sqlx::query_scalar("SELECT capabilities FROM worker_devices WHERE id=$1 AND tenant_id=$2 AND user_id=$3 AND state='active' AND platform='darwin' FOR UPDATE")
+            .bind(id).bind(&session.tenant_id).bind(&session.user_id).fetch_optional(&mut *tx).await?;
+        let mut capabilities: Vec<String> =
+            serde_json::from_value(existing.context("设备不存在或不支持应用控制")?)?;
+        capabilities.retain(|capability| capability != "desktop.open-app");
+        if enabled {
+            capabilities.push("desktop.open-app".into());
+        }
+        sqlx::query("UPDATE worker_devices SET capabilities=$2 WHERE id=$1")
+            .bind(id)
+            .bind(serde_json::to_value(capabilities)?)
+            .execute(&mut *tx)
+            .await?;
+        if !enabled {
+            sqlx::query("UPDATE worker_tasks SET state='cancelled',lease=NULL,lease_until=NULL,error='应用控制授权已关闭' WHERE worker_id=$1 AND capability='desktop.open-app' AND state IN ('queued','running')")
+                .bind(id).execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
     async fn claim(&self, device: &DeviceIdentity) -> Result<Option<Task>> {
         self.expire().await?;
         let mut tx = self.pool.begin().await?;

@@ -37,6 +37,7 @@ pub(crate) fn WorkerPanel(pairing: Option<String>, on_close: EventHandler<()>) -
     let mut busy = use_signal(|| false);
     let mut selected = use_signal(|| None::<(Worker, String)>);
     let mut revoke = use_signal(|| None::<Worker>);
+    let mut desktop = use_signal(|| None::<Worker>);
     let mut code = use_signal(move || pairing);
     let mut workers = use_resource(move || async {
         request::<Vec<Worker>>("GET", "/api/runtime/workers", None::<&()>).await
@@ -93,6 +94,11 @@ pub(crate) fn WorkerPanel(pairing: Option<String>, on_close: EventHandler<()>) -
                                 small{"{worker.platform}"}
                                 if worker.status!="revoked"{
                                     div{class:"flex flex-wrap gap-2",
+                                        if worker.platform=="darwin" {
+                                            Button{variant:ButtonVariant::Outline,onclick:{let worker=worker.clone();move |_|desktop.set(Some(worker.clone()))},
+                                                if worker.capabilities.iter().any(|capability|capability=="desktop.open-app"){"应用控制设置"}else{"启用应用控制"}
+                                            }
+                                        }
                                         for (capability,label) in [("space.scan","扫描占用"),("space.clean-preview","预览清理"),("space.clean","清理缓存"),("space.archive","归档到 AIO"),("space.archive-list","归档列表"),("space.archive-restore","恢复归档")]{
                                             if worker.capabilities.iter().any(|v|v==capability){
                                                 Button{variant:ButtonVariant::Outline,onclick:{let worker=worker.clone();move |_|selected.set(Some((worker.clone(),capability.into())))},"{label}"}
@@ -124,6 +130,14 @@ pub(crate) fn WorkerPanel(pairing: Option<String>, on_close: EventHandler<()>) -
             Dialog{open:true,on_open_change:move|open:bool|if !open{revoke.set(None)},DialogTitle{"撤销设备授权"}
                 p{"撤销 {worker.label} 后，该设备无法继续领取任务或访问归档。"}
                 Button{disabled:busy(),onclick:move |_|{let id=worker.id.clone();busy.set(true);spawn(async move{match request::<()>("DELETE",&format!("/api/runtime/workers/{id}"),None::<&()>).await{Ok(())=>{revoke.set(None);workers.restart();},Err(e)=>error.set(Some(e))}busy.set(false);});},"确认撤销"}
+            }
+        }
+        if let Some(worker)=desktop(){
+            Dialog{open:true,on_open_change:move|open:bool|if !open{desktop.set(None)},DialogTitle{"应用控制"}
+                p{"启用后，AIO 智能体可以在 {worker.label} 上打开已安装应用。请先更新客户端；不会开放任意命令、鼠标或键盘控制。"}
+                Button{disabled:busy(),onclick:{let enabled=!worker.capabilities.iter().any(|capability|capability=="desktop.open-app");move |_|{let id=worker.id.clone();busy.set(true);spawn(async move{match request::<()>("PUT",&format!("/api/runtime/workers/{id}/desktop"),Some(&super::model::DesktopAccess{enabled})).await{Ok(())=>{desktop.set(None);workers.restart();},Err(e)=>error.set(Some(e))}busy.set(false);});}},
+                    if !worker.capabilities.iter().any(|capability|capability=="desktop.open-app") {"确认启用"}else{"关闭应用控制"}
+                }
             }
         }
     }

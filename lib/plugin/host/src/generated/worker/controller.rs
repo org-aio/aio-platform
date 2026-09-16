@@ -7,7 +7,7 @@ use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Path, State},
     http::{HeaderMap, header},
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
 };
 
 pub(crate) fn router() -> Router<RuntimeState> {
@@ -20,7 +20,9 @@ pub(crate) fn router() -> Router<RuntimeState> {
         )
         .route("/api/runtime/workers", get(list))
         .route("/api/runtime/workers/{id}", delete(revoke))
+        .route("/api/runtime/workers/{id}/desktop", put(desktop))
         .route("/api/runtime/workers/tasks", get(tasks).post(enqueue))
+        .route("/api/runtime/workers/tasks/{id}", get(task))
         .route("/api/runtime/workers/claim", post(claim))
         .route("/api/runtime/workers/heartbeat", post(heartbeat))
         .route("/api/runtime/workers/tasks/{id}/heartbeat", post(renew))
@@ -134,6 +136,29 @@ async fn claim(
     let device = device(&state, &headers).await?;
     state.workers.heartbeat(&device, None).await?;
     Ok(response(state.workers.claim(&device).await?))
+}
+
+async fn task(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<RuntimeResponse<Task>>, RuntimeError> {
+    let session = authenticate(&state, &headers).await?;
+    Ok(response(state.workers.task(&session, &id).await?))
+}
+
+async fn desktop(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(request): Json<DesktopAccess>,
+) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
+    let session = authenticate(&state, &headers).await?;
+    state
+        .workers
+        .desktop(&session, &id, request.enabled)
+        .await?;
+    Ok(response(()))
 }
 async fn heartbeat(
     State(state): State<RuntimeState>,

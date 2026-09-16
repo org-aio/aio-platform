@@ -4,6 +4,7 @@ mod development;
 mod instance;
 mod model;
 pub(in crate::runtime::server) mod supervision;
+mod workers;
 
 pub(in crate::runtime::server) use model::{Start, Stop};
 

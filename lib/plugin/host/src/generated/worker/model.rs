@@ -54,6 +54,11 @@ pub struct CompleteTask {
 pub struct Lease {
     pub lease: String,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DesktopAccess {
+    pub enabled: bool,
+}
 #[derive(Clone)]
 pub struct DeviceIdentity {
     pub id: String,

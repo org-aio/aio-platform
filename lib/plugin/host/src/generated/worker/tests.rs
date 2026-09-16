@@ -83,7 +83,7 @@ async fn worker_pairing_tasks_archives_and_revocation_end_to_end() -> Result<()>
     let app = controller::router().with_state(state.clone());
     let server = tokio::spawn(axum::serve(listener, app).into_future());
     let client = reqwest::Client::new();
-    let pair:Value=post(&client,&base,"/pairings",None,json!({"label":"test-worker","platform":"test","capabilities":["space.scan","space.archive","space.archive-list","space.archive-restore"]})).await?.error_for_status()?.json().await?;
+    let pair:Value=post(&client,&base,"/pairings",None,json!({"label":"test-worker","platform":"darwin","capabilities":["space.scan","space.archive","space.archive-list","space.archive-restore"]})).await?.error_for_status()?.json().await?;
     let pair = &pair["data"];
     let code = pair["code"].as_str().context("缺少配对码")?;
     let token = pair["token"].as_str().context("缺少设备凭据")?;
@@ -131,6 +131,98 @@ async fn worker_pairing_tasks_archives_and_revocation_end_to_end() -> Result<()>
         .json()
         .await?;
     assert_eq!(other["data"], json!([]));
+    // 应用控制由设备所属账号显式授权，其他用户或租户不能开启。
+    let desktop = format!("{base}/api/runtime/workers/{device}/desktop");
+    for (user, tenant) in [("other", "test"), ("owner", "other-tenant")] {
+        assert!(
+            client
+                .put(&desktop)
+                .header("x-test-user", user)
+                .header("x-test-tenant", tenant)
+                .json(&json!({"enabled":true}))
+                .send()
+                .await?
+                .status()
+                .is_client_error()
+        );
+    }
+    let app_id = uuid::Uuid::new_v4().to_string();
+    let app_task = json!({"id":app_id,"worker_id":device,"capability":"desktop.open-app","input":{"application":"Postman"}});
+    let submit = || {
+        client
+            .post(format!("{base}/api/runtime/workers/tasks"))
+            .header("x-test-user", "owner")
+            .json(&app_task)
+    };
+    assert!(submit().send().await?.status().is_client_error());
+    client
+        .put(&desktop)
+        .header("x-test-user", "owner")
+        .json(&json!({"enabled":true}))
+        .send()
+        .await?
+        .error_for_status()?;
+    for _ in 0..2 {
+        submit().send().await?.error_for_status()?;
+    }
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM worker_tasks WHERE id=$1")
+        .bind(&app_id)
+        .fetch_one(&state.store.pool)
+        .await?;
+    assert_eq!(count, 1);
+    let app_claim: Value = post(&client, &base, "/claim", Some(token), json!({}))
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert_eq!(app_claim["data"]["id"], app_id);
+    let task_url = format!("{base}/api/runtime/workers/tasks/{app_id}");
+    assert!(
+        client
+            .get(&task_url)
+            .header("x-test-user", "other")
+            .send()
+            .await?
+            .status()
+            .is_client_error()
+    );
+    let app_read: Value = client
+        .get(&task_url)
+        .header("x-test-user", "owner")
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert!(app_read["data"]["lease"].is_null());
+    client
+        .put(&desktop)
+        .header("x-test-user", "owner")
+        .json(&json!({"enabled":false}))
+        .send()
+        .await?
+        .error_for_status()?;
+    let cancelled: Value = client
+        .get(&task_url)
+        .header("x-test-user", "owner")
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert_eq!(cancelled["data"]["state"], "cancelled");
+    assert!(
+        post(
+            &client,
+            &base,
+            &format!("/tasks/{app_id}/complete"),
+            Some(token),
+            json!({"lease":app_claim["data"]["lease"],"result":{"running":true}})
+        )
+        .await?
+        .status()
+        .is_client_error()
+    );
     let input = root.path().join("input");
     tokio::fs::create_dir(&input).await?;
     tokio::fs::write(input.join("record.txt"), "worker archive round trip 中文").await?;

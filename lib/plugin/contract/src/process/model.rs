@@ -12,6 +12,8 @@ pub struct Configuration {
     pub endpoints: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub http_endpoints: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub worker_capabilities: Vec<String>,
     pub services: Vec<String>,
 }
 

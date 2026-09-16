@@ -19,6 +19,7 @@ use super::model::Gateway;
 pub(super) fn router(gateway: Arc<Gateway>) -> Router {
     Router::new()
         .route("/invoke", post(invoke))
+        .route("/workers", post(super::workers::invoke))
         .route("/egress", post(egress))
         .route("/egress/models", get(models))
         .route("/egress/http", post(super::http_egress::request))

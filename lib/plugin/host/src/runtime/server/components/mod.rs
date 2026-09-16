@@ -44,6 +44,7 @@ pub(super) struct Components {
     objects: PathBuf,
     services: Arc<services::Services>,
     identity: Arc<dyn crate::identity::IdentityProvider>,
+    workers: Arc<dyn crate::generated::worker::WorkerService>,
     slots: Mutex<HashMap<(Uuid, String), Arc<PersistentComponentSlot>>>,
     pub mutations: Mutex<()>,
     processes: process::Processes,
@@ -75,6 +76,11 @@ impl Components {
                     .join("processes")
             });
         let supervisor = process::Processes::client()?;
+        let workers = dill::Catalog::builder()
+            .add_value(pool.clone())
+            .add::<crate::generated::worker::WorkerServiceImpl>()
+            .build()
+            .get_one::<dyn crate::generated::worker::WorkerService>()?;
         Ok(Arc::new_cyclic(|weak| Self {
             pool,
             development: Default::default(),
@@ -84,6 +90,7 @@ impl Components {
             objects,
             services: Arc::default(),
             identity,
+            workers,
             slots: Mutex::default(),
             mutations: Mutex::new(()),
             processes: process::Processes::new(weak.clone(), root, supervisor),
