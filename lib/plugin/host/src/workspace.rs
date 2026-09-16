@@ -164,7 +164,7 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
         }
         for context in [catalog.session_context] {
           az_ui_components::appearance::AppearanceScope { key: "{context}", user_key: catalog.user.handle.clone(),
-          runtime::settings::PluginSettingsHost { pages: catalog.plugin_settings.clone(), versions: catalog.page_versions.clone(), context: catalog.context.clone() }
+          runtime::settings::PluginSettingsHost { pages: catalog.plugin_settings.clone(), versions: catalog.page_versions.clone(), context: catalog.context.clone(),
           PluginApplication {
             application_label: config.label.clone(),
             pages: static_plugins.pages.clone(),
@@ -181,6 +181,7 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
                 handle: catalog.user.handle.clone(),
                 initials: catalog.user.initials.clone(),
             },
+          }
           }
           }
         }
