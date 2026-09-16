@@ -101,7 +101,10 @@ pub fn execute(worker: &Worker, job: &BuildJob, root: &Path) -> Result<Documenta
         let log = fs::File::create(&log_path)?;
         let mut command = container(&name, &source)?;
         command.args(["--env", "HOME=/cache"]);
-        for (key, value) in crate::toolchains::settings(job.recipe.environment) {
+        for (key, value) in crate::toolchains::settings(
+            job.recipe.environment,
+            env::var("AIO_BUILD_HTTP_PROXY").ok().as_deref(),
+        )? {
             command.args(["--env", &format!("{key}={value}")]);
         }
         let mut process = command
@@ -156,6 +159,7 @@ pub fn execute(worker: &Worker, job: &BuildJob, root: &Path) -> Result<Documenta
                 "Could not resolve host",
                 "Failed to connect to",
                 "Connection timed out",
+                "HTTP connect timed out",
                 "Timeout was reached",
                 "Operation too slow",
                 "failed to download from",
