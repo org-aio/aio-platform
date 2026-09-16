@@ -13,7 +13,7 @@ const token = parseEnv(current).AIO_DELIVERY_TOKEN || randomBytes(32).toString('
 if (!/^[a-zA-Z0-9_-]{32,256}$/.test(token)) throw new Error('已有交付凭据格式无效');
 const servicePath = '/opt/aio-delivery/git/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin';
 const retained = current.split('\n').filter(line => !/^(AIO_DELIVERY_(TOKEN|OWNER)|PATH)=/.test(line));
-fs.writeFileSync(hostFile, retained.join('\n').trimEnd() + `\nAIO_DELIVERY_TOKEN=${token}\nAIO_DELIVERY_OWNER=zjarlin\nPATH=${servicePath}\n`);
+fs.writeFileSync(hostFile, retained.join('\n').trimEnd() + `\nAIO_DELIVERY_TOKEN=${token}\nAIO_DELIVERY_OWNER=org-aio\nPATH=${servicePath}\n`);
 fs.mkdirSync('/opt/aio-delivery/bin', { recursive: true });
 const values = {
   AIO_DELIVERY_TOKEN: token,
