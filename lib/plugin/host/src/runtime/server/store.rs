@@ -126,6 +126,9 @@ impl PluginStore {
         sqlx::raw_sql(include_str!("../../generated/worker/schema.sql"))
             .execute(&self.pool)
             .await?;
+        sqlx::raw_sql(include_str!("../../generated/personal_config/schema.sql"))
+            .execute(&self.pool)
+            .await?;
         self.migrate_published_source_ids().await?;
         Ok(())
     }

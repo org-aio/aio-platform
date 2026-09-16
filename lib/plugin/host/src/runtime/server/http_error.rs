@@ -17,6 +17,13 @@ impl RuntimeError {
         }
     }
 
+    pub(crate) fn conflict(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            error: anyhow::anyhow!(message.into()),
+        }
+    }
+
     pub(crate) fn unauthorized(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,

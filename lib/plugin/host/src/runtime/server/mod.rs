@@ -63,6 +63,7 @@ pub struct RuntimeState {
     pub store: Arc<store::PluginStore>,
     pub repository: Arc<repository::RepositoryInstaller>,
     pub identity: Arc<dyn crate::identity::IdentityProvider>,
+    pub(crate) personal_config: Arc<dyn crate::generated::personal_config::PersonalConfigService>,
     pub(crate) workers: Arc<dyn crate::generated::worker::WorkerService>,
     activation_locks: Arc<Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>>,
     publication_slots: Arc<tokio::sync::Semaphore>,
@@ -128,7 +129,19 @@ impl RuntimeState {
             .add::<crate::generated::worker::WorkerServiceImpl>()
             .build()
             .get_one::<dyn crate::generated::worker::WorkerService>()?;
+        let keyring_path = config
+            .component_storage
+            .as_ref()
+            .map(|s| s.root.join("keyring.json"))
+            .unwrap_or_else(|| config.cache_root.join("worker-keyring.json"));
+        let personal_config = dill::Catalog::builder()
+            .add_value(store.pool.clone())
+            .add_value(components::load_keyring(&keyring_path)?)
+            .add::<crate::generated::personal_config::PersonalConfigServiceImpl>()
+            .build()
+            .get_one::<dyn crate::generated::personal_config::PersonalConfigService>()?;
         let state = Self {
+            personal_config,
             workers,
             development: Arc::default(),
             store,

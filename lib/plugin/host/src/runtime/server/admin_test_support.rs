@@ -28,7 +28,16 @@ impl RuntimeState {
             .add::<crate::generated::worker::WorkerServiceImpl>()
             .build()
             .get_one::<dyn crate::generated::worker::WorkerService>()?;
+        let personal_config = dill::Catalog::builder()
+            .add_value(store.pool.clone())
+            .add_value(super::components::load_keyring(
+                &cache.join("worker-keyring.json"),
+            )?)
+            .add::<crate::generated::personal_config::PersonalConfigServiceImpl>()
+            .build()
+            .get_one::<dyn crate::generated::personal_config::PersonalConfigService>()?;
         Ok(Self {
+            personal_config,
             workers,
             config: Arc::new(crate::configuration::HostConfig {
                 database_url: database.into(),
