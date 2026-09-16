@@ -29,6 +29,7 @@ pub(super) async fn lookup(code: &str) -> Result<Option<Worker>, String> {
         .await
         .map_err(|error| error.to_string())?;
     if response.status() == 400 {
+        check_unavailable(response).await?;
         return Ok(None);
     }
     decode_response(response).await.map(Some)
@@ -41,8 +42,19 @@ pub(super) async fn approve(code: &str) -> Result<bool, String> {
         .await
         .map_err(|error| error.to_string())?;
     if response.status() == 400 {
+        check_unavailable(response).await?;
         return Ok(false);
     }
     decode_response::<()>(response).await?;
     Ok(true)
+}
+
+/// 设备数量上限、数据库故障等也可能返回 400，不能据此丢弃仍有效的配对入口。
+async fn check_unavailable(response: gloo_net::http::Response) -> Result<(), String> {
+    let body = response.text().await.map_err(|error| error.to_string())?;
+    let value = serde_json::from_str::<serde_json::Value>(&body).ok();
+    match value.as_ref().and_then(|value| value["error"].as_str()) {
+        Some("配对码无效或已过期" | "配对码无效、已使用或已过期") => Ok(()),
+        _ => Err(format!("请求失败（HTTP 400）：{body}")),
+    }
 }
