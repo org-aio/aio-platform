@@ -19,3 +19,5 @@ Component 前端单独变化时保留同一执行实例；本地服务由 CLI �
 ## 权限与菜单验证
 
 `tenant_installation_grants_members_and_menu_visibility_preserves_runtime` 在独立 `component_market_test` PostgreSQL 与真实 WIT 测试组件上验证成员自动授权、跨租户与已移除成员拒绝、旧权限索引回填、升级回退、启停卸载，以及隐藏菜单不改变运行实例和授权。设置 `AIO_COMPONENT_TEST_DATABASE_URL` 与 `AIO_TEST_HEALTHY_COMPONENT` 后运行 `cargo test -p az-plugin-host --features server --lib components:: -- --include-ignored`。
+
+`installation` 统一安装事务、启停卸载与回滚；`delivery` 在同一变更锁内再次检查启用状态、市场版本及排除摘要，自动更新既有安装。回滚仅排除当前市场版本，不永久固定插件；失败沿用安装路径的旧实例恢复。

@@ -1,3 +1,4 @@
+pub(in crate::runtime::server) mod components;
 mod controller;
 mod discovery;
 mod documents;
@@ -21,3 +22,5 @@ pub(super) fn start(state: super::RuntimeState) {
 }
 
 pub(super) use rollout::{ensure_current, exclude_revision, remember_installation};
+
+pub(super) use components::finish_publication;

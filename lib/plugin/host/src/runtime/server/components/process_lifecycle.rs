@@ -22,6 +22,7 @@ impl Components {
         tenant: &str,
         source: Uuid,
         bundle: Bundle,
+        excluded: Option<&str>,
     ) -> Result<()> {
         let enabled: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM component_installations WHERE tenant_id=$1 AND source_id=$2 AND enabled)")
             .bind(tenant).bind(source).fetch_one(&self.pool).await?;
@@ -33,10 +34,12 @@ impl Components {
         let result = async {
             self.processes.activate(source, tenant, &bundle).await?;
             let mut tx = self.pool.begin().await?;
-            sqlx::query("INSERT INTO component_installations(tenant_id,source_id,digest,generation) VALUES($1,$2,$3,$4) ON CONFLICT(tenant_id,source_id) DO UPDATE SET digest=EXCLUDED.digest,enabled=true,generation=EXCLUDED.generation").bind(tenant).bind(source).bind(&bundle.digest).bind(Uuid::new_v4()).execute(&mut *tx).await?;
+            self.save_installation(&mut tx, tenant, source, &bundle.digest, excluded)
+                .await?;
             tx.commit().await?;
             Ok(())
-        }.await;
+        }
+        .await;
         if result.is_err() {
             self.processes.stop(source, tenant).await?;
             if let Some(previous) = previous {

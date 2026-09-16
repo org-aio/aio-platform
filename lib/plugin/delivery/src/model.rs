@@ -23,6 +23,7 @@ pub enum BuildEnvironment {
     Kotlin,
     #[serde(rename = "typescript")]
     TypeScript,
+    Fullstack,
 }
 
 impl BuildEnvironment {
@@ -31,6 +32,7 @@ impl BuildEnvironment {
             Self::Rust => "AIO_BUILD_IMAGE_RUST",
             Self::Kotlin => "AIO_BUILD_IMAGE_KOTLIN",
             Self::TypeScript => "AIO_BUILD_IMAGE_TYPESCRIPT",
+            Self::Fullstack => "AIO_BUILD_IMAGE_FULLSTACK",
         }
     }
 }

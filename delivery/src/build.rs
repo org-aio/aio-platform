@@ -21,7 +21,7 @@ impl std::fmt::Display for Retryable {
 }
 impl std::error::Error for Retryable {}
 
-fn checked(command: &mut Command) -> Result<()> {
+pub(crate) fn checked(command: &mut Command) -> Result<()> {
     let mut child = command
         .stdin(Stdio::null())
         .spawn()
@@ -174,20 +174,14 @@ pub fn execute(worker: &Worker, job: &BuildJob, root: &Path) -> Result<Documenta
             return Err(error);
         }
         checked(Command::new("chown").args(["-R", "0:0"]).arg(&source))?;
-        checked(
-            Command::new(env::var("AIO_CLI").unwrap_or_else(|_| "aio".into()))
-                .args(["plugin", "package"])
-                .arg(&source)
-                .args(["--git", &job.git, "--version", &job.version, "-o"])
-                .arg(&archive),
-        )?;
+        crate::packaging::write(&source, &archive, job)?;
     } else {
         documentation = serde_json::from_slice(&fs::read(root.join("documentation.json"))?)?;
     }
     worker
         .request(&format!("/api/internal/delivery/jobs/{}/package", job.id))
         .header("x-aio-build-lease", &job.lease)
-        .header("content-type", "application/vnd.aio.plugin+gzip")
+        .header("content-type", crate::packaging::content_type(&source)?)
         .body(fs::read(&archive)?)
         .send()?
         .error_for_status()?;

@@ -2,7 +2,7 @@ use super::*;
 use std::fs;
 
 #[derive(Default)]
-struct TestIdentity;
+pub(super) struct TestIdentity;
 #[async_trait::async_trait]
 impl crate::identity::IdentityProvider for TestIdentity {
     async fn can_publish(&self, _: &crate::identity::SessionContext) -> anyhow::Result<bool> {
@@ -68,7 +68,7 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
     sqlx::raw_sql("CREATE TABLE IF NOT EXISTS plugin_sources(id TEXT PRIMARY KEY,git TEXT); CREATE TABLE IF NOT EXISTS tenant_plugin_bindings(tenant_id TEXT,source_id TEXT,enabled BOOLEAN);").execute(&pool).await?;
     let temp = tempfile::tempdir()?;
     let tenant = Uuid::new_v4().to_string();
-    let identity = Arc::new(TestIdentity::default());
+    let identity = Arc::new(TestIdentity);
     let git = format!("https://github.com/example/parent-{tenant}.git");
     let child_git = format!("https://github.com/example/child-{tenant}.git");
     let first = package(&temp.path().join("parent"), &git, None, "1.0.0")?;

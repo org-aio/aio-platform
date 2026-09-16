@@ -43,3 +43,14 @@ CREATE TABLE IF NOT EXISTS component_process_actors (
 );
 
 ALTER TABLE component_versions ADD COLUMN IF NOT EXISTS permissions TEXT[];
+
+ALTER TABLE component_installations ADD COLUMN IF NOT EXISTS excluded_digest TEXT;
+CREATE TABLE IF NOT EXISTS component_rollouts (
+    tenant_id TEXT NOT NULL,
+    source_id UUID NOT NULL REFERENCES component_sources(id),
+    digest TEXT NOT NULL REFERENCES component_versions(digest),
+    state TEXT NOT NULL DEFAULT 'queued',
+    error TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY(tenant_id,source_id,digest)
+);

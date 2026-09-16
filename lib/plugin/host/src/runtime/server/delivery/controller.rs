@@ -23,7 +23,9 @@ pub(in crate::runtime::server) fn router() -> Router<RuntimeState> {
         )
         .route(
             "/api/internal/delivery/jobs/{id}/package",
-            post(upload).layer(DefaultBodyLimit::max(az_plugin_package::MAX_PACKAGE_BYTES)),
+            post(upload).layer(DefaultBodyLimit::max(
+                az_plugin_bundle::MAX_ENCODED_BYTES.max(az_plugin_package::MAX_PACKAGE_BYTES),
+            )),
         )
         .route(
             "/api/internal/delivery/jobs/{id}/complete",
@@ -131,6 +133,12 @@ async fn upload(
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default();
     let job = store::check_lease(&state.store.pool, id, lease).await?;
+    if headers.get("content-type").and_then(|v| v.to_str().ok())
+        == Some("application/vnd.aio.component+gzip")
+    {
+        super::components::upload(&state, &job, &body).await?;
+        return Ok(StatusCode::NO_CONTENT);
+    }
     let package = tokio::task::spawn_blocking(move || PluginPackage::decode(&body))
         .await
         .map_err(|e| RuntimeError::bad_request(e.to_string()))??;
@@ -160,6 +168,9 @@ async fn complete(
     if let Some(error) = report.error {
         sqlx::query("UPDATE delivery_jobs SET state='failed',error=$3,lease_until=NULL,updated_at=now() WHERE id=$1 AND lease=$2")
             .bind(id).bind(report.lease).bind(error.chars().take(16000).collect::<String>()).execute(&state.store.pool).await?;
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    if super::components::complete(&state, &job, &report.documentation).await? {
         return Ok(StatusCode::NO_CONTENT);
     }
     let revision: Option<String> =

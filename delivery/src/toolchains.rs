@@ -1,8 +1,8 @@
 use az_plugin_delivery::BuildEnvironment;
 
-pub fn settings(environment: BuildEnvironment) -> &'static [(&'static str, &'static str)] {
+pub fn settings(environment: BuildEnvironment) -> Vec<(&'static str, &'static str)> {
     match environment {
-        BuildEnvironment::Rust => &[
+        BuildEnvironment::Rust => vec![
             ("NO_DOWNLOADS", "1"),
             ("DX_TELEMETRY_ENABLED", "false"),
             ("CARGO_HOME", "/cache/cargo"),
@@ -12,7 +12,7 @@ pub fn settings(environment: BuildEnvironment) -> &'static [(&'static str, &'sta
             ("CARGO_HTTP_MULTIPLEXING", "false"),
             ("CARGO_NET_RETRY", "3"),
         ],
-        BuildEnvironment::Kotlin => &[
+        BuildEnvironment::Kotlin => vec![
             ("KOTLIN_CLI_NO_WELCOME_BANNER", "1"),
             ("KOTLIN_CLI_JAVA_HOME", "/opt/java/openjdk"),
             (
@@ -20,6 +20,11 @@ pub fn settings(environment: BuildEnvironment) -> &'static [(&'static str, &'sta
                 "-Duser.home=/cache -XX:ActiveProcessorCount=4",
             ),
         ],
-        BuildEnvironment::TypeScript => &[],
+        BuildEnvironment::TypeScript => vec![],
+        BuildEnvironment::Fullstack => {
+            let mut values = settings(BuildEnvironment::Rust);
+            values.extend(settings(BuildEnvironment::Kotlin));
+            values
+        }
     }
 }

@@ -1,5 +1,6 @@
 mod build;
 mod documents;
+mod packaging;
 mod toolchains;
 
 use std::{

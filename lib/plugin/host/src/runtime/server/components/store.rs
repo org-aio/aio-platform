@@ -34,6 +34,19 @@ impl Components {
     }
 
     pub async fn publish(&self, bundle: Bundle, readme: &str) -> Result<Uuid> {
+        self.publish_checked(bundle, readme, None).await
+    }
+
+    pub async fn publish_delivery(&self, bundle: Bundle, readme: &str, job: i64) -> Result<Uuid> {
+        self.publish_checked(bundle, readme, Some(job)).await
+    }
+
+    async fn publish_checked(
+        &self,
+        bundle: Bundle,
+        readme: &str,
+        job: Option<i64>,
+    ) -> Result<Uuid> {
         let _guard = self.mutations.lock().await;
         ensure!(readme.len() <= 512 * 1024, "README 超过限制");
         let verified = bundle.verify()?;
@@ -76,6 +89,9 @@ impl Components {
         sqlx::query("INSERT INTO component_versions(digest,source_id,archive,version,source_commit,description,metadata,readme,capabilities,permissions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(digest) DO NOTHING")
             .bind(&bundle.digest).bind(source).bind(archive).bind(&bundle.version).bind(&bundle.commit).bind(serde_json::to_value(description)?).bind(serde_json::to_value(metadata)?).bind(readme).bind(serde_json::to_value(&verified.manifest().plugin.capabilities)?).bind(&verified.manifest().plugin.permissions).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO component_publications(source_id,digest) VALUES($1,$2) ON CONFLICT(source_id) DO UPDATE SET digest=EXCLUDED.digest,published_at=now()").bind(source).bind(&bundle.digest).execute(&mut *tx).await?;
+        if let Some(job) = job {
+            super::super::delivery::finish_publication(&mut tx, job, &bundle).await?;
+        }
         tx.commit().await?;
         Ok(source)
     }

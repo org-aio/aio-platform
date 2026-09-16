@@ -427,6 +427,7 @@ name = "az-delivery-worker"
 version = "2026.5.10"
 dependencies = [
  "anyhow",
+ "az-plugin-bundle",
  "az-plugin-delivery",
  "base64",
  "pulldown-cmark",
@@ -434,6 +435,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tempfile",
+ "toml 0.8.2",
  "url",
 ]
 

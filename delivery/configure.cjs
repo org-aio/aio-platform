@@ -4,8 +4,8 @@ const { parseEnv } = require('node:util');
 
 if (process.getuid() !== 0) throw new Error('必须由 root 配置构建服务');
 const images = process.argv.slice(2);
-if (images.length !== 3 || images.some(value => !/^sha256:[a-f0-9]{64}$/.test(value))) {
-  throw new Error('用法: node configure.cjs <Rust image ID> <Kotlin image ID> <TypeScript image ID>');
+if (images.length !== 4 || images.some(value => !/^sha256:[a-f0-9]{64}$/.test(value))) {
+  throw new Error('用法: node configure.cjs <Rust image ID> <Kotlin image ID> <TypeScript image ID> <Fullstack image ID>');
 }
 const hostFile = '/opt/aio-idea/runtime.env';
 const current = fs.readFileSync(hostFile, 'utf8');
@@ -23,6 +23,7 @@ const values = {
   AIO_BUILD_IMAGE_RUST: images[0],
   AIO_BUILD_IMAGE_KOTLIN: images[1],
   AIO_BUILD_IMAGE_TYPESCRIPT: images[2],
+  AIO_BUILD_IMAGE_FULLSTACK: images[3],
 };
 const workerFile = '/opt/aio-delivery/worker.env';
 const previous = fs.existsSync(workerFile) ? parseEnv(fs.readFileSync(workerFile, 'utf8')) : {};

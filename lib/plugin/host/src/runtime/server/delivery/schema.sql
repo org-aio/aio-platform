@@ -43,3 +43,9 @@ CREATE TABLE IF NOT EXISTS delivery_rollouts (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY(tenant_id,source_id,revision)
 );
+
+CREATE TABLE IF NOT EXISTS delivery_component_packages (
+    job_id BIGINT PRIMARY KEY REFERENCES delivery_jobs(id) ON DELETE CASCADE,
+    archive BYTEA NOT NULL,
+    readme TEXT NOT NULL DEFAULT ''
+);

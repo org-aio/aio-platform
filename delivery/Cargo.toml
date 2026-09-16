@@ -10,6 +10,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+az-plugin-bundle = { path = "../lib/plugin/bundle" }
+toml.workspace = true
 az-plugin-delivery = { path = "../lib/plugin/delivery" }
 base64.workspace = true
 pulldown-cmark = "0.13"
@@ -18,6 +20,9 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 url.workspace = true
+
+[dev-dependencies]
+tempfile = "3.23.0"
 
 [lints]
 workspace = true
