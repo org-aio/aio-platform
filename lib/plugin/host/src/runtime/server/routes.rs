@@ -94,6 +94,7 @@ pub fn router(state: RuntimeState) -> Router {
         .merge(super::bootstrap::router())
         .merge(super::navigation::router())
         .merge(super::tools::router())
+        .merge(crate::generated::worker::controller::router())
         .with_state(state)
 }
 

@@ -4,48 +4,48 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-pub(super) struct RuntimeError {
+pub(crate) struct RuntimeError {
     status: StatusCode,
     error: anyhow::Error,
 }
 
 impl RuntimeError {
-    pub(super) fn bad_request(message: impl Into<String>) -> Self {
+    pub(crate) fn bad_request(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
             error: anyhow::anyhow!(message.into()),
         }
     }
 
-    pub(super) fn unauthorized(message: impl Into<String>) -> Self {
+    pub(crate) fn unauthorized(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
             error: anyhow::anyhow!(message.into()),
         }
     }
 
-    pub(super) fn forbidden(message: impl Into<String>) -> Self {
+    pub(crate) fn forbidden(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::FORBIDDEN,
             error: anyhow::anyhow!(message.into()),
         }
     }
 
-    pub(super) fn not_found(message: impl Into<String>) -> Self {
+    pub(crate) fn not_found(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
             error: anyhow::anyhow!(message.into()),
         }
     }
 
-    pub(super) fn unavailable(message: impl Into<String>) -> Self {
+    pub(crate) fn unavailable(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
             error: anyhow::anyhow!(message.into()),
         }
     }
 
-    pub(super) fn unsupported_media_type(message: impl Into<String>) -> Self {
+    pub(crate) fn unsupported_media_type(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::UNSUPPORTED_MEDIA_TYPE,
             error: anyhow::anyhow!(message.into()),

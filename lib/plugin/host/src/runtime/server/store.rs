@@ -61,7 +61,7 @@ ALTER TABLE tenant_plugin_bindings ADD CONSTRAINT tenant_plugin_bindings_source_
 "#;
 
 pub struct PluginStore {
-    pub(super) pool: PgPool,
+    pub(crate) pool: PgPool,
 }
 
 pub struct ProcessBinding {
@@ -123,6 +123,9 @@ impl PluginStore {
         super::delivery::migrate(&self.pool).await?;
         page_state::migrate(&self.pool).await?;
         super::navigation::migrate(&self.pool).await?;
+        sqlx::raw_sql(include_str!("../../generated/worker/schema.sql"))
+            .execute(&self.pool)
+            .await?;
         self.migrate_published_source_ids().await?;
         Ok(())
     }

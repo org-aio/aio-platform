@@ -11,7 +11,7 @@ use crate::runtime::{RuntimeCatalog, RuntimeResponse, UserView};
 
 const MANAGE_PERMISSION: &str = "plugin:manage";
 
-pub(super) async fn authenticate(
+pub(crate) async fn authenticate(
     state: &RuntimeState,
     headers: &HeaderMap,
 ) -> Result<SessionContext, RuntimeError> {

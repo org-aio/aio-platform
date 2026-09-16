@@ -211,7 +211,7 @@ impl Components {
     }
 }
 
-fn load_keyring(path: &Path) -> Result<Keyring> {
+pub(super) fn load_keyring(path: &Path) -> Result<Keyring> {
     use std::{
         io::Write,
         os::unix::fs::{OpenOptionsExt, PermissionsExt},

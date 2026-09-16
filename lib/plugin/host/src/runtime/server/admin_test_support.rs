@@ -23,7 +23,13 @@ impl RuntimeState {
             .await?;
         let store = Arc::new(PluginStore::new(pool));
         store.migrate().await?;
+        let workers = dill::Catalog::builder()
+            .add_value(store.pool.clone())
+            .add::<crate::generated::worker::WorkerServiceImpl>()
+            .build()
+            .get_one::<dyn crate::generated::worker::WorkerService>()?;
         Ok(Self {
+            workers,
             config: Arc::new(crate::configuration::HostConfig {
                 database_url: database.into(),
                 cache_root: cache.into(),

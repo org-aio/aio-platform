@@ -17,3 +17,5 @@ pub use workspace::Workspace;
 mod development;
 #[cfg(any(feature = "web", feature = "desktop"))]
 pub use development::DevelopmentStatus;
+
+pub mod generated;

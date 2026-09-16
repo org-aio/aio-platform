@@ -10,6 +10,25 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
     };
     use dioxus::prelude::*;
 
+    let mut worker_open = use_signal(|| false);
+    let mut worker_pair = use_signal(|| {
+        web_sys::window()
+            .and_then(|window| window.location().search().ok())
+            .and_then(|search| {
+                search.trim_start_matches('?').split('&').find_map(|part| {
+                    part.strip_prefix("worker_pair=")
+                        .filter(|code| {
+                            code.len() == 32 && code.bytes().all(|b| b.is_ascii_hexdigit())
+                        })
+                        .map(str::to_owned)
+                })
+            })
+    });
+    use_effect(move || {
+        if worker_pair().is_some() {
+            worker_open.set(true);
+        }
+    });
     let mut last_application = use_signal(|| None::<startup::LoadedApplication>);
     let mut preparations = use_signal(|| (String::new(), Vec::<String>::new()));
     let mut application = use_resource(move || {
@@ -99,6 +118,14 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
             .is_none_or(|permission| snapshot.permissions.iter().any(|value| value == permission))
     });
     let mut account_items = static_plugins.account_items;
+    account_items.push(ApplicationAccountItem {
+        id: "worker-devices".into(),
+        label: "我的设备".into(),
+        icon: Some("monitor".into()),
+        page_id: None,
+        required_permission: None,
+        destructive: false,
+    });
     account_items.extend(
         catalog
             .account_items
@@ -164,6 +191,9 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
         }
         for context in [catalog.session_context] {
           az_ui_components::appearance::AppearanceScope { key: "{context}", user_key: catalog.user.handle.clone(),
+          if worker_open() {
+              crate::generated::worker::view::WorkerPanel { pairing: worker_pair(), on_close: move |_| { worker_open.set(false); worker_pair.set(None); } }
+          }
           runtime::settings::PluginSettingsHost { pages: catalog.plugin_settings.clone(), versions: catalog.page_versions.clone(), context: catalog.context.clone(),
           PluginApplication {
             application_label: config.label.clone(),
@@ -175,7 +205,9 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
             workspace_id: catalog.tenant.id.clone(),
             workspace_context: catalog.context.clone(),
             render_runtime_page: runtime::client::render_page,
-            on_account_action: config.account_action,
+            on_account_action: move |action: String| {
+                if action == "worker-devices" { worker_open.set(true); } else { (config.account_action)(action); }
+            },
             user: ApplicationUser {
                 label: catalog.user.label.clone(),
                 handle: catalog.user.handle.clone(),

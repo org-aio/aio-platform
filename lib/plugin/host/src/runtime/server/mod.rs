@@ -14,7 +14,7 @@ mod frontend_package;
 mod frontend_routes;
 #[cfg(test)]
 mod frontend_tests;
-mod http_error;
+pub(crate) mod http_error;
 mod installation;
 mod lifecycle;
 mod management;
@@ -31,7 +31,7 @@ mod publisher_store;
 mod releases;
 mod remote_access;
 mod repository;
-mod request_context;
+pub(crate) mod request_context;
 mod routes;
 mod service_dispatch;
 mod source_migration;
@@ -63,6 +63,7 @@ pub struct RuntimeState {
     pub store: Arc<store::PluginStore>,
     pub repository: Arc<repository::RepositoryInstaller>,
     pub identity: Arc<dyn crate::identity::IdentityProvider>,
+    pub(crate) workers: Arc<dyn crate::generated::worker::WorkerService>,
     activation_locks: Arc<Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>>,
     publication_slots: Arc<tokio::sync::Semaphore>,
     frontend: Arc<frontend_access::FrontendAccess>,
@@ -72,6 +73,16 @@ pub struct RuntimeState {
 }
 
 impl RuntimeState {
+    pub(crate) fn worker_keyring(&self) -> Result<az_plugin_runtime::Keyring> {
+        let path = self
+            .config
+            .component_storage
+            .as_ref()
+            .map(|v| v.root.join("keyring.json"))
+            .unwrap_or_else(|| self.config.cache_root.join("worker-keyring.json"));
+        components::load_keyring(&path)
+    }
+
     pub async fn initialize(
         config: crate::configuration::HostConfig,
         identity: Arc<dyn crate::identity::IdentityProvider>,
@@ -112,7 +123,13 @@ impl RuntimeState {
         } else {
             None
         };
+        let workers = dill::Catalog::builder()
+            .add_value(store.pool.clone())
+            .add::<crate::generated::worker::WorkerServiceImpl>()
+            .build()
+            .get_one::<dyn crate::generated::worker::WorkerService>()?;
         let state = Self {
+            workers,
             development: Arc::default(),
             store,
             repository,
