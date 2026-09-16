@@ -50,6 +50,15 @@ impl Processes {
                     .all(|endpoint| approved.split(',').any(|allowed| allowed == endpoint)),
             "process 模型地址未获宿主授权"
         );
+        let approved_http = std::env::var("AIO_PROCESS_HTTP_ENDPOINTS").unwrap_or_default();
+        ensure!(
+            local
+                || process
+                    .http_endpoints
+                    .iter()
+                    .all(|endpoint| approved_http.split(',').any(|allowed| allowed == endpoint)),
+            "process 第三方 HTTP 地址未获宿主授权"
+        );
         tokio::fs::create_dir_all(&directory).await?;
         tokio::fs::set_permissions(&self.root, std::fs::Permissions::from_mode(0o700)).await?;
         for name in ["package", "grant", "broker", "database", "runtime"] {
@@ -175,6 +184,7 @@ impl Processes {
                 "/broker/gateway.sock".into()
             },
             endpoints: process.endpoints.clone(),
+            http_endpoints: process.http_endpoints.clone(),
             services: process.services.clone(),
         };
         replace_file(
@@ -194,6 +204,7 @@ impl Processes {
             start: start.clone(),
             token: configuration.ingress_token.clone(),
             endpoints: configuration.endpoints.clone(),
+            http_endpoints: configuration.http_endpoints.clone(),
             services: configuration.services.clone(),
             client: reqwest::Client::builder()
                 .no_proxy()

@@ -110,6 +110,7 @@ impl Processes {
             serde_json::from_slice(&super::instance::read_body(response, 128 * 1024).await?)?;
         description.process = true;
         super::instance::validate_description(&bundle, &description)?;
+        let description = description.with_settings(&bundle)?;
         self.instances.lock().await.insert(
             key,
             Arc::new(Instance {

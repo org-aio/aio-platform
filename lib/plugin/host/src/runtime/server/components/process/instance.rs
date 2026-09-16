@@ -127,7 +127,7 @@ impl Processes {
                         serde_json::from_slice(&read_body(response, 128 * 1024).await?)?;
                     description.process = true;
                     validate_description(&bundle.verify()?, &description)?;
-                    return Ok(description);
+                    return description.with_settings(&bundle.verify()?);
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
@@ -274,6 +274,10 @@ pub(super) fn validate_description(
                 && !page.label.is_empty()
                 && page.label.len() <= 256,
             "process 页面标识无效"
+        );
+        ensure!(
+            page.surface == "workspace" || (page.scene.is_none() && page.menu_path.is_empty()),
+            "独立页面不应声明工作区导航"
         );
         ensure!(
             bundle.frontend(&page.entry).is_some(),

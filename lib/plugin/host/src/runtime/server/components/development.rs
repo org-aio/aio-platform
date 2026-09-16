@@ -78,12 +78,9 @@ impl Components {
             )
             .await?;
         }
-        let description = slot
-            .snapshot()
-            .await
-            .context("开发实例未激活")?
-            .description
-            .into();
+        let description =
+            Description::from(slot.snapshot().await.context("开发实例未激活")?.description)
+                .with_settings(&bundle)?;
         self.development.write().await.insert(
             source,
             Instance {

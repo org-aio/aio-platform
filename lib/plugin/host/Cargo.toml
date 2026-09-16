@@ -1,6 +1,6 @@
 [package]
 name = "az-plugin-host"
-version = "2026.9.17"
+version = "2026.9.18"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
@@ -21,8 +21,8 @@ getrandom = { version = "0.4.2", optional = true }
 axum = { version = "0.8.6", optional = true }
 dill = "0.15.0"
 dioxus = { version = "=0.7.9", default-features = false, features = ["macro", "html", "signals"], optional = true }
-az-dioxus-admin-shell = { git = "https://github.com/zjarlin/dioxus-admin-workbench.git", rev = "cc676107118a3fa83ac891dd97e35279ab9bebbd", default-features = false, optional = true }
-az-ui-components = { git = "https://github.com/zjarlin/dioxus-admin-workbench.git", rev = "cc676107118a3fa83ac891dd97e35279ab9bebbd", optional = true }
+az-dioxus-admin-shell = { git = "https://github.com/zjarlin/dioxus-admin-workbench.git", rev = "c51ef561b8a68545482dd56b235515cc9c8b30bc", default-features = false, optional = true }
+az-ui-components = { git = "https://github.com/zjarlin/dioxus-admin-workbench.git", rev = "c51ef561b8a68545482dd56b235515cc9c8b30bc", optional = true }
 az-plugin-manifest = { path = "../manifest", default-features = false }
 az-plugin-package = { path = "../package", optional = true }
 gloo-net = { version = "0.6.0", features = ["http", "json"], optional = true }

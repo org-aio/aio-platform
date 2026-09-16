@@ -49,6 +49,7 @@ pub(super) struct Gateway {
     pub start: Start,
     pub token: String,
     pub endpoints: Vec<String>,
+    pub http_endpoints: Vec<String>,
     pub services: Vec<String>,
     pub client: reqwest::Client,
     pub quota: Arc<tokio::sync::Semaphore>,

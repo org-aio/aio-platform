@@ -22,3 +22,5 @@ pub(super) struct Processes {
     instances: Mutex<HashMap<(Uuid, String), Arc<model::Instance>>>,
     pub(super) pending: Mutex<HashMap<Uuid, Arc<model::Instance>>>,
 }
+
+mod http_egress;

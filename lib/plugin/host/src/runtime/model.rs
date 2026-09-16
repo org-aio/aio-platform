@@ -24,8 +24,17 @@ pub struct RuntimeCatalog {
     #[serde(default)]
     pub hidden_pages: Vec<String>,
     #[serde(default)]
+    pub plugin_settings: Vec<PluginSettingsPage>,
+    #[serde(default)]
     pub account_items: Vec<RuntimeAccountItem>,
     pub plugins: Vec<InstalledPluginView>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PluginSettingsPage {
+    pub source_id: String,
+    pub label: String,
+    pub page_id: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

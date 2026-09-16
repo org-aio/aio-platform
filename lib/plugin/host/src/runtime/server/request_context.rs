@@ -170,6 +170,9 @@ pub(super) async fn catalog_value(
     catalog
         .account_items
         .retain(|item| permitted(item.required_permission.as_deref(), &session.permissions));
+    catalog
+        .plugin_settings
+        .retain(|item| catalog.pages.iter().any(|page| page.id == item.page_id));
     super::navigation::apply(state, &session.tenant_id, &mut catalog).await?;
     catalog.session_context = session_context(session);
     catalog.context = tenant_context(session)?;

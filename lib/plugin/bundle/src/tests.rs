@@ -385,3 +385,46 @@ fn local_native_artifacts_do_not_weaken_published_package_validation() -> anyhow
     );
     Ok(())
 }
+
+#[test]
+fn validates_settings_and_exact_https_tool_capabilities() -> Result<()> {
+    let settings = MANIFEST.replace(
+        "[plugin.runtime]",
+        "[plugin]\nsettings_page='settings'\n[plugin.runtime]",
+    );
+    assert_eq!(
+        BundleManifest::parse(&settings)?
+            .plugin
+            .settings_page
+            .as_deref(),
+        Some("settings")
+    );
+    for id in ["", "../settings", "settings?token=secret"] {
+        assert!(
+            BundleManifest::parse(
+                &settings.replace("settings_page='settings'", &format!("settings_page='{id}'"))
+            )
+            .is_err()
+        );
+    }
+    let process = format!(
+        "schema_version=2\n[plugin.runtime]\nartifact='server'\nhost_version='>=2026.9.18'\n[plugin.runtime.process]\nimage='sha256:{}'\nhttp_endpoints=['https://api.tavily.com/search']\n[plugin.frontend]\npath='web'\n",
+        "a".repeat(64)
+    );
+    BundleManifest::parse(&process)?;
+    for url in [
+        "http://api.tavily.com/search",
+        "https://secret@api.tavily.com/search",
+        "https://api.tavily.com/search?key=secret",
+        "https://api.tavily.com/search#token",
+    ] {
+        assert!(
+            BundleManifest::parse(&process.replace("https://api.tavily.com/search", url)).is_err(),
+            "{url}"
+        );
+    }
+    // 省略新字段时保留旧版序列化形式，不破坏已安装组件与进程。
+    let old = toml::to_string(&BundleManifest::parse(MANIFEST)?)?;
+    assert!(!old.contains("settings_page") && !old.contains("http_endpoints"));
+    Ok(())
+}

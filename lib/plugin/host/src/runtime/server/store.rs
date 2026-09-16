@@ -242,6 +242,7 @@ impl PluginStore {
         }
         ensure_unique_pages(&pages)?;
         Ok(RuntimeCatalog {
+            plugin_settings: Vec::new(),
             session_context: String::new(),
             context: String::new(),
             page_versions,

@@ -8,5 +8,7 @@ mod frontend;
 pub(crate) mod frontend_preload;
 #[cfg(feature = "server")]
 pub mod server;
+#[cfg(any(feature = "web", feature = "desktop"))]
+pub(crate) mod settings;
 
 pub use model::*;

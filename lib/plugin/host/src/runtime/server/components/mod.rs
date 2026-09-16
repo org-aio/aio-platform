@@ -207,7 +207,7 @@ impl Components {
             .await?;
         let description = slot.snapshot().await.context("候选实例未激活")?.description;
         slot.deactivate().await;
-        Ok(description.into())
+        model::Description::from(description).with_settings(&bundle.verify()?)
     }
 }
 
@@ -238,3 +238,6 @@ fn load_keyring(path: &Path) -> Result<Keyring> {
     let key: [u8; 32] = serde_json::from_slice(&std::fs::read(path)?)?;
     Keyring::new("primary".into(), [("primary".into(), key)].into())
 }
+
+#[cfg(test)]
+mod settings_tests;

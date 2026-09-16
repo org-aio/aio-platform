@@ -21,11 +21,15 @@ pub(super) fn router(gateway: Arc<Gateway>) -> Router {
         .route("/invoke", post(invoke))
         .route("/egress", post(egress))
         .route("/egress/models", get(models))
+        .route("/egress/http", post(super::http_egress::request))
         .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
         .with_state(gateway)
 }
 
-async fn active(gateway: &Gateway, headers: &HeaderMap) -> Result<Arc<super::super::Components>> {
+pub(super) async fn active(
+    gateway: &Gateway,
+    headers: &HeaderMap,
+) -> Result<Arc<super::super::Components>> {
     let token = headers
         .get("x-aio-token")
         .and_then(|v| v.to_str().ok())

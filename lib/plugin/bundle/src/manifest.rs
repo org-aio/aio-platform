@@ -14,6 +14,8 @@ pub struct BundleManifest {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ComponentManifest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings_page: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dependencies: Vec<az_plugin_manifest::RepositoryDependency>,
     #[serde(default)]
@@ -52,6 +54,8 @@ pub struct ProcessManifest {
     pub image: String,
     #[serde(default)]
     pub endpoints: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub http_endpoints: Vec<String>,
     #[serde(default)]
     pub services: Vec<String>,
 }
@@ -80,6 +84,16 @@ impl BundleManifest {
             "只接受 v2 清单"
         );
         let plugin = &manifest.plugin;
+        if let Some(page) = &plugin.settings_page {
+            ensure!(
+                !page.is_empty()
+                    && page.len() <= 128
+                    && page
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b)),
+                "设置页面 ID 无效"
+            );
+        }
         az_plugin_manifest::validate_dependencies(&plugin.dependencies)?;
         ensure!(
             plugin.permissions.len() <= 64
@@ -152,12 +166,19 @@ impl BundleManifest {
                 "process 镜像无效"
             );
             ensure!(
-                process.endpoints.len() <= 16 && process.services.len() <= 16,
+                process.endpoints.len() <= 16
+                    && process.http_endpoints.len() <= 16
+                    && process.services.len() <= 16,
                 "process 授权超过配额"
             );
             for endpoint in &process.endpoints {
                 az_plugin_contract::process::model_endpoint(endpoint)
                     .map_err(anyhow::Error::msg)?;
+            }
+            for endpoint in &process.http_endpoints {
+                let url = az_plugin_contract::process::model_endpoint(endpoint)
+                    .map_err(anyhow::Error::msg)?;
+                ensure!(url.scheme() == "https", "第三方 HTTP 出站仅接受 HTTPS");
             }
             for service in &process.services {
                 ensure!(

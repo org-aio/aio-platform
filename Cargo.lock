@@ -525,7 +525,7 @@ dependencies = [
 
 [[package]]
 name = "az-plugin-host"
-version = "2026.9.17"
+version = "2026.9.18"
 dependencies = [
  "anyhow",
  "async-trait",

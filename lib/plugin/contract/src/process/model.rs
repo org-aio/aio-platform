@@ -10,6 +10,8 @@ pub struct Configuration {
     pub ingress_token: String,
     pub broker_socket: String,
     pub endpoints: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub http_endpoints: Vec<String>,
     pub services: Vec<String>,
 }
 

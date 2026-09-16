@@ -132,7 +132,15 @@ fn append(
         catalog
             .page_versions
             .insert(id.clone(), format!("{digest}:{generation}"));
-        if p.surface != "workspace" {
+        if p.surface == "settings" {
+            catalog
+                .plugin_settings
+                .push(crate::runtime::PluginSettingsPage {
+                    source_id: source.to_string(),
+                    label: description.label.clone(),
+                    page_id: id.clone(),
+                });
+        } else if p.surface != "workspace" {
             catalog.account_items.push(RuntimeAccountItem {
                 id: id.clone(),
                 label: p.label.clone(),

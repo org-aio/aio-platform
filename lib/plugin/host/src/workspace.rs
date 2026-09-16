@@ -77,6 +77,7 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
         "context": catalog.context,
         "pages": catalog.pages.iter().filter(|page| {
             !catalog.hidden_pages.contains(&page.id)
+                && !catalog.plugin_settings.iter().any(|item| item.page_id == page.id)
                 && matches!(page.body, runtime::PageBody::Frontend { .. })
                 && page.required_permission.as_deref().is_none_or(|permission| snapshot.permissions.iter().any(|item| item == permission))
         }).map(|page| serde_json::json!({ "id": page.id, "version": catalog.page_versions.get(&page.id) })).collect::<Vec<_>>()
@@ -126,13 +127,19 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
     let runtime_pages = catalog
         .pages
         .into_iter()
-        .filter(|page| !catalog.hidden_pages.contains(&page.id))
+        .filter(|page| {
+            !catalog.hidden_pages.contains(&page.id)
+                && !catalog
+                    .plugin_settings
+                    .iter()
+                    .any(|item| item.page_id == page.id)
+        })
         .map(|page| ApplicationRuntimePage {
             id: page.id,
             label: page.label,
             icon: page.icon,
-            scene_id: page.scene.id,
-            scene_label: page.scene.label,
+            scene_id: "workspace".into(),
+            scene_label: "工作空间".into(),
             menu_path: page
                 .menu_path
                 .into_iter()
@@ -157,6 +164,7 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
         }
         for context in [catalog.session_context] {
           az_ui_components::appearance::AppearanceScope { key: "{context}", user_key: catalog.user.handle.clone(),
+          runtime::settings::PluginSettingsHost { pages: catalog.plugin_settings.clone(), versions: catalog.page_versions.clone(), context: catalog.context.clone() }
           PluginApplication {
             application_label: config.label.clone(),
             pages: static_plugins.pages.clone(),

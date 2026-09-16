@@ -48,6 +48,28 @@ impl From<metadata::Description> for Description {
     }
 }
 
+impl Description {
+    pub(super) fn with_settings(
+        mut self,
+        bundle: &az_plugin_bundle::VerifiedBundle,
+    ) -> anyhow::Result<Self> {
+        if let Some(id) = &bundle.manifest().plugin.settings_page {
+            use anyhow::Context;
+            let page = self
+                .pages
+                .iter_mut()
+                .find(|page| &page.id == id)
+                .context("清单中的设置页面不存在")?;
+            anyhow::ensure!(
+                page.surface == "fullscreen" && page.scene.is_none() && page.menu_path.is_empty(),
+                "设置页必须声明为独立全屏页面，不能进入业务导航"
+            );
+            page.surface = "settings".into();
+        }
+        Ok(self)
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Request {
