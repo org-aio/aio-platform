@@ -17,6 +17,7 @@ use axum::{
 
 pub(in crate::runtime::server) fn router(state: RuntimeState) -> Router<RuntimeState> {
     Router::new()
+        .merge(super::worker_services::router())
         .route(
             "/api/runtime/components/publish",
             post(publish)

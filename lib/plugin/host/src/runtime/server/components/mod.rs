@@ -16,6 +16,7 @@ mod services;
 mod store;
 #[cfg(test)]
 mod tests;
+mod worker_services;
 
 use anyhow::{Context, Result, ensure};
 use az_plugin_bundle::Bundle;

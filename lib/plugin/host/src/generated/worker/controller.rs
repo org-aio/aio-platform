@@ -51,7 +51,7 @@ pub(super) fn token(headers: &HeaderMap) -> Result<String, RuntimeError> {
     }
     Err(RuntimeError::unauthorized("设备凭据无效"))
 }
-pub(super) async fn device(
+pub(crate) async fn device(
     state: &RuntimeState,
     headers: &HeaderMap,
 ) -> Result<DeviceIdentity, RuntimeError> {

@@ -55,11 +55,12 @@ impl Components {
     }
 
     pub async fn append_catalog(&self, tenant: &str, catalog: &mut RuntimeCatalog) -> Result<()> {
-        let rows=sqlx::query("SELECT s.id,s.git,i.digest,i.enabled,i.generation::TEXT,v.description,v.capabilities,v.metadata->>'title' AS title FROM component_sources s JOIN component_installations i ON i.source_id=s.id JOIN component_versions v ON v.digest=i.digest WHERE i.tenant_id=$1").bind(tenant).fetch_all(&self.pool).await?;
+        let rows=sqlx::query("SELECT s.id,s.git,coalesce(parent.id,s.id) AS menu_source,i.digest,i.enabled,i.generation::TEXT,v.description,v.capabilities,v.metadata->>'title' AS title FROM component_sources s LEFT JOIN component_sources parent ON parent.git=s.parent_git JOIN component_installations i ON i.source_id=s.id JOIN component_versions v ON v.digest=i.digest WHERE i.tenant_id=$1").bind(tenant).fetch_all(&self.pool).await?;
         for row in rows {
             append(
                 catalog,
                 row.try_get("id")?,
+                row.try_get("menu_source")?,
                 row.try_get("git")?,
                 row.try_get("digest")?,
                 row.try_get("generation")?,
@@ -72,10 +73,24 @@ impl Components {
             );
         }
         if tenant == "development" {
-            for (source, instance) in self.development.read().await.iter() {
+            let development = self.development.read().await;
+            for (source, instance) in development.iter() {
+                let parent = instance
+                    .bundle
+                    .manifest()
+                    .plugin
+                    .marketplace
+                    .as_ref()
+                    .and_then(|m| m.parent.as_ref());
+                let menu_source = development
+                    .iter()
+                    .find(|(_, candidate)| parent == Some(&candidate.repository))
+                    .map(|(id, _)| *id)
+                    .unwrap_or(*source);
                 append(
                     catalog,
                     *source,
+                    menu_source,
                     instance.source.clone(),
                     instance.bundle.digest().into(),
                     instance.generation.clone(),
@@ -102,6 +117,7 @@ impl Components {
 fn append(
     catalog: &mut RuntimeCatalog,
     source: Uuid,
+    menu_source: Uuid,
     git: String,
     digest: String,
     generation: String,
@@ -172,7 +188,7 @@ fn append(
                 .into_iter()
                 .enumerate()
                 .map(|(i, label)| MenuGroupDefinition {
-                    id: format!("component-{source}-{i}-{label}"),
+                    id: format!("component-{menu_source}-{i}-{label}"),
                     label,
                     icon: None,
                 })
@@ -203,6 +219,7 @@ mod tests {
         append(
             &mut catalog,
             Uuid::nil(),
+            Uuid::nil(),
             "plugin.git".into(),
             "revision".into(),
             "generation".into(),
@@ -214,6 +231,40 @@ mod tests {
         assert_eq!(catalog.plugin_settings.len(), 1);
         assert_eq!(catalog.plugin_settings[0].label, "用户看到的插件标题");
         assert_eq!(catalog.pages[0].label, "配置");
+        Ok(())
+    }
+    #[test]
+    fn child_plugins_share_the_parent_menu_without_sharing_page_identity() -> Result<()> {
+        let mut catalog: RuntimeCatalog = serde_json::from_value(serde_json::json!({
+            "session_context":"session","context":"workspace","page_versions":{},
+            "tenant":{"id":"tenant","label":"工作区"},"user":{"label":"用户","handle":"user","initials":"U"},"pages":[],"plugins":[]
+        }))?;
+        let parent = Uuid::new_v4();
+        for (source, id, label) in [
+            (parent, "chat", "对话"),
+            (Uuid::new_v4(), "memory", "记忆图谱"),
+        ] {
+            let description = serde_json::from_value(
+                serde_json::json!({"label":label,"pages":[{"id":id,"label":label,"entry":"index.html","scene":["workspace","工作空间"],"menu_path":["智能体"],"permission":null,"surface":"workspace"}]}),
+            )?;
+            append(
+                &mut catalog,
+                source,
+                parent,
+                "plugin.git".into(),
+                "revision".into(),
+                "generation".into(),
+                true,
+                label.into(),
+                description,
+                false,
+            );
+        }
+        assert_eq!(
+            catalog.pages[0].menu_path[0].id,
+            catalog.pages[1].menu_path[0].id
+        );
+        assert_ne!(catalog.pages[0].id, catalog.pages[1].id);
         Ok(())
     }
 }
