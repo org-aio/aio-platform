@@ -16,6 +16,7 @@ pub(crate) fn PluginSettingsHost(
     children: Element,
 ) -> Element {
     let mut groups = use_signal(Vec::new);
+    let selected_group = use_signal(|| None::<String>);
     use_effect(use_reactive((&pages,), move |(pages,)| {
         groups.set(
             pages
@@ -44,6 +45,7 @@ pub(crate) fn PluginSettingsHost(
         }
     });
     use_context_provider(|| ApplicationSettings {
+        selected: selected_group,
         groups: groups.into(),
         render,
     });
