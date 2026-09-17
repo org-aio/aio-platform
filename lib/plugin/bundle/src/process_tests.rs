@@ -43,7 +43,7 @@ fn process_requires_immutable_image_and_explicit_https_services() {
 fn process_accepts_workspace_execution_without_opening_arbitrary_capabilities() {
     assert!(
         BundleManifest::parse(&manifest(
-            "worker_capabilities = ['desktop.open-app', 'skills.sync', 'workspace.execute']"
+            "worker_capabilities = ['desktop.open-app', 'desktop.control', 'skills.sync', 'workspace.execute']"
         ))
         .is_ok()
     );

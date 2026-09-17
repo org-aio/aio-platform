@@ -146,7 +146,7 @@ impl BundleManifest {
         validate_relative_path(&plugin.runtime.artifact)?;
         if let Some(process) = &plugin.runtime.process {
             ensure!(
-                process.worker_capabilities.len() <= 3
+                process.worker_capabilities.len() <= 4
                     && process
                         .worker_capabilities
                         .iter()
