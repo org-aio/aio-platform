@@ -57,7 +57,7 @@ function prepare(env=process.env) {
 
 function npm(args, capture=false) {
   const executable=process.env.npm_execpath;
-  const options={encoding:'utf8',stdio:capture?['ignore','pipe','inherit']:'inherit'};
+  const options={encoding:'utf8',stdio:capture?['ignore','pipe','inherit']:'inherit',env:{...process.env,npm_config_registry:registry}};
   if (executable && /npm-cli\.js$/.test(executable) && fs.existsSync(executable)) return execFileSync(process.execPath,[executable,...args],options);
   if(process.platform==='win32') fail('请通过 npx @zjarlin/aio 调用发布工具');
   return execFileSync('npm',args,options);
@@ -93,22 +93,23 @@ function sameRelease(value, release, integrity) {
   return value?.name===release.package && value.version===release.version && value.aio?.source?.repository===release.source.repository && value.aio?.source?.revision===release.source.revision && value.aio?.source?.reference===release.source.reference && (!integrity || value.dist?.integrity===integrity);
 }
 
-async function publish() {
+async function publish(runNpm = npm) {
   const release=read(stateFile);
   fs.mkdirSync('.aio/npm',{recursive:true});
-  const packages=JSON.parse(npm(['pack','--ignore-scripts','--json','--pack-destination','.aio/npm'],true));
+  const packages=JSON.parse(runNpm(['pack','--ignore-scripts','--json','--pack-destination','.aio/npm'],true));
   if(packages.length!==1) fail('必须生成一个 npm 包');
   const archive=path.resolve('.aio/npm',packages[0].filename);
   const integrity='sha512-'+createHash('sha512').update(fs.readFileSync(archive)).digest('base64');
   // 使用打包后的命令做版本验证，不执行 setup 或其他本机修改。
-  const reported=npm(['exec','--yes',`--package=${archive}`,'--',release.command,'--version'],true).trim();
+  const reported=runNpm(['exec','--yes',`--package=${archive}`,'--',release.command,'--version'],true).trim();
   if(!reported.split(/\s+/).includes(release.version)) fail(`打包后 CLI --version 必须返回 ${release.version}`);
   const existing=await metadata(release.package,release.version);
   if(existing) {
     if(!sameRelease(existing,release,integrity)) fail('npm 已存在不同内容的同名版本，拒绝覆盖');
     console.log('npm 已有相同发布，继续同步市场');
   } else {
-    npm(['publish',archive,'--registry',registry,'--access','public','--tag',release.tag,'--provenance','--ignore-scripts']);
+    // npm OIDC 根据仓库可见性自动生成来源证明，私有仓库不能强制开启。
+    runNpm(['publish',archive,'--registry',registry,'--access','public','--tag',release.tag,'--ignore-scripts']);
   }
   write(stateFile,{...release,integrity});
 }
@@ -140,7 +141,7 @@ async function sync(wait = ms => new Promise(resolve => setTimeout(resolve, ms))
   fail('npm 或市场尚未就绪；重新运行相同工作流可继续同步，无需更改版本');
 }
 
-module.exports={versionFor,configuration,sameRelease,prepare,sync};
+module.exports={versionFor,configuration,sameRelease,prepare,publish,sync};
 if(!module.parent) {
   const mode=process.argv[1];
   Promise.resolve().then(()=>{

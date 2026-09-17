@@ -63,7 +63,7 @@ dependencies = [
 
 [[package]]
 name = "aio-host"
-version = "2026.9.18"
+version = "2026.9.22"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -400,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "az-aio-cli"
-version = "2026.9.18"
+version = "2026.9.22"
 dependencies = [
  "anyhow",
  "az-plugin-bundle",
@@ -510,7 +510,7 @@ dependencies = [
 
 [[package]]
 name = "az-plugin-development"
-version = "2026.9.18"
+version = "2026.9.22"
 dependencies = [
  "anyhow",
  "az-plugin-manifest",
@@ -525,7 +525,7 @@ dependencies = [
 
 [[package]]
 name = "az-plugin-host"
-version = "2026.9.21"
+version = "2026.9.22"
 dependencies = [
  "anyhow",
  "async-trait",

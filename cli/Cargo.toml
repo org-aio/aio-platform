@@ -1,6 +1,6 @@
 [package]
 name = "az-aio-cli"
-version = "2026.9.18"
+version = "2026.9.22"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

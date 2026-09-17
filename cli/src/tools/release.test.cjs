@@ -1,6 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {versionFor,configuration,sameRelease,sync}=require('./release.cjs');
+const {versionFor,configuration,sameRelease,publish,sync}=require('./release.cjs');
 test('开发版本保持高于基础版本，标签必须精确匹配',()=>{
   assert.deepEqual(versionFor('0.4.1','refs/heads/main','7','a'.repeat(40)),{version:'0.4.2-dev.7.gaaaaaaaaaaaa',tag:'next'});
   assert.deepEqual(versionFor('0.4.2','refs/tags/v0.4.2','8','a'.repeat(40)),{version:'0.4.2',tag:'latest'});
@@ -20,6 +20,37 @@ test('重复发布需匹配源码和包完整性',()=>{
   assert(!sameRelease(published,release,'sha512-other'));
   assert(!sameRelease({...published,aio:{source:{...release.source,reference:'refs/heads/other'}}},release));
   assert(!sameRelease({...published,aio:{source:{...release.source,repository:'other/tool'}}},release));
+});
+
+test('私有仓库发布交给 npm OIDC 处理来源证明并保持打包校验',async t=>{
+  const fs=require('node:fs');
+  const path=require('node:path');
+  const root=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'aio-private-release-'));
+  const previous=process.cwd();
+  const fetch=global.fetch;
+  t.after(()=>{global.fetch=fetch;process.chdir(previous);fs.rmSync(root,{recursive:true,force:true});});
+  process.chdir(root);
+  const release={package:'tool',command:'tool',version:'0.1.1-dev.1',tag:'next',source:{repository:'owner/private-tool',revision:'a'.repeat(40),reference:'refs/heads/main'}};
+  fs.mkdirSync('.aio');
+  fs.writeFileSync('.aio/cli-release.json',JSON.stringify(release));
+  global.fetch=async ()=>new Response('{}',{status:404});
+  const commands=[];
+  await publish(args=>{
+    commands.push(args[0]);
+    if(args[0]==='pack') {
+      fs.writeFileSync('.aio/npm/tool.tgz','verified archive');
+      return JSON.stringify([{filename:'tool.tgz'}]);
+    }
+    if(args[0]==='exec') return release.version;
+    assert.equal(args[0],'publish');
+    assert(!args.some(arg=>arg.startsWith('--provenance')));
+    assert(args.includes('--ignore-scripts'));
+    assert.equal(args[args.indexOf('--tag')+1],'next');
+  });
+  assert.deepEqual(commands,['pack','exec','publish']);
+  const recorded=JSON.parse(fs.readFileSync('.aio/cli-release.json','utf8'));
+  assert.equal(recorded.integrity,'sha512-'+require('node:crypto').createHash('sha512').update('verified archive').digest('base64'));
+  assert.deepEqual(recorded.source,release.source);
 });
 
 test('npm 传播超过两分钟时自动继续并只同步成功的相同版本',async t=>{
