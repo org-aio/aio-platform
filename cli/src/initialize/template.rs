@@ -106,14 +106,15 @@ fn App() -> dioxus::prelude::Element {
     use az_dioxus_admin_shell::{ApplicationUser, PluginApplication};
     use dioxus::prelude::*;
 
-    let pages = match plugins::pages() {
-        Ok(pages) => pages,
+    let catalog = match plugins::client_catalog() {
+        Ok(catalog) => catalog,
         Err(error) => return rsx! { p { "加载应用页面失败: {error}" } },
     };
     rsx! {
         PluginApplication {
             application_label: __APPLICATION_TITLE__,
-            pages,
+            pages: catalog.pages,
+            topbar_items: catalog.topbar_items,
             user: ApplicationUser {
                 label: "用户".to_owned(),
                 handle: String::new(),
@@ -179,14 +180,23 @@ pub fn plugins_source(clients: &[String], servers: &[String]) -> String {
         .collect::<String>();
     let source = r#"// 此文件由 aio plugin sync 生成。
 #[cfg(any(feature = "web", feature = "desktop"))]
-pub fn pages() -> anyhow::Result<Vec<az_dioxus_admin_shell::ApplicationPage>> {
+pub struct ClientCatalog {
+    pub pages: Vec<az_dioxus_admin_shell::ApplicationPage>,
+    pub topbar_items: Vec<az_dioxus_admin_shell::ApplicationTopbarItem>,
+}
+
+#[cfg(any(feature = "web", feature = "desktop"))]
+pub fn client_catalog() -> anyhow::Result<ClientCatalog> {
     use anyhow::Context as _;
     use dill::{Catalog, CatalogBuilder};
 
     let mut builder = CatalogBuilder::new();
 __CLIENT_REGISTRATIONS__    builder.validate().context("校验页面插件依赖图失败")?;
     let catalog: Catalog = builder.build();
-    az_dioxus_admin_shell::collect_application_pages(&catalog)
+    Ok(ClientCatalog {
+        pages: az_dioxus_admin_shell::collect_application_pages(&catalog)?,
+        topbar_items: az_dioxus_admin_shell::collect_application_topbar_items(&catalog)?,
+    })
 }
 
 #[cfg(feature = "server")]

@@ -24,7 +24,7 @@ fn App() -> dioxus::prelude::Element {
         az_plugin_host::DevelopmentStatus {}
         az_plugin_host::Workspace {
             config: az_plugin_host::composition::BrowserComposition {
-                label: "AIO Sandbox".into(), pages: vec![], account_items: vec![],
+                label: "AIO Sandbox".into(), pages: vec![], account_items: vec![], topbar_items: vec![],
                 login: || rsx! { p { "开发会话已结束" } }, account_action: |_| {},
             }
         }

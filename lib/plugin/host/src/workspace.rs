@@ -209,6 +209,7 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
             application_label: config.label.clone(),
             pages: static_plugins.pages.clone(),
             account_items: account_items.clone(),
+            topbar_items: config.topbar_items.clone(),
             runtime_pages: runtime_pages.clone(),
             runtime_page_versions: catalog.page_versions.clone(),
             prepared_pages: prepared_pages.clone(),
