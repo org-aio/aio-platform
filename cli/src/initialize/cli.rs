@@ -106,7 +106,8 @@ mod tests {
         let package: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(root.path().join("package.json"))?)?;
         assert_eq!(package["name"], "my-cli");
-        let skill = fs::read_to_string(root.path().join("skills/my-cli/SKILL.md"))?;
+        let skill =
+            fs::read_to_string(root.path().join("skills/my-cli/SKILL.md"))?.replace("\r\n", "\n");
         let header = skill
             .strip_prefix("---\n")
             .and_then(|s| s.split_once("\n---"))

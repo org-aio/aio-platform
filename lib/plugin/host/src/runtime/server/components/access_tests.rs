@@ -49,7 +49,12 @@ impl IdentityProvider for Identity {
 async fn tenant_installation_grants_members_and_menu_visibility_preserves_runtime() -> Result<()> {
     let database = std::env::var("AIO_COMPONENT_TEST_DATABASE_URL")?;
     ensure!(
-        database.contains("localhost") && database.split('?').next().unwrap().ends_with("/component_market_test"),
+        database.contains("localhost")
+            && database
+                .split('?')
+                .next()
+                .unwrap()
+                .ends_with("/component_market_test"),
         "只接受本机独立测试库"
     );
     let root = tempfile::tempdir()?;
