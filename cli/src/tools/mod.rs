@@ -20,6 +20,21 @@ pub(super) fn run(arguments: &[String]) -> Result<()> {
         }
         ["helper", "install"] => az_tool::protocol::register(&std::env::current_exe()?),
         ["helper", "uninstall"] => az_tool::protocol::unregister(),
+        ["tool", "capabilities"] => {
+            println!("{{\"install\":true}}");
+            Ok(())
+        }
+        ["tool", "install", id, "--version", version, "--yes"] => {
+            // 由已配对设备接收网页确认后的任务，仍只读取官方市场的固定版本。
+            let link = InstallLink::parse(
+                &InstallLink {
+                    id: (*id).into(),
+                    version: (*version).into(),
+                }
+                .to_string(),
+            )?;
+            Store::user()?.install(install::fetch(&link)?)
+        }
         ["tool", "install", id, "--version", version] => install_link(InstallLink::parse(
             &InstallLink {
                 id: (*id).into(),

@@ -6,6 +6,8 @@ use sqlx::PgPool;
 pub(in crate::runtime::server) async fn migrate(pool: &PgPool) -> Result<()> {
     sqlx::raw_sql("CREATE TABLE IF NOT EXISTS marketplace_tools (id TEXT NOT NULL, version TEXT NOT NULL, manifest JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY(id, version))").execute(pool).await?;
     sqlx::raw_sql("CREATE TABLE IF NOT EXISTS marketplace_tool_details (id TEXT PRIMARY KEY, document JSONB NOT NULL)").execute(pool).await?;
+    sqlx::raw_sql("CREATE TABLE IF NOT EXISTS marketplace_tool_removals (id TEXT PRIMARY KEY, removed_at TIMESTAMPTZ NOT NULL DEFAULT now())").execute(pool).await?;
+    sqlx::raw_sql("CREATE TABLE IF NOT EXISTS worker_tool_inventory (device_id TEXT PRIMARY KEY, inventory JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now())").execute(pool).await?;
     sqlx::raw_sql("CREATE TABLE IF NOT EXISTS marketplace_tool_publications (id TEXT NOT NULL, version TEXT NOT NULL, git TEXT NOT NULL, source_revision TEXT NOT NULL, integrity TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY(id,version), FOREIGN KEY(id,version) REFERENCES marketplace_tools(id,version))").execute(pool).await?;
     import(
         pool,
@@ -41,7 +43,7 @@ pub(in crate::runtime::server) async fn get(
     version: &str,
 ) -> Result<Option<ToolManifest>> {
     let value: Option<serde_json::Value> =
-        sqlx::query_scalar("SELECT manifest FROM marketplace_tools WHERE id=$1 AND version=$2")
+        sqlx::query_scalar("SELECT manifest FROM marketplace_tools WHERE id=$1 AND version=$2 AND NOT EXISTS(SELECT 1 FROM marketplace_tool_removals WHERE id=$1)")
             .bind(id)
             .bind(version)
             .fetch_optional(pool)
@@ -63,7 +65,7 @@ fn decode(value: serde_json::Value) -> Result<ToolManifest> {
 
 pub(in crate::runtime::server) async fn entries(pool: &PgPool) -> Result<Vec<MarketplaceItem>> {
     let rows: Vec<serde_json::Value> =
-        sqlx::query_scalar("SELECT manifest FROM marketplace_tools ORDER BY id, created_at")
+        sqlx::query_scalar("SELECT manifest FROM marketplace_tools t WHERE NOT EXISTS(SELECT 1 FROM marketplace_tool_removals r WHERE r.id=t.id) ORDER BY id, created_at")
             .fetch_all(pool)
             .await?;
     let mut latest = std::collections::BTreeMap::<String, ToolManifest>::new();
@@ -95,6 +97,16 @@ pub(in crate::runtime::server) async fn entries(pool: &PgPool) -> Result<Vec<Mar
     Ok(latest.into_values().map(Into::into).collect())
 }
 
+// 保留版本历史和删除标记，避免启动导入或自动发布使过时条目重新出现。
+pub(super) async fn remove(pool: &PgPool, id: &str) -> Result<()> {
+    ensure!(exists(pool, id).await?, "CLI 条目不存在");
+    sqlx::query("INSERT INTO marketplace_tool_removals(id) VALUES($1) ON CONFLICT(id) DO NOTHING")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 fn apply_metadata(manifest: &mut ToolManifest, doc: &Documentation) {
     manifest.title = doc.metadata.title.clone();
     manifest.summary = doc.metadata.summary.clone();
@@ -114,6 +126,10 @@ pub(super) async fn register(
         sqlx::query("INSERT INTO marketplace_tool_details(id,document) VALUES($1,$2) ON CONFLICT(id) DO NOTHING")
             .bind(&manifest.id).bind(serde_json::to_value(doc)?).execute(&mut *tx).await?;
     }
+    sqlx::query("DELETE FROM marketplace_tool_removals WHERE id=$1")
+        .bind(&manifest.id)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(())
 }

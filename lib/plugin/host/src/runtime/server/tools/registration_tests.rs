@@ -129,6 +129,32 @@ async fn registration_http_auth_persistence_metadata_and_no_server_execution() -
             .is_some()
     );
     assert!(!marker.exists());
+    exercise_devices(&client, &base, &state, &manifest).await?;
+    let removal = format!("{base}/api/runtime/tools/{}", manifest.id);
+    assert_eq!(client.delete(&removal).send().await?.status(), 401);
+    assert_eq!(
+        client
+            .delete(&removal)
+            .header("x-test-role", "manager")
+            .send()
+            .await?
+            .status(),
+        403
+    );
+    client
+        .delete(&removal)
+        .header("x-test-role", "publisher")
+        .send()
+        .await?
+        .error_for_status()?;
+    assert_eq!(
+        client
+            .get(format!("{base}/api/runtime/tools/{}/1.0.0", manifest.id))
+            .send()
+            .await?
+            .status(),
+        404
+    );
     server.abort();
     sqlx::query("DELETE FROM marketplace_tool_details WHERE id=$1")
         .bind(&manifest.id)
@@ -138,6 +164,151 @@ async fn registration_http_auth_persistence_metadata_and_no_server_execution() -
         .bind(&manifest.id)
         .execute(&state.store.pool)
         .await?;
+    Ok(())
+}
+
+async fn exercise_devices(
+    client: &reqwest::Client,
+    base: &str,
+    state: &RuntimeState,
+    manifest: &az_tool::ToolManifest,
+) -> Result<()> {
+    use crate::{generated::worker::model::PairRequest, identity::SessionContext};
+    use serde_json::json;
+    let session = SessionContext {
+        session_id: "test".into(),
+        user_id: "publisher".into(),
+        account: "publisher".into(),
+        display_name: String::new(),
+        tenant_id: "test".into(),
+        tenant_label: String::new(),
+        permissions: vec![],
+    };
+    let pairing = state
+        .workers
+        .pair(PairRequest {
+            label: "安装验收设备".into(),
+            platform: "darwin".into(),
+            capabilities: vec!["space.scan".into()],
+        })
+        .await?;
+    state.workers.approve(&session, &pairing.code).await?;
+    let identity = state.workers.identity(&pairing.token).await?;
+    state.workers.heartbeat(&identity, None).await?;
+    let devices_url = format!("{base}/api/runtime/tools/{}/devices", manifest.id);
+    let snapshot: serde_json::Value = client
+        .get(&devices_url)
+        .header("x-test-role", "publisher")
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert_eq!(snapshot["data"][0]["checked_at"], serde_json::Value::Null);
+    assert_eq!(snapshot["data"][0]["can_install"], false);
+    let install_url = format!("{base}/api/runtime/tools/{}/install", manifest.id);
+    let install = json!({"worker_id":pairing.device_id,"version":manifest.version});
+    assert_eq!(
+        client
+            .post(&install_url)
+            .header("x-test-role", "publisher")
+            .json(&install)
+            .send()
+            .await?
+            .status(),
+        400
+    );
+    let report_url = format!("{base}/api/runtime/workers/tools/inventory");
+    let mut inventory =
+        json!({"tools":{},"packages":{"codex-model-sync":"0.4.1"},"can_install":true,"error":null});
+    assert_eq!(
+        client
+            .post(&report_url)
+            .json(&inventory)
+            .send()
+            .await?
+            .status(),
+        401
+    );
+    client
+        .post(&report_url)
+        .bearer_auth(&pairing.token)
+        .json(&inventory)
+        .send()
+        .await?
+        .error_for_status()?;
+    let other: serde_json::Value = client
+        .get(&devices_url)
+        .header("x-test-role", "manager")
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert_eq!(other["data"], json!([]));
+    assert_eq!(
+        client
+            .post(&install_url)
+            .header("x-test-role", "manager")
+            .json(&install)
+            .send()
+            .await?
+            .status(),
+        404
+    );
+    let npm: serde_json::Value = client
+        .get(format!("{base}/api/runtime/tools/codex-model-sync/devices"))
+        .header("x-test-role", "publisher")
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert_eq!(npm["data"][0]["installed"]["version"], "0.4.1");
+    let task: serde_json::Value = client
+        .post(&install_url)
+        .header("x-test-role", "publisher")
+        .json(&install)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert_eq!(task["data"]["capability"], "tools.install");
+    assert_eq!(task["data"]["worker_id"], pairing.device_id);
+    assert_eq!(
+        task["data"]["input"],
+        json!({"id":manifest.id,"version":manifest.version})
+    );
+    inventory["tools"][&manifest.id] = json!({"version":manifest.version,"state":"installed"});
+    client
+        .post(&report_url)
+        .bearer_auth(&pairing.token)
+        .json(&inventory)
+        .send()
+        .await?
+        .error_for_status()?;
+    assert_eq!(
+        client
+            .post(&install_url)
+            .header("x-test-role", "publisher")
+            .json(&install)
+            .send()
+            .await?
+            .status(),
+        400
+    );
+    state.workers.revoke(&session, &pairing.device_id).await?;
+    assert_eq!(
+        client
+            .post(&report_url)
+            .bearer_auth(&pairing.token)
+            .json(&inventory)
+            .send()
+            .await?
+            .status(),
+        401
+    );
     Ok(())
 }
 

@@ -60,5 +60,18 @@ async fn exercise(pool: &PgPool) -> Result<()> {
         super::storage::get(pool, "codex-model-sync", "0.4.1").await?,
         Some(original)
     );
+    super::storage::remove(pool, "codex-model-sync").await?;
+    super::migrate(pool).await?;
+    assert!(super::entries(pool).await?.is_empty());
+    assert!(
+        super::storage::get(pool, "codex-model-sync", "0.4.1")
+            .await?
+            .is_none()
+    );
+    let retained: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM marketplace_tools WHERE id='codex-model-sync'")
+            .fetch_one(pool)
+            .await?;
+    assert_eq!(retained, 2);
     Ok(())
 }
