@@ -21,8 +21,8 @@ getrandom = { version = "0.4.2", optional = true }
 axum = { version = "0.8.6", optional = true }
 dill = "0.15.0"
 dioxus = { version = "=0.7.9", default-features = false, features = ["macro", "html", "signals"], optional = true }
-az-dioxus-admin-shell = { git = "https://github.com/zjarlin/dioxus-admin-workbench.git", rev = "75f69b0cfab604d6ab1047b967c1adb72a2a0521", default-features = false, optional = true }
-az-ui-components = { git = "https://github.com/zjarlin/dioxus-admin-workbench.git", rev = "75f69b0cfab604d6ab1047b967c1adb72a2a0521", optional = true }
+az-dioxus-admin-shell = { git = "https://github.com/zjarlin/dioxus-admin-workbench.git", rev = "067df8cc67a44fbed3638f4ccec3e6379af7ca9f", default-features = false, optional = true }
+az-ui-components = { git = "https://github.com/zjarlin/dioxus-admin-workbench.git", rev = "067df8cc67a44fbed3638f4ccec3e6379af7ca9f", optional = true }
 az-plugin-manifest = { path = "../manifest", default-features = false }
 az-plugin-package = { path = "../package", optional = true }
 gloo-net = { version = "0.6.0", features = ["http", "json"], optional = true }
