@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 const DESKTOP: &str = "desktop.open-app";
+const CONTROL: &str = "desktop.control";
 const WORKSPACE: &str = "workspace.execute";
 
 /// 进程身份与用户范围由宿主验证，模型参数不能指定其他账号。
@@ -107,7 +108,10 @@ async fn execute(gateway: &Gateway, headers: &HeaderMap, request: Request) -> Re
             Ok(serde_json::to_value(task)?)
         }
         "submit" => {
-            ensure!(capability == WORKSPACE, "工作区执行能力无效");
+            ensure!(
+                [WORKSPACE, CONTROL].contains(&capability),
+                "设备执行能力无效"
+            );
             let task = components
                 .workers
                 .enqueue(
@@ -115,7 +119,7 @@ async fn execute(gateway: &Gateway, headers: &HeaderMap, request: Request) -> Re
                     SubmitTask {
                         id: request.request_id.context("请求 ID 缺失")?,
                         worker_id: request.worker_id.context("设备 ID 缺失")?,
-                        capability: WORKSPACE.into(),
+                        capability: capability.into(),
                         input: request.input.context("工作区任务输入缺失")?,
                     },
                 )
@@ -155,7 +159,8 @@ fn requested_capabilities<'a>(
         .iter()
         .map(String::as_str)
         .filter(|granted| {
-            [DESKTOP, WORKSPACE].contains(granted) && (capability == "*" || *granted == capability)
+            [DESKTOP, WORKSPACE, CONTROL].contains(granted)
+                && (capability == "*" || *granted == capability)
         })
         .collect();
     ensure!(!capabilities.is_empty(), "插件未获设备授权");

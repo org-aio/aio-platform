@@ -25,8 +25,8 @@ worker 配对复用 AIO 当前登录账号、工作区和成员有效性。设�
 
 进程 broker 的 `POST /workers` 使用原有 `x-aio-token`，`tenantId`、`userId` 仍由宿主核验插件来源和成员有效性。可选 `capability` 默认 `desktop.open-app`，现有 `openApp` 调用保持不变：
 
-- `{"tenantId":"...","userId":"...","operation":"list","capability":"workspace.execute"}` 发现工作区设备；仅 `list` 支持 `capability:"*"`，返回插件已获授权的 `desktop.open-app` 或 `workspace.execute` 任一能力设备。
-- `{"tenantId":"...","userId":"...","operation":"submit","capability":"workspace.execute","workerId":"...","requestId":"UUID","input":{"action":"describe"}}` 创建任务。`submit` 只接受 `workspace.execute`；重复请求 ID 必须具有相同设备、能力和输入。
+- `{"tenantId":"...","userId":"...","operation":"list","capability":"workspace.execute"}` 发现工作区设备；仅 `list` 支持 `capability:"*"`，返回插件已获授权的 `desktop.open-app`、`workspace.execute` 或 `desktop.control` 任一能力设备。
+- `{"tenantId":"...","userId":"...","operation":"submit","capability":"workspace.execute","workerId":"...","requestId":"UUID","input":{"action":"describe"}}` 创建任务。`submit` 接受 `workspace.execute` 和 `desktop.control`；重复请求 ID 必须具有相同设备、能力和输入。
 - `{"tenantId":"...","userId":"...","operation":"task","capability":"workspace.execute","taskId":"UUID"}` 查询任务；把 `operation` 改成 `cancel` 可取消任务。任务实际能力必须与请求一致，并包含在插件授权中。
 
 部署者仍需显式配置 `AIO_PROCESS_WORKER_CAPABILITIES` 和插件清单授权，开通设备能力不会自动扩充宿主进程授权。
@@ -34,3 +34,9 @@ worker 配对复用 AIO 当前登录账号、工作区和成员有效性。设�
 聚焦回归：`AIO_TEST_DATABASE_URL=... cargo test -p az-plugin-host --features server process::workers -- --include-ignored`，覆盖设备开关、取消幂等、租户/用户/来源/能力隔离以及单设备领取约束。使用独立测试库，并按组件运行时要求先执行 `REVOKE ALL ON SCHEMA public FROM PUBLIC`；测试在随机独立 schema 中创建和清理业务表。
 
 验证：宿主单元测试，以及隔离 PostgreSQL 的 `worker_pairing_tasks_archives_and_revocation_end_to_end`（环境变量 AIO_TEST_DATABASE_URL / AIO_SPACE_TEST_CLI）。后者验证长轮询等待和唤醒、重复领取、完成回执重传、归档恢复、跨用户拒绝和等待中撤权。真实 NAT / 防火墙证据由产品发布验收文档记录。
+
+## 原生桌面控制
+
+`POST /api/runtime/workers/desktop/access` 使用设备 Bearer 凭据与 `{"enabled":true|false}` 单独开关 `desktop.control`，不接受浏览器凭据。关闭会取消该能力的未完成任务，其他能力保留。宿主 process 清单及 `AIO_PROCESS_WORKER_CAPABILITIES` 也须显式授予此能力。
+
+桌面 submit 输入固定为 session UUID、action、arguments 和可选 observation UUID。允许列举、观察、激活应用和固定鼠标/键盘动作；输入限额沿用 32768 字节，写操作必须带 observation。worker 再校验本机开关、单会话独占和观察凭据有效性。宿主只路由到用户设备，不操作服务端桌面；图片回执沿原任务结果通道传输。原生权限与应用兼容性由设备实际检查，complete 不等于用户目标已完成。

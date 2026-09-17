@@ -39,6 +39,58 @@ pub(super) fn validate_workspace_input(input: &serde_json::Value) -> Result<()> 
         _ => anyhow::bail!("工作区操作无效"),
     }
 }
+/// 桌面仅接受固定 OCU 工具；本机仍需独立开启授权并验证观察凭据。
+pub(super) fn validate_desktop_input(input: &serde_json::Value) -> Result<()> {
+    let object = input
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("桌面输入必须为对象"))?;
+    ensure!(
+        object
+            .keys()
+            .all(|key| ["session", "action", "arguments", "observation"].contains(&key.as_str())),
+        "桌面输入字段无效"
+    );
+    uuid::Uuid::parse_str(
+        input["session"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("桌面会话缺失"))?,
+    )?;
+    let action = input["action"].as_str().unwrap_or_default();
+    ensure!(
+        [
+            "list_apps",
+            "get_app_state",
+            "activate_app",
+            "click",
+            "type_text",
+            "press_key",
+            "scroll",
+            "drag",
+            "set_value",
+            "perform_secondary_action",
+            "release"
+        ]
+        .contains(&action),
+        "桌面动作未开放"
+    );
+    ensure!(input["arguments"].is_object(), "桌面参数必须为对象");
+    if !["list_apps", "release"].contains(&action) {
+        ensure!(
+            input["arguments"]["app"]
+                .as_str()
+                .is_some_and(|app| !app.trim().is_empty() && app.len() <= 256),
+            "应用名称无效"
+        );
+    }
+    if !["list_apps", "get_app_state", "activate_app", "release"].contains(&action) {
+        uuid::Uuid::parse_str(
+            input["observation"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("需要最新界面观察凭据"))?,
+        )?;
+    }
+    Ok(())
+}
 pub(super) fn worker(row: sqlx::postgres::PgRow) -> Result<Worker> {
     Ok(Worker {
         id: row.try_get("id")?,
@@ -61,4 +113,22 @@ pub(super) fn task(row: sqlx::postgres::PgRow) -> Result<Task> {
         lease: row.try_get("lease")?,
         created_at: row.try_get("created_at_ms")?,
     })
+}
+
+#[cfg(test)]
+mod desktop_tests {
+    use super::*;
+    use serde_json::json;
+    use uuid::Uuid;
+    #[test]
+    fn actions_require_fresh_observation() -> Result<()> {
+        let input = json!({"session":Uuid::new_v4(),"action":"click","arguments":{"app":"WPS","element_index":"1"}});
+        assert!(validate_desktop_input(&input).is_err());
+        let mut observed = input;
+        observed["observation"] = json!(Uuid::new_v4());
+        validate_desktop_input(&observed)?;
+        observed["action"] = json!("shell");
+        assert!(validate_desktop_input(&observed).is_err());
+        Ok(())
+    }
 }

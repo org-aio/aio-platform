@@ -152,7 +152,10 @@ impl BundleManifest {
                         .iter()
                         .all(|capability| matches!(
                             capability.as_str(),
-                            "desktop.open-app" | "skills.sync" | "workspace.execute"
+                            "desktop.open-app"
+                                | "desktop.control"
+                                | "skills.sync"
+                                | "workspace.execute"
                         )),
                 "process 设备能力未开放"
             );

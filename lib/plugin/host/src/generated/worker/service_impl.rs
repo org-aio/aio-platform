@@ -119,6 +119,9 @@ impl WorkerService for WorkerServiceImpl {
         if request.capability == "workspace.execute" {
             validate_workspace_input(&request.input)?;
         }
+        if request.capability == "desktop.control" {
+            validate_desktop_input(&request.input)?;
+        }
         let mut tx = self.pool.begin().await?;
         let row=sqlx::query("SELECT capabilities FROM worker_devices WHERE id=$1 AND tenant_id=$2 AND user_id=$3 AND state='active' FOR UPDATE")
             .bind(&request.worker_id).bind(&session.tenant_id).bind(&session.user_id).fetch_optional(&mut *tx).await?.context("设备不存在或已撤销")?;
@@ -179,27 +182,12 @@ impl WorkerService for WorkerServiceImpl {
         Ok(value)
     }
     async fn workspace_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
-        let existing: Option<serde_json::Value> = sqlx::query_scalar("SELECT capabilities FROM worker_devices WHERE id=$1 AND tenant_id=$2 AND user_id=$3 AND state='active' FOR UPDATE")
-            .bind(&device.id).bind(&device.tenant).bind(&device.user)
-            .fetch_optional(&mut *tx).await?;
-        let mut capabilities: Vec<String> =
-            serde_json::from_value(existing.context("设备不存在或已撤销")?)?;
-        capabilities.retain(|capability| capability != "workspace.execute");
-        if enabled {
-            capabilities.push("workspace.execute".into());
-        }
-        sqlx::query("UPDATE worker_devices SET capabilities=$2 WHERE id=$1")
-            .bind(&device.id)
-            .bind(serde_json::to_value(capabilities)?)
-            .execute(&mut *tx)
-            .await?;
-        if !enabled {
-            sqlx::query("UPDATE worker_tasks SET state='cancelled',lease=NULL,lease_until=NULL,completed_at=now(),error='工作区执行授权已关闭' WHERE worker_id=$1 AND capability='workspace.execute' AND state IN ('queued','running')")
-                .bind(&device.id).execute(&mut *tx).await?;
-        }
-        tx.commit().await?;
-        Ok(())
+        self.local_capability(device, "workspace.execute", enabled)
+            .await
+    }
+    async fn desktop_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()> {
+        self.local_capability(device, "desktop.control", enabled)
+            .await
     }
     async fn desktop(&self, session: &SessionContext, id: &str, enabled: bool) -> Result<()> {
         let mut tx = self.pool.begin().await?;
@@ -307,6 +295,37 @@ impl WorkerServiceImpl {
         // 未知是否完成的副作用任务不自动重派，由用户检查结果后重试。
         sqlx::query("UPDATE worker_tasks SET state='interrupted',error='设备租约过期，执行结果待确认',lease=NULL,lease_until=NULL WHERE state='running' AND lease_until<now()")
             .execute(&self.pool).await?;
+        Ok(())
+    }
+}
+
+impl WorkerServiceImpl {
+    async fn local_capability(
+        &self,
+        device: &DeviceIdentity,
+        capability: &str,
+        enabled: bool,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let existing: Option<serde_json::Value> = sqlx::query_scalar("SELECT capabilities FROM worker_devices WHERE id=$1 AND tenant_id=$2 AND user_id=$3 AND state='active' FOR UPDATE")
+            .bind(&device.id).bind(&device.tenant).bind(&device.user)
+            .fetch_optional(&mut *tx).await?;
+        let mut capabilities: Vec<String> =
+            serde_json::from_value(existing.context("设备不存在或已撤销")?)?;
+        capabilities.retain(|item| item != capability);
+        if enabled {
+            capabilities.push(capability.into());
+        }
+        sqlx::query("UPDATE worker_devices SET capabilities=$2 WHERE id=$1")
+            .bind(&device.id)
+            .bind(serde_json::to_value(capabilities)?)
+            .execute(&mut *tx)
+            .await?;
+        if !enabled {
+            sqlx::query("UPDATE worker_tasks SET state='cancelled',lease=NULL,lease_until=NULL,completed_at=now(),error='本机执行授权已关闭' WHERE worker_id=$1 AND capability=$2 AND state IN ('queued','running')")
+                .bind(&device.id).bind(capability).execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
         Ok(())
     }
 }

@@ -28,6 +28,7 @@ pub(crate) fn router() -> Router<RuntimeState> {
             "/api/runtime/workers/workspaces/access",
             post(workspace_access),
         )
+        .route("/api/runtime/workers/desktop/access", post(desktop_access))
         .route("/api/runtime/workers/claim", post(claim))
         .route("/api/runtime/workers/heartbeat", post(heartbeat))
         .route("/api/runtime/workers/tasks/{id}/heartbeat", post(renew))
@@ -218,6 +219,27 @@ async fn workspace_access(
     state
         .workers
         .workspace_access(&device, request.enabled)
+        .await
+        .map_err(worker_error)?;
+    Ok(response(()))
+}
+
+async fn desktop_access(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Json(request): Json<WorkspaceAccess>,
+) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
+    if !headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("Bearer "))
+    {
+        return Err(RuntimeError::unauthorized("缺少设备 Bearer 凭据"));
+    }
+    let device = device(&state, &headers).await?;
+    state
+        .workers
+        .desktop_access(&device, request.enabled)
         .await
         .map_err(worker_error)?;
     Ok(response(()))

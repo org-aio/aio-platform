@@ -416,6 +416,76 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
         .await?
         .error_for_status()?;
     verify_bridge(state, &device.id).await?;
+    let desktop_access = format!("{base}/desktop/access");
+    let desktop_input =
+        json!({"session":Uuid::new_v4(),"action":"get_app_state","arguments":{"app":"WPS"}});
+    assert!(
+        state
+            .workers
+            .enqueue(&owner, submit(&device.id, CONTROL, desktop_input.clone()))
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        client
+            .post(&desktop_access)
+            .header("x-test-user", "owner")
+            .json(&json!({"enabled":true}))
+            .send()
+            .await?
+            .status(),
+        401
+    );
+    client
+        .post(&desktop_access)
+        .bearer_auth(&pair.token)
+        .json(&json!({"enabled":true}))
+        .send()
+        .await?
+        .error_for_status()?;
+    let desktop_task = state
+        .workers
+        .enqueue(&owner, submit(&device.id, CONTROL, desktop_input.clone()))
+        .await?;
+    assert!(
+        state
+            .workers
+            .enqueue(
+                &session("test", "other"),
+                submit(&device.id, CONTROL, desktop_input.clone())
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        state
+            .workers
+            .enqueue(
+                &session("other", "owner"),
+                submit(&device.id, CONTROL, desktop_input)
+            )
+            .await
+            .is_err()
+    );
+    client
+        .post(&desktop_access)
+        .bearer_auth(&pair.token)
+        .json(&json!({"enabled":false}))
+        .send()
+        .await?
+        .error_for_status()?;
+    assert_eq!(
+        state.workers.task(&owner, &desktop_task.id).await?.state,
+        "cancelled"
+    );
+    assert!(
+        !state
+            .workers
+            .identity(&pair.token)
+            .await?
+            .capabilities
+            .contains(&CONTROL.into())
+    );
     state.workers.revoke(&owner, &device.id).await?;
     assert_eq!(
         client
@@ -426,6 +496,16 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
             .await?
             .status(),
         401
+    );
+    Ok(())
+}
+
+#[test]
+fn desktop_actions_need_an_observation_and_explicit_process_grant() -> Result<()> {
+    assert!(requested_capabilities(&[DESKTOP.into()], CONTROL, "submit").is_err());
+    assert_eq!(
+        requested_capabilities(&[CONTROL.into()], CONTROL, "submit")?,
+        [CONTROL]
     );
     Ok(())
 }
