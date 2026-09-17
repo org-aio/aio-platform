@@ -69,7 +69,7 @@ pub(in crate::runtime::server::tools) async fn publish(
             "https://raw.githubusercontent.com/{}/{}/README.md",
             identity.repository, identity.sha
         ),
-        false,
+        true,
         256 * 1024,
     )
     .await;
