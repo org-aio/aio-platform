@@ -101,7 +101,9 @@ pub(in crate::runtime::server) async fn entries(pool: &PgPool) -> Result<Vec<Mar
 pub(super) async fn remove(pool: &PgPool, id: &str) -> Result<()> {
     ensure!(exists(pool, id).await?, "CLI 条目不存在");
     sqlx::query("INSERT INTO marketplace_tool_removals(id) VALUES($1) ON CONFLICT(id) DO NOTHING")
-        .bind(id).execute(pool).await?;
+        .bind(id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -124,6 +126,10 @@ pub(super) async fn register(
         sqlx::query("INSERT INTO marketplace_tool_details(id,document) VALUES($1,$2) ON CONFLICT(id) DO NOTHING")
             .bind(&manifest.id).bind(serde_json::to_value(doc)?).execute(&mut *tx).await?;
     }
+    sqlx::query("DELETE FROM marketplace_tool_removals WHERE id=$1")
+        .bind(&manifest.id)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(())
 }

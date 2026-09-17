@@ -1,6 +1,6 @@
 mod controller;
-mod documents;
 mod devices;
+mod documents;
 mod model;
 mod publication;
 #[cfg(test)]
@@ -15,8 +15,8 @@ use axum::{
     extract::{DefaultBodyLimit, Path, State},
     routing::{delete, get, post},
 };
-pub(super) use model::MarketplaceItem;
 pub(super) use devices::mark_installed;
+pub(super) use model::MarketplaceItem;
 pub(super) use storage::{entries, migrate};
 
 pub(super) fn router() -> Router<RuntimeState> {
@@ -27,7 +27,10 @@ pub(super) fn router() -> Router<RuntimeState> {
         .route("/api/runtime/tools/{id}", delete(controller::remove))
         .route("/api/runtime/tools/{id}/devices", get(devices::list))
         .route("/api/runtime/tools/{id}/install", post(devices::install))
-        .route("/api/runtime/workers/tools/inventory", post(devices::report))
+        .route(
+            "/api/runtime/workers/tools/inventory",
+            post(devices::report),
+        )
         .route(
             "/api/runtime/tools/{id}/details",
             get(controller::details).patch(controller::update),
