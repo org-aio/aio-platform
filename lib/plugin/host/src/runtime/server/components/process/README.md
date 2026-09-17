@@ -1,6 +1,6 @@
 # 隔离 Process
 
-模型出站支持 `POST /egress` 转发聊天和 `GET /egress/models` 读取模型列表，两者共用活动版本校验、API 基址授权、密钥转发、并发限制和响应体配额。
+模型出站支持 `POST /egress/responses` 转发 Responses SSE、`POST /egress` 转发 Chat Completions，以及 `GET /egress/models` 读取模型列表。各入口共用活动版本校验、API 基址授权、密钥转发、并发限制和响应体配额；固定协议入口不允许插件指定任意上游路径。Responses 入口只接受 `input`，拒绝 Chat 的 `messages`。宿主 2026.9.21 增加 Responses 入口，允许先发布宿主、再升级 Agent。
 
 v2 包以完整摘要绑定 ELF、前端、迁移和固定运行时镜像。监督器启动无网络、只读根文件系统的容器，宿主通过私有 Unix socket 提供入口、专属 PostgreSQL 通道、模型出站及跨插件调用。
 

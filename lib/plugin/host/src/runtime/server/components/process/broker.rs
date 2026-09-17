@@ -21,6 +21,7 @@ pub(super) fn router(gateway: Arc<Gateway>) -> Router {
         .route("/invoke", post(invoke))
         .route("/workers", post(super::workers::invoke))
         .route("/egress", post(egress))
+        .route("/egress/responses", post(responses))
         .route("/egress/models", get(models))
         .route("/egress/http", post(super::http_egress::request))
         .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
@@ -186,16 +187,40 @@ async fn invoke_inner(
 }
 
 async fn egress(State(gateway): State<Arc<Gateway>>, headers: HeaderMap, body: Bytes) -> Response {
-    match egress_inner(gateway, headers, Some(body)).await {
+    match egress_inner(
+        gateway,
+        headers,
+        Some(body),
+        GenerationProtocol::ChatCompletions,
+    )
+    .await
+    {
         Ok(response) => response,
         Err(_) => (StatusCode::BAD_GATEWAY, "模型出站不可用或未授权").into_response(),
     }
 }
 
 async fn models(State(gateway): State<Arc<Gateway>>, headers: HeaderMap) -> Response {
-    match egress_inner(gateway, headers, None).await {
+    match egress_inner(gateway, headers, None, GenerationProtocol::Responses).await {
         Ok(response) => response,
         Err(_) => (StatusCode::BAD_GATEWAY, "模型列表不可用或未授权").into_response(),
+    }
+}
+
+/// 固定协议入口由宿主选择，插件不能传任意上游路径。
+enum GenerationProtocol {
+    ChatCompletions,
+    Responses,
+}
+
+async fn responses(
+    State(gateway): State<Arc<Gateway>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    match egress_inner(gateway, headers, Some(body), GenerationProtocol::Responses).await {
+        Ok(response) => response,
+        Err(_) => (StatusCode::BAD_GATEWAY, "模型服务不可用或未授权").into_response(),
     }
 }
 
@@ -203,6 +228,7 @@ async fn egress_inner(
     gateway: Arc<Gateway>,
     headers: HeaderMap,
     body: Option<Bytes>,
+    protocol: GenerationProtocol,
 ) -> Result<Response> {
     let permit = gateway.quota.clone().try_acquire_owned()?;
     active(&gateway, &headers).await?;
@@ -220,19 +246,24 @@ async fn egress_inner(
         "application/json"
     };
     let mut request = if let Some(body) = body {
-        let payload: serde_json::Value = serde_json::from_slice(&body)?;
-        ensure!(
-            payload["stream"] == true
-                && payload["model"]
-                    .as_str()
-                    .is_some_and(|s| !s.is_empty() && s.len() <= 256),
-            "模型请求无效"
-        );
-        gateway
-            .client
-            .post(format!("{endpoint}/chat/completions"))
-            .header("content-type", "application/json")
-            .body(body)
+        match protocol {
+            GenerationProtocol::Responses => responses_request(&gateway.client, endpoint, body)?,
+            GenerationProtocol::ChatCompletions => {
+                let payload: serde_json::Value = serde_json::from_slice(&body)?;
+                ensure!(
+                    payload["stream"] == true
+                        && payload["model"]
+                            .as_str()
+                            .is_some_and(|s| !s.is_empty() && s.len() <= 256),
+                    "模型请求无效"
+                );
+                gateway
+                    .client
+                    .post(format!("{endpoint}/chat/completions"))
+                    .header("content-type", "application/json")
+                    .body(body)
+            }
+        }
     } else {
         gateway.client.get(format!("{endpoint}/models"))
     };
@@ -269,4 +300,66 @@ async fn egress_inner(
         .status(status)
         .header("content-type", content_type)
         .body(Body::from_stream(stream))?)
+}
+
+/// 校验 Responses 请求后构造固定路径，调用者先完成活动版本和基址授权。
+fn responses_request(
+    client: &reqwest::Client,
+    endpoint: &str,
+    body: Bytes,
+) -> Result<reqwest::RequestBuilder> {
+    let payload: serde_json::Value = serde_json::from_slice(&body)?;
+    ensure!(
+        payload["stream"] == true
+            && payload["model"]
+                .as_str()
+                .is_some_and(|value| !value.is_empty() && value.len() <= 256)
+            && (payload["input"].is_array() || payload["input"].is_string())
+            && payload.get("messages").is_none(),
+        "Responses 模型请求无效"
+    );
+    Ok(client
+        .post(format!("{endpoint}/responses"))
+        .header("content-type", "application/json")
+        .body(body))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn forwards_responses_items_to_fixed_path_and_rejects_chat_body() -> Result<()> {
+        let body = json!({"model":"fixture","input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}],"stream":true,"store":false});
+        let expected = body.clone();
+        let upstream = Router::new().route(
+            "/v1/responses",
+            post(move |Json(actual): Json<serde_json::Value>| {
+                let expected = expected.clone();
+                async move {
+                    assert_eq!(actual, expected);
+                    (
+                        [("content-type", "text/event-stream")],
+                        "data: {\"type\":\"response.completed\"}\n\n",
+                    )
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let endpoint = format!("http://{}/v1", listener.local_addr()?);
+        let server = tokio::spawn(async move { axum::serve(listener, upstream).await });
+        let client = reqwest::Client::new();
+        let response = responses_request(&client, &endpoint, serde_json::to_vec(&body)?.into())?
+            .send()
+            .await?;
+        assert!(response.status().is_success());
+        assert!(response.text().await?.contains("response.completed"));
+        let invalid = json!({"model":"fixture","messages":[],"stream":true});
+        assert!(
+            responses_request(&client, &endpoint, serde_json::to_vec(&invalid)?.into()).is_err()
+        );
+        server.abort();
+        Ok(())
+    }
 }
