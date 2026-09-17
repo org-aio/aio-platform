@@ -13,18 +13,3 @@ pub(crate) use service::PersonalConfigService;
 pub(crate) use service_impl::PersonalConfigServiceImpl;
 #[cfg(all(test, feature = "server"))]
 mod tests;
-
-#[cfg(any(feature = "web", feature = "desktop"))]
-pub(crate) mod view;
-
-#[cfg(any(feature = "web", feature = "desktop"))]
-pub(crate) mod entry_form;
-
-#[cfg(any(feature = "web", feature = "desktop"))]
-pub(crate) mod history_view;
-
-#[cfg(any(feature = "web", feature = "desktop"))]
-pub(crate) mod devices_view;
-
-#[cfg(any(feature = "web", feature = "desktop"))]
-pub(crate) mod assets_view;

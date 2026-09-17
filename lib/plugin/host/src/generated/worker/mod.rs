@@ -19,6 +19,3 @@ pub(crate) mod view;
 pub(crate) use service::WorkerService;
 #[cfg(feature = "server")]
 pub(crate) use service_impl::WorkerServiceImpl;
-
-#[cfg(any(feature = "web", feature = "desktop"))]
-mod task_form;

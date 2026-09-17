@@ -11,7 +11,6 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
     use dioxus::prelude::*;
 
     let mut worker_open = use_signal(|| false);
-    let mut personal_open = use_signal(|| false);
     let mut worker_pair = use_signal(|| {
         web_sys::window()
             .and_then(|window| window.location().search().ok())
@@ -127,14 +126,6 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
         required_permission: None,
         destructive: false,
     });
-    account_items.push(ApplicationAccountItem {
-        id: "personal-config".into(),
-        label: "个人配置".into(),
-        icon: Some("folder-cog".into()),
-        page_id: None,
-        required_permission: None,
-        destructive: false,
-    });
     account_items.extend(
         catalog
             .account_items
@@ -200,7 +191,6 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
         }
         for context in [catalog.session_context] {
           az_ui_components::appearance::AppearanceScope { key: "{context}", user_key: catalog.user.handle.clone(),
-          if personal_open() { crate::generated::personal_config::view::PersonalConfigPanel { on_close: move |_| personal_open.set(false) } }
           if worker_open() {
               crate::generated::worker::view::WorkerPanel { pairing: worker_pair, on_close: move |_| { worker_open.set(false); worker_pair.set(None); } }
           }
@@ -217,7 +207,7 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
             workspace_context: catalog.context.clone(),
             render_runtime_page: runtime::client::render_page,
             on_account_action: move |action: String| {
-                if action == "personal-config" { personal_open.set(true); } else if action == "worker-devices" { worker_open.set(true); } else { (config.account_action)(action); }
+                if action == "worker-devices" { worker_open.set(true); } else { (config.account_action)(action); }
             },
             user: ApplicationUser {
                 label: catalog.user.label.clone(),

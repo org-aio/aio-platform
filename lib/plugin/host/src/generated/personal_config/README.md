@@ -1,6 +1,6 @@
 # 个人配置
 
-宿主内独立的多设备个人配置领域，复用账号、租户、worker 配对和撤销。不依赖智能体或模型服务。网页入口位于账号菜单“个人配置”。
+宿主内独立的多设备个人配置领域，复用账号、租户、worker 配对和撤销。不依赖智能体或模型服务。文件同步由 Space 插件接管，宿主不再提供账号菜单“个人配置”及其编辑、历史、同步设备和资源恢复面板。
 
 ## 契约
 
@@ -19,7 +19,7 @@
 
 ## 实现和验收
 
-`service` 为契约，`service_impl` 通过 Dill 获取 PgPool/Keyring；`schema.sql` 由宿主迁移加载。`controller` 负责身份和长轮询传输，UI 按列表、编辑、历史、设备、资源恢复分工，复用共享组件。
+`service` 为契约，`service_impl` 通过 Dill 获取 PgPool/Keyring；`schema.sql` 由宿主迁移加载。`controller` 负责身份和长轮询传输，保留 Space 客户端使用的同步接口和已有加密数据。
 
 `AIO_TEST_DATABASE_URL` 指向隔离 PostgreSQL、`AIO_SPACE_TEST_CLI` 指向构建后的 CLI，执行：
 

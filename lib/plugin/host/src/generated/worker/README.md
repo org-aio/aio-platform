@@ -2,7 +2,7 @@
 
 worker 配对复用 AIO 当前登录账号、工作区和成员有效性。设备只持有独立可撤销凭据，不保存账号密码。
 
-入口：controller.rs；协议：model.rs；Dill 服务：service.rs / service_impl.rs；PostgreSQL：schema.sql。浏览器管理入口由 view.rs 注入现有 Workspace。
+入口：controller.rs；协议：model.rs；Dill 服务：service.rs / service_impl.rs；PostgreSQL：schema.sql。账号菜单“我的设备”由 view.rs 注入现有 Workspace，仅负责设备列表、配对确认和撤销配对。文件同步、磁盘扫描、清理、归档和应用控制由 Space 插件管理；宿主不再提供对应操作表单或任务记录面板。
 
 设备创建十分钟有效的配对请求，浏览器登录后确认设备信息；设备凭据摘要持久化，配对码一次消费。每账号最多 32 台设备，任务只能下发到本人同工作区设备的已声明能力。任务领取使用行锁和独占租约；120 秒租约由设备每 20 秒续约，失联任务标记 interrupted，不自动重放未知副作用。
 

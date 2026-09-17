@@ -1,4 +1,4 @@
-use super::model::{Task, Worker};
+use super::model::Worker;
 use az_ui_components::{
     button::{Button, ButtonVariant},
     dialog::{Dialog, DialogTitle},
@@ -6,7 +6,7 @@ use az_ui_components::{
 use dioxus::prelude::*;
 use serde::{Serialize, de::DeserializeOwned};
 
-pub(crate) async fn request<T: DeserializeOwned>(
+async fn request<T: DeserializeOwned>(
     method: &str,
     path: &str,
     body: Option<&impl Serialize>,
@@ -36,14 +36,12 @@ pub(super) async fn decode_response<T: DeserializeOwned>(
     Ok(response.data)
 }
 
-/// 登录后挂载的设备管理弹窗，授权始终使用当前 AIO 账号会话。
+/// 登录后挂载的设备配对弹窗，授权始终使用当前 AIO 账号会话。
 #[component]
 pub(crate) fn WorkerPanel(pairing: Signal<Option<String>>, on_close: EventHandler<()>) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut busy = use_signal(|| false);
-    let mut selected = use_signal(|| None::<(Worker, String)>);
     let mut revoke = use_signal(|| None::<Worker>);
-    let mut desktop = use_signal(|| None::<Worker>);
     let code = pairing;
     let mut notice = use_signal(|| None::<String>);
     let mut close = move |()| match super::pairing::finish(code) {
@@ -52,9 +50,6 @@ pub(crate) fn WorkerPanel(pairing: Signal<Option<String>>, on_close: EventHandle
     };
     let mut workers = use_resource(move || async {
         request::<Vec<Worker>>("GET", "/api/runtime/workers", None::<&()>).await
-    });
-    let mut tasks = use_resource(move || async {
-        request::<Vec<Task>>("GET", "/api/runtime/workers/tasks", None::<&()>).await
     });
     let pending = use_resource(move || {
         let value = code();
@@ -77,14 +72,12 @@ pub(crate) fn WorkerPanel(pairing: Signal<Option<String>>, on_close: EventHandle
             )
             .await;
             workers.restart();
-            tasks.restart();
         }
     });
     rsx! {
         Dialog{open:true,on_open_change:move|open:bool|if !open{close(())},
             div{class:"grid gap-4",
                 div{class:"flex items-center justify-between gap-2",DialogTitle{"我的设备"}Button{variant:ButtonVariant::Ghost,onclick:move |_|close(()),"关闭"}}
-                p{"登录当前账号即可管理自己的电脑和服务器。设备主动连接 AIO，无需开放本机端口。"}
                 if let Some(Ok(Some(worker)))=pending.read().as_ref(){
                     section{class:"grid gap-2",
                         h3{"配对新设备：{worker.label}"}
@@ -98,57 +91,27 @@ pub(crate) fn WorkerPanel(pairing: Signal<Option<String>>, on_close: EventHandle
                 if let Some(message)=error(){p{role:"alert","{message}"}}
                 match workers.read().as_ref(){
                     Some(Ok(items))=>rsx!{
-                        if items.is_empty(){p{"暂无设备。在需要管理的电脑运行 aio-space connect，浏览器会打开此处完成配对。"}}
+                        if items.is_empty(){p{"暂无已配对设备"}}
                         for worker in items.iter().cloned(){
-                            section{key:"{worker.id}",class:"grid gap-2 border-b pb-3",
-                                strong{"{worker.label} · {worker.status}"}
-                                small{"{worker.platform}"}
+                            section{key:"{worker.id}",class:"flex flex-wrap items-center justify-between gap-2 border-b pb-3",
+                                div{class:"grid gap-2",
+                                    strong{"{worker.label} · {worker.status}"}
+                                    small{"{worker.platform}"}
+                                }
                                 if worker.status!="revoked"{
-                                    div{class:"flex flex-wrap gap-2",
-                                        if worker.platform=="darwin" {
-                                            Button{variant:ButtonVariant::Outline,onclick:{let worker=worker.clone();move |_|desktop.set(Some(worker.clone()))},
-                                                if worker.capabilities.iter().any(|capability|capability=="desktop.open-app"){"应用控制设置"}else{"启用应用控制"}
-                                            }
-                                        }
-                                        for (capability,label) in [("space.scan","扫描占用"),("space.clean-preview","预览清理"),("space.clean","清理缓存"),("space.archive","归档到 AIO"),("space.archive-list","归档列表"),("space.archive-restore","恢复归档")]{
-                                            if worker.capabilities.iter().any(|v|v==capability){
-                                                Button{variant:ButtonVariant::Outline,onclick:{let worker=worker.clone();move |_|selected.set(Some((worker.clone(),capability.into())))},"{label}"}
-                                            }
-                                        }
-                                        Button{variant:ButtonVariant::Ghost,onclick:{let worker=worker.clone();move |_|revoke.set(Some(worker.clone()))},"撤销设备"}
-                                    }
+                                    Button{variant:ButtonVariant::Ghost,onclick:{let worker=worker.clone();move |_|revoke.set(Some(worker.clone()))},"撤销配对"}
                                 }
                             }
                         }
                     },
                     Some(Err(e))=>rsx!{p{role:"alert","{e}"}},None=>rsx!{p{"正在加载设备…"}}
                 }
-                h3{"最近任务"}
-                if let Some(Ok(items))=tasks.read().as_ref(){
-                    for task in items.iter().take(12){
-                        details{key:"{task.id}",summary{"{task.capability} · {task.state}"}
-                            if let Some(message)=&task.error{p{role:"alert","{message}"}}
-                            if let Some(result)=&task.result{pre{class:"overflow-auto text-xs","{serde_json::to_string_pretty(result).unwrap_or_default()}"}}
-                        }
-                    }
-                }
             }
-        }
-        if let Some((worker,capability))=selected(){
-            super::task_form::TaskForm{worker,capability,on_close:move |_|selected.set(None),on_submitted:move |_|{selected.set(None);tasks.restart();}}
         }
         if let Some(worker)=revoke(){
-            Dialog{open:true,on_open_change:move|open:bool|if !open{revoke.set(None)},DialogTitle{"撤销设备授权"}
-                p{"撤销 {worker.label} 后，该设备无法继续领取任务或访问归档。"}
+            Dialog{open:true,on_open_change:move|open:bool|if !open{revoke.set(None)},DialogTitle{"撤销设备配对"}
+                p{"撤销 {worker.label} 的配对后，该设备无法继续同步、执行任务或访问归档。"}
                 Button{disabled:busy(),onclick:move |_|{let id=worker.id.clone();busy.set(true);spawn(async move{match request::<()>("DELETE",&format!("/api/runtime/workers/{id}"),None::<&()>).await{Ok(())=>{revoke.set(None);workers.restart();},Err(e)=>error.set(Some(e))}busy.set(false);});},"确认撤销"}
-            }
-        }
-        if let Some(worker)=desktop(){
-            Dialog{open:true,on_open_change:move|open:bool|if !open{desktop.set(None)},DialogTitle{"应用控制"}
-                p{"启用后，AIO 智能体可以在 {worker.label} 上打开已安装应用。请先更新客户端；不会开放任意命令、鼠标或键盘控制。"}
-                Button{disabled:busy(),onclick:{let enabled=!worker.capabilities.iter().any(|capability|capability=="desktop.open-app");move |_|{let id=worker.id.clone();busy.set(true);spawn(async move{match request::<()>("PUT",&format!("/api/runtime/workers/{id}/desktop"),Some(&super::model::DesktopAccess{enabled})).await{Ok(())=>{desktop.set(None);workers.restart();},Err(e)=>error.set(Some(e))}busy.set(false);});}},
-                    if !worker.capabilities.iter().any(|capability|capability=="desktop.open-app") {"确认启用"}else{"关闭应用控制"}
-                }
             }
         }
     }
