@@ -1,5 +1,6 @@
 mod controller;
 mod documents;
+mod devices;
 mod model;
 mod publication;
 #[cfg(test)]
@@ -12,9 +13,10 @@ use super::{RuntimeState, http_error::RuntimeError};
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Path, State},
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 pub(super) use model::MarketplaceItem;
+pub(super) use devices::mark_installed;
 pub(super) use storage::{entries, migrate};
 
 pub(super) fn router() -> Router<RuntimeState> {
@@ -22,6 +24,10 @@ pub(super) fn router() -> Router<RuntimeState> {
         .route("/api/runtime/tools/access", get(controller::access))
         .route("/api/runtime/tools/register", post(controller::register))
         .route("/api/runtime/tools/publish", post(publication::publish))
+        .route("/api/runtime/tools/{id}", delete(controller::remove))
+        .route("/api/runtime/tools/{id}/devices", get(devices::list))
+        .route("/api/runtime/tools/{id}/install", post(devices::install))
+        .route("/api/runtime/workers/tools/inventory", post(devices::report))
         .route(
             "/api/runtime/tools/{id}/details",
             get(controller::details).patch(controller::update),

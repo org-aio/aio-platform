@@ -15,6 +15,16 @@ use az_tool::{
     registration::{Documentation, Metadata, Registration},
 };
 
+pub(super) async fn remove(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
+    authenticate_publish_manager(&state, &headers).await?;
+    storage::remove(&state.store.pool, &id).await?;
+    Ok(Json(RuntimeResponse { data: () }))
+}
+
 pub(super) async fn access(
     State(state): State<RuntimeState>,
     headers: HeaderMap,

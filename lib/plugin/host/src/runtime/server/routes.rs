@@ -614,6 +614,7 @@ async fn marketplace(
         .map(super::tools::MarketplaceItem::Plugin)
         .collect::<Vec<_>>();
     items.extend(super::tools::entries(&state.store.pool).await?);
+    super::tools::mark_installed(&state, &session, &mut items).await?;
     Ok(Json(RuntimeResponse { data: items }))
 }
 
