@@ -68,6 +68,7 @@ pub(super) fn validate_desktop_input(input: &serde_json::Value) -> Result<()> {
             "drag",
             "set_value",
             "perform_secondary_action",
+            "create_spreadsheet",
             "release"
         ]
         .contains(&action),
@@ -126,6 +127,10 @@ mod desktop_tests {
         assert!(validate_desktop_input(&input).is_err());
         let mut observed = input;
         observed["observation"] = json!(Uuid::new_v4());
+        validate_desktop_input(&observed)?;
+        observed["action"] = json!("create_spreadsheet");
+        observed["arguments"] =
+            json!({"app":"WPS","filename":"人员.xlsx","rows":[["姓名","年龄"],["小明",18]]});
         validate_desktop_input(&observed)?;
         observed["action"] = json!("shell");
         assert!(validate_desktop_input(&observed).is_err());

@@ -39,4 +39,4 @@ worker 配对复用 AIO 当前登录账号、工作区和成员有效性。设�
 
 `POST /api/runtime/workers/desktop/access` 使用设备 Bearer 凭据与 `{"enabled":true|false}` 单独开关 `desktop.control`，不接受浏览器凭据。关闭会取消该能力的未完成任务，其他能力保留。宿主 process 清单及 `AIO_PROCESS_WORKER_CAPABILITIES` 也须显式授予此能力。
 
-桌面 submit 输入固定为 session UUID、action、arguments 和可选 observation UUID。允许列举、观察、激活应用和固定鼠标/键盘动作；输入限额沿用 32768 字节，写操作必须带 observation。worker 再校验本机开关、单会话独占和观察凭据有效性。宿主只路由到用户设备，不操作服务端桌面；图片回执沿原任务结果通道传输。原生权限与应用兼容性由设备实际检查，complete 不等于用户目标已完成。
+桌面 submit 输入固定为 session UUID、action、arguments 和可选 observation UUID。允许列举、观察、激活应用、固定鼠标/键盘动作及 create_spreadsheet；建表使用 filename、sheet_name、rows，由 worker 在受控输出目录生成并打开全新 XLSX，不允许指定任意路径或覆盖文件；输入限额沿用 32768 字节，写操作必须带 observation。worker 再校验本机开关、单会话独占和观察凭据有效性。宿主只路由到用户设备，不操作服务端桌面；图片回执沿原任务结果通道传输。原生权限与应用兼容性由设备实际检查，complete 不等于用户目标已完成。
