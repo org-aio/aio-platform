@@ -87,6 +87,11 @@ impl PersonalConfigService for PersonalConfigServiceImpl {
         let old=sqlx::query("SELECT *, (extract(epoch FROM updated_at)*1000)::bigint AS updated_ms FROM personal_config_entries WHERE tenant_id=$1 AND user_id=$2 AND id=$3").bind(&owner.tenant).bind(&owner.user).bind(&request.id).fetch_optional(&mut *tx).await?;
         let previous = old.as_ref().map(util::entry).transpose()?;
         if let Some(entry) = &previous {
+            if entry.format.starts_with("yjs-") && request.format != entry.format {
+                return Err(RuntimeError::bad_request(
+                    "CRDT 文件必须通过已升级的 Space 客户端编辑",
+                ));
+            }
             if entry.hash == hash {
                 return Ok(entry.clone());
             }

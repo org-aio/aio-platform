@@ -75,8 +75,9 @@ pub(crate) fn PersonalConfigPanel(on_close: EventHandler<()>) -> Element {
                                         strong{class:"break-all","{entry.target}"}
                                         small{class:"break-all",{scope_label(&entry.layer,&devices)}" · 版本 {entry.revision}" if entry.deleted{" · 已删除"}}
                                         div{class:"flex flex-wrap gap-2",
-                                            if !entry.deleted{Button{variant:ButtonVariant::Outline,disabled:busy(),onclick:{let entry=entry.clone();move |_|{let entry=entry.clone();busy.set(true);spawn(async move{match request::<Content>("GET",&format!("/api/runtime/personal-config/entries/{}",entry.id),None::<&()>).await{Ok(value)=>if entry.kind=="asset"{asset.set(Some(value))}else{editor.set(Some((entry.kind,Some(value))))},Err(e)=>error.set(Some(e))}busy.set(false);});}},if entry.kind=="asset"{"恢复到设备"}else{"编辑"}}}
-                                            Button{variant:ButtonVariant::Ghost,disabled:busy()||!catalog.finished(),onclick:{let entry=entry.clone();move |_|history.set(Some(entry.clone()))},"历史版本"}
+                                            if entry.format.starts_with("yjs-"){small{"Space 文件同步"}}
+                                            if !entry.deleted && !entry.format.starts_with("yjs-"){Button{variant:ButtonVariant::Outline,disabled:busy(),onclick:{let entry=entry.clone();move |_|{let entry=entry.clone();busy.set(true);spawn(async move{match request::<Content>("GET",&format!("/api/runtime/personal-config/entries/{}",entry.id),None::<&()>).await{Ok(value)=>if entry.kind=="asset"{asset.set(Some(value))}else{editor.set(Some((entry.kind,Some(value))))},Err(e)=>error.set(Some(e))}busy.set(false);});}},if entry.kind=="asset"{"恢复到设备"}else{"编辑"}}}
+                                            if !entry.format.starts_with("yjs-"){Button{variant:ButtonVariant::Ghost,disabled:busy()||!catalog.finished(),onclick:{let entry=entry.clone();move |_|history.set(Some(entry.clone()))},"历史版本"}}
                                             if !entry.deleted{Button{variant:ButtonVariant::Ghost,disabled:busy()||!catalog.finished(),onclick:{let entry=entry.clone();move |_|deleting.set(Some(entry.clone()))},"删除"}}
                                         }
                                     }

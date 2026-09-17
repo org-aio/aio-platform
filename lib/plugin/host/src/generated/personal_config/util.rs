@@ -1,6 +1,7 @@
 use super::model::*;
 use crate::runtime::server::http_error::RuntimeError;
 use az_plugin_contract::{InvocationScope, RequestContext};
+use base64::Engine;
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 
@@ -22,9 +23,22 @@ pub(super) fn validate(request: &WriteEntry) -> Result<(), RuntimeError> {
     }
     match request.kind.as_str() {
         "file" => {
-            if !valid_path(&request.target) || !matches!(request.format.as_str(), "text" | "jsonc")
+            if !valid_path(&request.target)
+                || !matches!(
+                    request.format.as_str(),
+                    "text" | "jsonc" | "yjs-v1" | "yjs-blob-v1" | "yjs-folder-v1"
+                )
             {
                 return Err(RuntimeError::bad_request("配置路径或格式无效"));
+            }
+            // 宿主只加密存储更新，操作合并和正文校验在授权设备中执行。
+            if request.format.starts_with("yjs-") && !request.deleted {
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(&request.content)
+                    .map_err(|_| RuntimeError::bad_request("CRDT 更新必须使用 Base64"))?;
+                if bytes.is_empty() || !request.secret {
+                    return Err(RuntimeError::bad_request("CRDT 更新不能为空且必须加密保存"));
+                }
             }
         }
         "env" => {

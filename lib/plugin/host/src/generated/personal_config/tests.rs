@@ -67,6 +67,32 @@ fn bash_function_contract_rejects_invalid_names_and_attributes() {
     entry.content = "x".repeat(32 * 1024 + 1);
     assert!(util::validate(&entry).is_err());
 }
+#[test]
+fn crdt_file_contract_requires_encoded_private_updates() {
+    use super::{model::WriteEntry, util};
+    let mut entry = WriteEntry {
+        id: uuid::Uuid::new_v4().to_string(),
+        expected: None,
+        kind: "file".into(),
+        target: ".add_fn".into(),
+        layer: "shared".into(),
+        format: "yjs-v1".into(),
+        secret: true,
+        executable: false,
+        deleted: false,
+        content: "AAA=".into(),
+    };
+    assert!(util::validate(&entry).is_ok());
+    entry.content = "alias ll='ls'".into();
+    assert!(util::validate(&entry).is_err());
+    entry.content = "AAA=".into();
+    entry.secret = false;
+    assert!(util::validate(&entry).is_err());
+    entry.secret = true;
+    entry.target = "../outside".into();
+    assert!(util::validate(&entry).is_err());
+}
+
 #[tokio::test]
 #[ignore = "需要 AIO_TEST_DATABASE_URL 和 AIO_SPACE_TEST_CLI，使用隔离 schema 和设备目录"]
 async fn personal_configuration_devices_isolation_revisions_and_sync() -> Result<()> {

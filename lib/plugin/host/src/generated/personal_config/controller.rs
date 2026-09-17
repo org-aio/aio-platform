@@ -3,6 +3,7 @@ use crate::runtime::{
     RuntimeResponse,
     server::{RuntimeState, http_error::RuntimeError, request_context::authenticate},
 };
+use axum::http::HeaderMap;
 use axum::{
     Extension, Json, Router,
     extract::{DefaultBodyLimit, OriginalUri, Path, Query, Request, State},
@@ -15,6 +16,10 @@ use serde_json::Value;
 
 pub(crate) fn router(state: RuntimeState) -> Router<RuntimeState> {
     let routes = Router::new()
+        .route(
+            "/protocol",
+            get(|| async { response(serde_json::json!({"fileSync":"yjs-v1"})) }),
+        )
         .route("/catalog", get(catalog))
         .route("/entries", post(write))
         .route("/entries/{id}", get(read))
@@ -73,8 +78,30 @@ fn response<T: serde::Serialize>(value: T) -> Response {
 async fn catalog(
     State(state): State<RuntimeState>,
     Extension(owner): Extension<Owner>,
+    headers: HeaderMap,
 ) -> Result<Response, RuntimeError> {
-    Ok(response(state.personal_config.catalog(&owner).await?))
+    let catalog = state.personal_config.catalog(&owner).await?;
+    if owner.device.is_some()
+        && catalog
+            .entries
+            .iter()
+            .any(|entry| entry.format.starts_with("yjs-"))
+    {
+        require_crdt_client(&headers)?;
+    }
+    Ok(response(catalog))
+}
+fn require_crdt_client(headers: &HeaderMap) -> Result<(), RuntimeError> {
+    if headers
+        .get("x-aio-config-format")
+        .and_then(|value| value.to_str().ok())
+        != Some("yjs-v1")
+    {
+        return Err(RuntimeError::bad_request(
+            "请升级 Space 客户端以同步 CRDT 文件",
+        ));
+    }
+    Ok(())
 }
 #[derive(Deserialize)]
 struct ReadVersion {
@@ -85,13 +112,16 @@ async fn read(
     Extension(owner): Extension<Owner>,
     Path(id): Path<String>,
     Query(query): Query<ReadVersion>,
+    headers: HeaderMap,
 ) -> Result<Response, RuntimeError> {
-    Ok(response(
-        state
-            .personal_config
-            .read(&owner, &id, query.revision)
-            .await?,
-    ))
+    let value = state
+        .personal_config
+        .read(&owner, &id, query.revision)
+        .await?;
+    if owner.device.is_some() && value.entry.format.starts_with("yjs-") {
+        require_crdt_client(&headers)?;
+    }
+    Ok(response(value))
 }
 async fn history(
     State(state): State<RuntimeState>,
@@ -103,8 +133,12 @@ async fn history(
 async fn write(
     State(state): State<RuntimeState>,
     Extension(owner): Extension<Owner>,
+    headers: HeaderMap,
     Json(request): Json<WriteEntry>,
 ) -> Result<Response, RuntimeError> {
+    if request.format.starts_with("yjs-") && !request.deleted {
+        require_crdt_client(&headers)?;
+    }
     Ok(response(
         state.personal_config.write(&owner, request).await?,
     ))
