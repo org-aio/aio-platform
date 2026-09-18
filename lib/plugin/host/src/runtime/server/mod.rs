@@ -18,6 +18,7 @@ pub(crate) mod http_error;
 mod installation;
 mod lifecycle;
 mod management;
+mod marketplace_removal;
 mod marketplace_store;
 mod navigation;
 mod official_market;

@@ -55,7 +55,10 @@ pub fn router(state: RuntimeState) -> Router {
         )
         .route("/api/runtime/catalog", get(catalog))
         .route("/api/runtime/pages/action", post(page_action))
-        .route("/api/runtime/marketplace", get(marketplace))
+        .route(
+            "/api/runtime/marketplace",
+            get(marketplace).delete(super::marketplace_removal::remove),
+        )
         .route("/api/runtime/plugins/install", post(install))
         .route("/api/runtime/publish-jobs/{job_id}", get(publish_job))
         .route(
@@ -608,6 +611,7 @@ async fn marketplace(
             entries.push(unlisted_entry(plugin));
         }
     }
+    super::marketplace_removal::retain_listed(&state.store.pool, &mut entries).await?;
     super::navigation::enrich_entries(&state.store.pool, &session.tenant_id, &mut entries).await?;
     let mut items = entries
         .into_iter()

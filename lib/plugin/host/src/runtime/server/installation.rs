@@ -21,6 +21,10 @@ pub(super) async fn install(
     tenant_id: &str,
     request: &InstallPluginRequest,
 ) -> Result<ActivatedPlugin> {
+    anyhow::ensure!(
+        !super::marketplace_removal::is_removed(&state.store.pool, &request.git).await?,
+        "插件已从市场删除，无法安装"
+    );
     if let Some(components) = &state.components
         && let Some((source, bundle)) = components
             .published(&request.git, request.rev.as_deref())

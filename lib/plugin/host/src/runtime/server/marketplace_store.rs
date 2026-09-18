@@ -19,6 +19,10 @@ CREATE TABLE IF NOT EXISTS marketplace_entries (
     PRIMARY KEY(source, git)
 );
 CREATE INDEX IF NOT EXISTS marketplace_entries_source_title_idx ON marketplace_entries(source, title);
+CREATE TABLE IF NOT EXISTS marketplace_plugin_removals (
+    git TEXT PRIMARY KEY,
+    removed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 "#;
 
 pub(super) const PUBLISHED_REGISTRY_SOURCE: &str = "aio://published";
