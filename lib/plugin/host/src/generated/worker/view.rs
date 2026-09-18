@@ -6,6 +6,26 @@ use az_ui_components::{
 use dioxus::prelude::*;
 use serde::{Serialize, de::DeserializeOwned};
 
+fn current_origin() -> String {
+    web_sys::window()
+        .and_then(|window| window.location().origin().ok())
+        .unwrap_or_else(|| "https://aio.addzero.site".into())
+}
+
+fn macos_command() -> String {
+    format!(
+        "npm install -g @zjarlin/aio-space\nbrew install restic\naio-space connect --server {}",
+        current_origin()
+    )
+}
+
+fn windows_command() -> String {
+    format!(
+        "npm install -g @zjarlin/aio-space\naio-space connect --server {} --no-browser --foreground",
+        current_origin()
+    )
+}
+
 async fn request<T: DeserializeOwned>(
     method: &str,
     path: &str,
@@ -44,6 +64,31 @@ pub(crate) fn WorkerPanel(pairing: Signal<Option<String>>, on_close: EventHandle
     let mut revoke = use_signal(|| None::<Worker>);
     let code = pairing;
     let mut notice = use_signal(|| None::<String>);
+    let mut copied = use_signal(|| None::<String>);
+    let macos = macos_command();
+    let windows = windows_command();
+    let copy_command = move |(label, command): (String, String)| {
+        let label_for_state = label.clone();
+        spawn(async move {
+            let command = serde_json::to_string(&command).unwrap_or_else(|_| "\"\"".into());
+            let script = format!(
+                "try {{ await navigator.clipboard.writeText({command}); return true; }} catch (_) {{ return false; }}"
+            );
+            match document::eval(&script).await {
+                Ok(value) if value.as_bool() == Some(true) => {
+                    copied.set(Some(label_for_state));
+                    let _ = document::eval(
+                        "await new Promise(resolve => setTimeout(resolve, 1600)); return true;",
+                    )
+                    .await;
+                    if copied() == Some(label) {
+                        copied.set(None);
+                    }
+                }
+                _ => error.set(Some("复制失败，请手动选择命令。".into())),
+            }
+        });
+    };
     let mut close = move |()| match super::pairing::finish(code) {
         Ok(()) => on_close.call(()),
         Err(message) => error.set(Some(message)),
@@ -78,9 +123,30 @@ pub(crate) fn WorkerPanel(pairing: Signal<Option<String>>, on_close: EventHandle
         Dialog{open:true,on_open_change:move|open:bool|if !open{close(())},
             div{class:"grid gap-4",
                 div{class:"flex items-center justify-between gap-2",DialogTitle{"我的设备"}Button{variant:ButtonVariant::Ghost,onclick:move |_|close(()),"关闭"}}
+                section{class:"grid gap-3 rounded-md border p-3",
+                    div{class:"grid gap-1",
+                        h3{"配对新设备"}
+                        p{class:"text-sm text-muted-foreground","在需要配对的电脑上运行对应命令，浏览器会打开 AIO 并等待你授权这台设备。"}
+                    }
+                    div{class:"grid gap-2",
+                        div{class:"flex items-center justify-between gap-2",
+                            strong{"macOS"}
+                            Button{variant:ButtonVariant::Outline,onclick:{let command=macos.clone();move |_|copy_command(("macOS".into(),command.clone()))},if copied()==Some("macOS".into()){"已复制"}else{"复制命令"}}
+                        }
+                        pre{class:"overflow-x-auto rounded-md bg-muted p-3 text-sm",code{class:"font-mono","{macos}"}}
+                    }
+                    div{class:"grid gap-2",
+                        div{class:"flex items-center justify-between gap-2",
+                            strong{"Windows"}
+                            Button{variant:ButtonVariant::Outline,onclick:{let command=windows.clone();move |_|copy_command(("Windows".into(),command.clone()))},if copied()==Some("Windows".into()){"已复制"}else{"复制命令"}}
+                        }
+                        pre{class:"overflow-x-auto rounded-md bg-muted p-3 text-sm",code{class:"font-mono","{windows}"}}
+                        small{class:"text-sm text-muted-foreground","Windows 当前不支持后台服务，请保持该终端窗口运行。"}
+                    }
+                }
                 if let Some(Ok(Some(worker)))=pending.read().as_ref(){
                     section{class:"grid gap-2",
-                        h3{"配对新设备：{worker.label}"}
+                        h3{"待授权设备：{worker.label}"}
                         p{"系统：{worker.platform}"}
                         p{"允许能力：" {worker.capabilities.join("、")}}
                         Button{disabled:busy(),onclick:move |_|{let Some(value)=code() else{return;};busy.set(true);spawn(async move{match super::pairing::approve(&value).await{Ok(approved)=>{match super::pairing::finish(code){Ok(())=>{notice.set(Some(if approved{"设备已配对，后续自动连接，无需再次使用配对链接。"}else{super::pairing::UNAVAILABLE}.into()));error.set(None);},Err(e)=>error.set(Some(e))}workers.restart();},Err(e)=>error.set(Some(e))}busy.set(false);});},"授权这台设备"}
