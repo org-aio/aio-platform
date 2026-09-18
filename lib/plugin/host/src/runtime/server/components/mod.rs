@@ -146,7 +146,13 @@ impl Components {
     async fn slot(&self, source: Uuid, tenant: &str) -> Result<Arc<PersistentComponentSlot>> {
         let mut slots = self.slots.lock().await;
         let key = (source, tenant.to_owned());
-        if let Some(slot) = slots.get(&key) {
+        if let Some(slot) = slots.get(&key).cloned() {
+            if slot.snapshot().await?.is_none()
+                && let Some(stored) = slot.stored().await?
+            {
+                let resources = self.resources(source, tenant, &stored.bundle).await?;
+                slot.restore(&self.engine, stored.grants, resources).await?;
+            }
             return Ok(slot.clone());
         }
         let slot = Arc::new(

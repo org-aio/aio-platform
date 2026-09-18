@@ -131,10 +131,22 @@ impl Components {
                 .handle(source, tenant, digest, request, context)
                 .await
         } else {
-            self.slot(source, tenant)
-                .await?
-                .handle(digest, request, context)
-                .await
+            let slot = self.slot(source, tenant).await?;
+            let retry = (request.clone(), context.clone());
+            match slot.handle(digest, request, context).await {
+                Ok(response) => Ok(response),
+                Err(error) => {
+                    slot.unload().await;
+                    if format!("{error:#}").contains("实例已失效，必须重新创建") {
+                        // 该错误发生在插件执行前，可安全重建后重试当前请求。
+                        let slot = self.slot(source, tenant).await?;
+                        let (request, context) = retry;
+                        return slot.handle(digest, request, context).await;
+                    }
+                    // 超时、取消或业务失败的结果可能不确定，只清槽，不重放当前写入。
+                    Err(error)
+                }
+            }
         }
     }
 }

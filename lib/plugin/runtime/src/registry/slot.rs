@@ -154,7 +154,7 @@ impl PersistentComponentSlot {
             "调用租户不匹配"
         );
         let state = self.state.read().await;
-        let active = state.as_ref().context("插件未激活")?;
+        let active = state.as_ref().context("插件未激活")?.clone();
         let mut transaction = self.pool.begin().await?;
         let (revision, _) =
             storage::locked_revision(&mut transaction, self.source, &self.tenant, false).await?;
@@ -162,7 +162,14 @@ impl PersistentComponentSlot {
             revision.as_deref() == Some(digest),
             "页面版本已撤销，请重新挂载"
         );
-        let response = active.handle(digest, request, context).await?;
+        let response = match active.handle(digest, request, context).await {
+            Ok(response) => response,
+            Err(error) => {
+                drop(state);
+                self.invalidate().await;
+                return Err(error);
+            }
+        };
         transaction.commit().await?;
         Ok(response)
     }
@@ -185,6 +192,11 @@ impl PersistentComponentSlot {
         if let Some(previous) = previous {
             previous.deactivate().await;
         }
+    }
+
+    async fn invalidate(&self) {
+        let _update = self.updates.lock().await;
+        *self.state.write().await = None;
     }
 
     async fn prepare(

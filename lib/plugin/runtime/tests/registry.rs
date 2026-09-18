@@ -1,4 +1,10 @@
-use std::{fs, sync::Arc};
+use std::{
+    fs,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -14,6 +20,7 @@ struct Services {
     started: tokio::sync::Notify,
     released: tokio::sync::Notify,
     activated: tokio::sync::Notify,
+    wait_calls: AtomicUsize,
 }
 
 #[async_trait]
@@ -23,6 +30,7 @@ impl HostServices for Services {
             self.activated.notify_one();
         }
         if permission == "wait" {
+            self.wait_calls.fetch_add(1, Ordering::SeqCst);
             self.started.notify_one();
             self.released.notified().await;
         }
@@ -31,6 +39,56 @@ impl HostServices for Services {
     async fn manage(&self, _: &InvocationScope, _: Request) -> Result<Response> {
         anyhow::bail!("未授予管理能力")
     }
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL and built WIT fixture Components"]
+async fn cancelled_persistent_request_recovers_for_follow_up_without_replay() -> Result<()> {
+    let provisioner =
+        DatabaseProvisioner::connect(&std::env::var("AIO_TEST_DATABASE_URL")?).await?;
+    let engine = ComponentEngine::new()?;
+    let source = uuid::Uuid::new_v4();
+    let tenant = source.to_string();
+    let first = bundle(
+        &fs::read(std::env::var("AIO_TEST_HEALTHY_COMPONENT")?)?,
+        "1.0.0",
+        "index.html",
+    )?;
+    let slot = provisioner
+        .component_slot(source, tenant.clone(), "2026.9.12".parse()?)
+        .await?;
+    let host = Arc::new(Services::default());
+    let resources = InvocationResources {
+        services: Some(host.clone()),
+        ..Default::default()
+    };
+    slot.activate(
+        &engine,
+        first.clone(),
+        Default::default(),
+        resources.clone(),
+    )
+    .await?;
+    let cancelled = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        slot.handle(&first.digest, path_request("/wait"), context(&tenant)),
+    )
+    .await;
+    assert!(cancelled.is_err(), "请求应被宿主服务阻塞并超时");
+    assert_eq!(host.wait_calls.load(Ordering::SeqCst), 1);
+    assert!(
+        slot.handle(&first.digest, path_request("/echo"), context(&tenant))
+            .await
+            .is_err(),
+        "取消后的槽必须先恢复，不能继续复用失效实例"
+    );
+    slot.restore(&engine, Default::default(), resources).await?;
+    let response = slot
+        .handle(&first.digest, path_request("/echo"), context(&tenant))
+        .await?;
+    assert_eq!(response.status, 200);
+    assert_eq!(host.wait_calls.load(Ordering::SeqCst), 1);
+    Ok(())
 }
 
 fn bundle(bytes: &[u8], version: &str, entry: &str) -> Result<Bundle> {
@@ -154,6 +212,13 @@ fn request() -> Request {
         query: None,
         headers: vec![],
         body: vec![0, 255, 128, 42],
+    }
+}
+
+fn path_request(path: &str) -> Request {
+    Request {
+        path: path.into(),
+        ..request()
     }
 }
 
