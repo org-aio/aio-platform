@@ -26,4 +26,30 @@ pub trait IdentityProvider: Send + Sync {
 
     async fn session_active(&self, session: &str, tenant: &str, user: &str)
     -> anyhow::Result<bool>;
+
+    /// 代表进程插件上报用量。默认不支持，宿主按需覆盖。
+    ///
+    /// 返回值 `Ok(None)` 表示该宿主未接入计费，调用方不应视为失败。
+    async fn meter(
+        &self,
+        _tenant: &str,
+        _user: &str,
+        _source: &str,
+        _resource: &str,
+        _quantity: i64,
+        _idempotency_key: &str,
+    ) -> anyhow::Result<Option<MeterOutcome>> {
+        Ok(None)
+    }
+}
+
+/// 一次用量上报的结算结果。
+#[cfg(feature = "server")]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeterOutcome {
+    pub amount_micros: i64,
+    pub grant_consumed: i64,
+    pub balance_charged_micros: i64,
+    pub balance_after_micros: i64,
+    pub duplicate: bool,
 }

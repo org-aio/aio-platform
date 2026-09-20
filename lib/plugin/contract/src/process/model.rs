@@ -29,3 +29,15 @@ pub struct ServiceRequest {
     pub context_id: Option<String>,
     pub interactive: bool,
 }
+
+/// 进程插件通过宿主 broker 上报用量。价格与扣费规则由宿主决定。
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MeterRequest {
+    pub tenant_id: String,
+    pub user_id: String,
+    pub source_id: String,
+    pub resource: String,
+    pub quantity: i64,
+    pub idempotency_key: String,
+}

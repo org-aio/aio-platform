@@ -7,7 +7,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use az_plugin_contract::process::ServiceRequest;
+use az_plugin_contract::process::{MeterRequest, ServiceRequest};
 use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -24,6 +24,7 @@ pub(super) fn router(gateway: Arc<Gateway>) -> Router {
         .route("/egress/responses", post(responses))
         .route("/egress/models", get(models))
         .route("/egress/http", post(super::http_egress::request))
+        .route("/meter", post(meter))
         .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
         .with_state(gateway)
 }
@@ -184,6 +185,64 @@ async fn invoke_inner(
         serde_json::from_slice(&response.body)?
     };
     Ok(serde_json::json!({"status":response.status,"body":body}))
+}
+
+/// 代表进程插件上报用量。宿主未接入计费时返回 204，不视为失败。
+async fn meter(
+    State(gateway): State<Arc<Gateway>>,
+    headers: HeaderMap,
+    Json(request): Json<MeterRequest>,
+) -> Response {
+    match meter_inner(&gateway, &headers, request).await {
+        Ok(Some(outcome)) => {
+            Json(serde_json::json!({"status": 200, "body": outcome})).into_response()
+        }
+        Ok(None) => StatusCode::NO_CONTENT.into_response(),
+        Err(_) => (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "用量上报未授权"})),
+        )
+            .into_response(),
+    }
+}
+
+async fn meter_inner(
+    gateway: &Gateway,
+    headers: &HeaderMap,
+    request: MeterRequest,
+) -> Result<Option<crate::identity::MeterOutcome>> {
+    let components = active(gateway, headers).await?;
+    ensure!(
+        request.tenant_id == gateway.start.tenant,
+        "计量租户与实例不一致"
+    );
+    ensure!(
+        !request.source_id.is_empty()
+            && request.resource.len() <= 64
+            && request.quantity > 0
+            && request.idempotency_key.len() <= 128,
+        "用量上报参数无效"
+    );
+    let actor: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM component_process_actors WHERE source_id=$1 AND tenant_id=$2 AND user_id=$3)").bind(gateway.start.source).bind(&request.tenant_id).bind(&request.user_id).fetch_one(&components.pool).await?;
+    ensure!(
+        actor
+            && components
+                .identity
+                .member_active(&request.tenant_id, &request.user_id)
+                .await?,
+        "process 用户已撤权"
+    );
+    components
+        .identity
+        .meter(
+            &request.tenant_id,
+            &request.user_id,
+            &request.source_id,
+            &request.resource,
+            request.quantity,
+            &request.idempotency_key,
+        )
+        .await
 }
 
 async fn egress(State(gateway): State<Arc<Gateway>>, headers: HeaderMap, body: Bytes) -> Response {

@@ -2,4 +2,4 @@ mod endpoint;
 mod model;
 
 pub use endpoint::model_endpoint;
-pub use model::{Configuration, ServiceRequest};
+pub use model::{Configuration, MeterRequest, ServiceRequest};
