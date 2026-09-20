@@ -8,6 +8,8 @@ on:
         required: false
         type: string
   push:
+    branches:
+      - main
     tags:
       - "v*"
 
@@ -22,8 +24,9 @@ permissions:
 jobs:
   verify:
     name: 校验发布来源
-    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    outputs:
+      should_publish: ${{ steps.release-check.outputs.should_publish }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -45,9 +48,12 @@ jobs:
           git fetch --no-tags origin main:refs/remotes/origin/main
           tag_commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
           git merge-base --is-ancestor "$tag_commit" refs/remotes/origin/main
+      - name: 判断是否需要发布
+        id: release-check
+        run: node npm/aio/scripts/should-publish.cjs
 
   build:
-    if: inputs.artifacts_run_id == ''
+    if: needs.verify.outputs.should_publish == 'true' && inputs.artifacts_run_id == ''
     name: 构建 ${{ matrix.id }}
     needs: verify
     strategy:
@@ -125,9 +131,8 @@ jobs:
   publish:
     name: 发布 npm 包
     needs: [verify, build]
-    if: always() && needs.verify.result == 'success' && (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.artifacts_run_id != ''))
+    if: needs.verify.result == 'success' && needs.verify.outputs.should_publish == 'true' && (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.artifacts_run_id != ''))
     runs-on: ubuntu-24.04
-    environment: npm
     permissions:
       contents: read
       id-token: write
