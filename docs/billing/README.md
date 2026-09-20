@@ -190,10 +190,21 @@ CREATE UNIQUE INDEX billing_usage_events_idempotency_idx
 
 ## 落地顺序
 
-1. 身份插件落地钱包、账本、用量事件表与计费 Service。
-2. 个人资料页接入钱包展示、充值订单与账本分页。
-3. 智能体在 `agent_messages.tokens` 写入点接入计费，先按量、再上套餐。
-4. 文件插件接入存储与图床流量计费，复用同一 Service。
-5. 套餐管理页面与人工调账工具。
+1. ✅ 身份插件落地钱包、账本、用量事件表与计费 Service。
+2. ✅ 个人资料页接入钱包展示、充值订单、订阅与账本分页。
+3. ✅ 设置中心接入支付宝渠道配置，服务端按 RSA2 生成收银台地址并在异步通知验签入账。
+4. ✅ 智能体在 `agent_messages.tokens` 写入点经宿主 broker `/meter` 上报 `agent_tokens`。
+5. ⬜ 文件插件接入存储与图床流量计费，复用同一 Service。
+6. ⬜ 套餐管理页面与人工调账工具。
+
+### 支付渠道
+
+支付宝配置位于“设置中心 → 支付”，字段包括 `app_id`、网关、异步通知地址、同步跳转地址、商户 UID、支付宝公钥和应用私钥。应用私钥使用 `AIO_BILLING_SECRET_KEY`（32 字节 Base64）以 AES-256-GCM 加密后入库，接口只返回 `has_private_key`。启用渠道前必须同时配置应用私钥和支付宝公钥。
+
+异步通知地址应指向 `https://<站点>/api/billing/alipay/notify`。回调必须通过 RSA2 验签，并校验 `app_id` 与订单金额；重复通知按订单状态幂等。未知订单号返回 `success` 以避免无限重试。
+
+### 进程插件计量
+
+网络隔离的进程插件不能直连身份插件，只能通过宿主 broker 的 `/meter` 上报。宿主通过 `IdentityProvider::meter` 结算，`aio-idea` 直接把用量交给身份插件的 `meter_resource`，价格取自 `billing_prices` 表。未接入计费的宿主返回 204，调用方不应视为失败。
 
 每一步都以真实数据库和浏览器流程验收，不以编译通过或单测代替充值、扣费、退款的端到端验证。
