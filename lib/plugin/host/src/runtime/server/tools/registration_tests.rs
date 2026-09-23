@@ -288,6 +288,15 @@ async fn exercise_devices(
         .send()
         .await?
         .error_for_status()?;
+    let installed: serde_json::Value = client
+        .get(&devices_url)
+        .header("x-test-role", "publisher")
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert_eq!(installed["data"][0]["installed"]["state"], "installed");
     assert_eq!(
         client
             .post(&install_url)

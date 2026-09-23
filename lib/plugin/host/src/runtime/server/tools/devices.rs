@@ -253,30 +253,6 @@ pub(super) async fn install(
     Ok(Json(RuntimeResponse { data: task }))
 }
 
-pub(in crate::runtime::server) async fn mark_installed(
-    state: &RuntimeState,
-    session: &SessionContext,
-    entries: &mut [MarketplaceItem],
-) -> Result<()> {
-    let inventories = inventories(state, session).await?;
-    let devices = state.workers.list(session).await?;
-    for entry in entries {
-        let MarketplaceItem::Cli(entry) = entry else {
-            continue;
-        };
-        entry.installed = devices.iter().any(|device| {
-            inventories
-                .get(&device.id)
-                .is_some_and(|(inventory, _, _)| {
-                    installed(&entry.cli, &device.platform, inventory).is_some_and(|record| {
-                        ["installed", "executed"].contains(&record.state.as_str())
-                    })
-                })
-        });
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

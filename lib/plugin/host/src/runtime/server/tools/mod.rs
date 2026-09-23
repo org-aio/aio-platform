@@ -15,7 +15,6 @@ use axum::{
     extract::{DefaultBodyLimit, Path, State},
     routing::{delete, get, post},
 };
-pub(super) use devices::mark_installed;
 pub(super) use model::MarketplaceItem;
 pub(super) use storage::{entries, migrate};
 

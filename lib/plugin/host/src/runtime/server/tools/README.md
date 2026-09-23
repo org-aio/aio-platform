@@ -4,6 +4,8 @@
 
 PostgreSQL 保存每个不可变版本。内置条目和 `AIO_TOOL_REGISTRY_DIR` 下的 JSON 在启动时导入；同 ID、同版本不会覆盖。公开只读 GET `/api/runtime/tools/{id}/{version}` 供本机助手获取，未收录版本返回 404。
 
+CLI 的安装状态属于单台设备，不属于租户或账号。市场列表中的 CLI 条目始终不作为“租户已安装”显示；详情页通过 `/api/runtime/tools/{id}/devices` 展示每台配对设备的上报状态，安装动作也必须明确选择目标设备。
+
 
 平台发布者可通过 `POST /api/runtime/tools/register` 仅提交命令和可选仓库地址；服务端自动生成独立 ID、默认展示资料和对应系统的安装方案。`GET/PATCH /api/runtime/tools/{id}/details` 读取或编辑资料，README 使用只读 Git 对象获取，不检出工作区。`marketplace_tool_details` 保存可变展示资料和 README 快照，安装步骤仍不可变。刷新失败保留可见错误，入口权限与现有平台发布权限一致。
 

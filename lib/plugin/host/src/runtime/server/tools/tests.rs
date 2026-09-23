@@ -50,6 +50,10 @@ async fn exercise(pool: &PgPool) -> Result<()> {
     assert_eq!(values[0]["cli"]["id"], "codex-model-sync");
     assert_eq!(values[0]["installed"], false);
     assert!(
+        values[0].get("device_installed").is_none(),
+        "CLI 市场列表不能暴露或聚合跨设备安装状态"
+    );
+    assert!(
         values[0]["tags"]
             .as_array()
             .unwrap()
