@@ -70,14 +70,6 @@ impl Components {
             ensure!(parent == &metadata.parent, "已发布来源不能改变父插件归属");
         }
         let source = existing.map(|r| r.0).unwrap_or_else(Uuid::new_v4);
-        let previous: Option<bool> = sqlx::query_scalar("SELECT COALESCE((v.description->>'process')::boolean,false) FROM component_publications p JOIN component_versions v ON v.digest=p.digest WHERE p.source_id=$1")
-            .bind(source).fetch_optional(&self.pool).await?;
-        if let Some(previous) = previous {
-            ensure!(
-                previous == verified.manifest().plugin.runtime.process.is_some(),
-                "已发布来源不能改变运行时类型"
-            );
-        }
         if let Some(parent) = &metadata.parent {
             let cycle:bool=sqlx::query_scalar("WITH RECURSIVE ancestors AS (SELECT git,parent_git FROM component_sources WHERE git=$1 UNION SELECT s.git,s.parent_git FROM component_sources s JOIN ancestors a ON s.git=a.parent_git) SELECT EXISTS(SELECT 1 FROM ancestors WHERE git=$2 OR parent_git=$2)").bind(parent).bind(&bundle.git).fetch_one(&self.pool).await?;
             ensure!(!cycle, "父子插件关系形成循环");

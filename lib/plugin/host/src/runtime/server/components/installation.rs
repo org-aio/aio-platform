@@ -23,6 +23,17 @@ impl Components {
         if bundle.verify()?.manifest().plugin.runtime.process.is_some() {
             return self.install_process(tenant, source, bundle, excluded).await;
         }
+        let enabled: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM component_installations WHERE tenant_id=$1 AND source_id=$2 AND enabled)")
+            .bind(tenant).bind(source).fetch_one(&self.pool).await?;
+        let installed = if enabled {
+            self.installed_bundle(tenant, source).await?
+        } else {
+            None
+        };
+        let previous_process = match installed.as_ref() {
+            Some(bundle) => bundle.verify()?.manifest().plugin.runtime.process.is_some(),
+            None => false,
+        };
         let resources = self.resources(source, tenant, &bundle).await?;
         let grants = bundle.verify()?.manifest().plugin.capabilities.clone();
         let slot = self.slot(source, tenant).await?;
@@ -38,7 +49,11 @@ impl Components {
         }
         .await;
         if let Err(error) = result {
-            if let Some(previous) = previous {
+            if previous_process {
+                if let Err(cleanup) = slot.deactivate().await {
+                    eprintln!("清理失败的 process 迁移实例失败: {cleanup:#}");
+                }
+            } else if let Some(previous) = previous {
                 let resources = self.resources(source, tenant, &previous.bundle).await?;
                 slot.activate(&self.engine, previous.bundle, previous.grants, resources)
                     .await?;
@@ -46,6 +61,9 @@ impl Components {
                 slot.deactivate().await?;
             }
             return Err(error);
+        }
+        if previous_process && let Err(error) = self.processes.stop(source, tenant).await {
+            eprintln!("清理旧 process 实例失败: {error:#}");
         }
         Ok(())
     }

@@ -31,6 +31,11 @@ impl Components {
         } else {
             None
         };
+        let previous_process = match previous.as_ref() {
+            Some(bundle) => bundle.verify()?.manifest().plugin.runtime.process.is_some(),
+            None => false,
+        };
+        let switched_from_wasm = previous.is_some() && !previous_process;
         let result = async {
             self.processes.activate(source, tenant, &bundle).await?;
             let mut tx = self.pool.begin().await?;
@@ -42,8 +47,13 @@ impl Components {
         .await;
         if result.is_err() {
             self.processes.stop(source, tenant).await?;
-            if let Some(previous) = previous {
+            if previous_process && let Some(previous) = previous {
                 self.processes.activate(source, tenant, &previous).await?;
+            }
+        }
+        if result.is_ok() && switched_from_wasm {
+            if let Err(error) = self.slot(source, tenant).await?.deactivate().await {
+                eprintln!("清理旧 Component 实例失败: {error:#}");
             }
         }
         result
