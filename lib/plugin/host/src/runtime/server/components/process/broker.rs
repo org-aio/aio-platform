@@ -8,6 +8,8 @@ use axum::{
     routing::{get, post},
 };
 use az_plugin_contract::process::{MeterRequest, ServiceRequest};
+use az_plugin_contract::{InvocationScope, RequestContext};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -25,8 +27,77 @@ pub(super) fn router(gateway: Arc<Gateway>) -> Router {
         .route("/egress/models", get(models))
         .route("/egress/http", post(super::http_egress::request))
         .route("/meter", post(meter))
+        .route("/cryptography/seal", post(seal))
+        .route("/cryptography/open", post(open))
         .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
         .with_state(gateway)
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CryptographyRequest {
+    purpose: String,
+    value: String,
+}
+
+async fn seal(
+    State(gateway): State<Arc<Gateway>>,
+    headers: HeaderMap,
+    Json(request): Json<CryptographyRequest>,
+) -> Response {
+    cryptography(&gateway, &headers, request, true).await
+}
+
+async fn open(
+    State(gateway): State<Arc<Gateway>>,
+    headers: HeaderMap,
+    Json(request): Json<CryptographyRequest>,
+) -> Response {
+    cryptography(&gateway, &headers, request, false).await
+}
+
+/// 进程只提交明文或密文，历史密钥始终留在宿主 Keyring 内。
+async fn cryptography(
+    gateway: &Gateway,
+    headers: &HeaderMap,
+    request: CryptographyRequest,
+    sealing: bool,
+) -> Response {
+    let result = async {
+        let components = active(gateway, headers).await?;
+        let bundle = components
+            .bundle(gateway.start.source, &gateway.start.tenant)
+            .await?;
+        ensure!(
+            bundle.manifest().plugin.capabilities.cryptography,
+            "process 未获加密能力"
+        );
+        let value = STANDARD.decode(request.value).context("加密载荷无效")?;
+        let scope = InvocationScope {
+            source_id: gateway.start.source.to_string(),
+            revision: gateway.start.revision.clone(),
+            context: RequestContext {
+                tenant_id: Some(gateway.start.tenant.clone()),
+                ..Default::default()
+            },
+            grants: Default::default(),
+        };
+        let value = if sealing {
+            components.keyring.seal(&scope, &request.purpose, &value)?
+        } else {
+            components.keyring.open(&scope, &request.purpose, &value)?
+        };
+        Ok::<_, anyhow::Error>(STANDARD.encode(value))
+    }
+    .await;
+    match result {
+        Ok(value) => Json(serde_json::json!({ "value": value })).into_response(),
+        Err(_) => (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": "加密操作未授权或数据无效" })),
+        )
+            .into_response(),
+    }
 }
 
 pub(super) async fn active(
@@ -116,10 +187,6 @@ async fn invoke_inner(
         sqlx::query_scalar("SELECT s.id FROM component_sources s JOIN component_installations i ON i.source_id=s.id WHERE s.git=$1 AND i.tenant_id=$2 AND i.enabled").bind(&request.target).bind(&request.tenant_id).fetch_optional(&components.pool).await?.context("目标插件未启用")?
     };
     let bundle = components.bundle(source, &request.tenant_id).await?;
-    ensure!(
-        bundle.manifest().plugin.runtime.process.is_none(),
-        "当前 broker 仅开放 Component 服务"
-    );
     let background;
     let context = if request.interactive {
         let id = request
