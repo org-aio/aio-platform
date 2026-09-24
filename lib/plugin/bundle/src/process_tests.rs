@@ -57,6 +57,15 @@ fn process_accepts_workspace_execution_without_opening_arbitrary_capabilities() 
 }
 
 #[test]
+fn process_accepts_subplugin_route_declarations() {
+    let manifest = manifest("[[plugin.subplugins]]\nid = 'boxun'\nroutes = ['admin-api']\n");
+    let parsed = BundleManifest::parse(&manifest).expect("子插件声明必须被进程包接受");
+    assert_eq!(parsed.plugin.subplugins.len(), 1);
+    assert_eq!(parsed.plugin.subplugins[0].id, "boxun");
+    assert_eq!(parsed.plugin.subplugins[0].routes, ["admin-api"]);
+}
+
+#[test]
 fn process_archive_binds_executable_and_rejects_other_platforms() -> anyhow::Result<()> {
     let mut binary = vec![0; 64];
     binary[..6].copy_from_slice(b"\x7fELF\x02\x01");

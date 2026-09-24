@@ -26,6 +26,8 @@ pub struct ComponentManifest {
     pub database: Option<DatabaseManifest>,
     #[serde(default)]
     pub capabilities: CapabilityGrants,
+    #[serde(default)]
+    pub subplugins: Vec<az_plugin_manifest::SubpluginManifest>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
