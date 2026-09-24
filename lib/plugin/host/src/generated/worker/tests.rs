@@ -1,3 +1,4 @@
+use super::model::{PairRequest, UpdateLabelRequest};
 use super::*;
 use crate::{
     identity::{IdentityProvider, SessionContext},
@@ -112,7 +113,7 @@ async fn device_label_is_owner_scoped_trimmed_and_persistent() -> Result<()> {
         .fetch_one(&state.store.pool)
         .await?;
     assert_eq!(stored, "工作笔记本");
-    for invalid in ["", "   ", "标".repeat(121)] {
+    for invalid in ["", "   ", "标".repeat(121).as_str()] {
         assert!(
             state
                 .workers
