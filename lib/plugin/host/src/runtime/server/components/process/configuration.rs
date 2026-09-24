@@ -162,8 +162,24 @@ impl Processes {
                             let socket = upstream_socket.clone();
                             clients.spawn(async move {
                                 if let Some(socket) = socket {
-                                    if let Ok(mut remote) = UnixStream::connect(socket).await { let _ = tokio::io::copy_bidirectional(&mut local, &mut remote).await; }
-                                } else if let Ok(mut remote) = TcpStream::connect((host.as_str(), port)).await { let _ = tokio::io::copy_bidirectional(&mut local, &mut remote).await; }
+                                    match UnixStream::connect(&socket).await {
+                                        Ok(mut remote) => {
+                                            let _ = tokio::io::copy_bidirectional(&mut local, &mut remote).await;
+                                            return;
+                                        }
+                                        Err(error) => {
+                                            eprintln!("process 数据库 Unix socket 转发失败 {}: {error}", socket.display());
+                                        }
+                                    }
+                                }
+                                match TcpStream::connect((host.as_str(), port)).await {
+                                    Ok(mut remote) => {
+                                        let _ = tokio::io::copy_bidirectional(&mut local, &mut remote).await;
+                                    }
+                                    Err(error) => {
+                                        eprintln!("process 数据库 TCP 转发失败 {host}:{port}: {error}");
+                                    }
+                                }
                             });
                         }
                     }
