@@ -15,6 +15,7 @@ fn initializes_every_template_without_tools_or_network() {
         ("typescript", &[]),
         ("typescript", &["--framework", "nuxt"]),
         ("typescript", &["--framework", "next"]),
+        ("rust", &["--framework", "topcoat"]),
         ("typescript", &["--runtime", "process"]),
         ("typescript", &["--runtime", "page-definition"]),
         ("typescript", &["--runtime", "wasm-component"]),

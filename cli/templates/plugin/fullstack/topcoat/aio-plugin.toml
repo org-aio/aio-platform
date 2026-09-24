@@ -1,0 +1,24 @@
+schema_version = 2
+
+[plugin.marketplace]
+title = "__TITLE__"
+summary = "Topcoat Rust 服务端全栈插件，包含真实路由、服务状态和 AIO 隔离前端。"
+license = "MIT"
+tags = ["rust", "topcoat", "fullstack"]
+
+[plugin.runtime]
+artifact = "dist/server"
+host_version = ">=2026.9.21"
+
+[plugin.runtime.process]
+image = "sha256:48a661b5e5f4560287dfc254e948825538d0f7a1379616495a424ed375afd31f"
+endpoints = []
+http_endpoints = []
+services = []
+worker_capabilities = []
+
+[plugin.frontend]
+path = "dist/frontend"
+
+[plugin.capabilities]
+database = false

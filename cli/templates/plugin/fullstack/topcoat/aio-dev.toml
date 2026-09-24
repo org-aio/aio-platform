@@ -1,0 +1,14 @@
+[frontend]
+inputs = ["frontend"]
+command = ["sh", "-c", "mkdir -p dist/frontend && cp frontend/index.html frontend/styles.css frontend/app.js dist/frontend/"]
+output = "dist/frontend"
+
+[backend]
+inputs = ["Cargo.toml", "Cargo.lock", "src"]
+command = ["cargo", "build"]
+output = "target/debug/__NAME__"
+
+[run]
+command = ["{artifact}"]
+health = "/health"
+environment = { AIO_PLUGIN_PORT = "{port}" }

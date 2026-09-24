@@ -144,6 +144,7 @@ pub fn repository_plugin(options: RepositoryPluginOptions) -> Result<()> {
     let language = match template {
         PluginTemplate::Fullstack(language) => language,
         PluginTemplate::Rust => PluginLanguage::Rust,
+        PluginTemplate::WebFullstack(WebFramework::Topcoat) => PluginLanguage::Rust,
         PluginTemplate::KotlinPages
         | PluginTemplate::KotlinComponent
         | PluginTemplate::KotlinService => PluginLanguage::Kotlin,

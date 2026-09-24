@@ -2,7 +2,7 @@
 
 负责生成可直接构建的 Web/Desktop/Server 应用仓库，以及 Rust、Kotlin Toolchain、TypeScript 插件仓库。模板消费正式插件协议与独立 workbench 壳，不复制宿主组件、CSS 或私有模型。
 
-三种语言默认生成全栈插件：Rust 为 Dioxus + Component，Kotlin 为 Compose Web + Ktor，TypeScript 为浏览器前端 + Node 服务，分别拆分前端、后端和共享模型。生成的 `aio-delivery.toml` 是自动发现的显式标记；推送默认分支后由独立构建服务发布，无需 GitHub Actions。Rust 系统源码插件使用 `--kind system`，页面扩展实现 trait 后由 Dill 按具体 `TypeId` 聚合。
+三种语言默认生成全栈插件：Rust 为 Dioxus + Component，Kotlin 为 Compose Web + Ktor，TypeScript 为浏览器前端 + Node 服务，分别拆分前端、后端和共享模型。`--framework nuxt|next|topcoat` 生成框架原生全栈插件；Topcoat 自动选择 Rust，产出 Linux `process` 服务与 AIO 隔离前端。生成的 `aio-delivery.toml` 是自动发现的显式标记；推送默认分支后由独立构建服务发布，无需 GitHub Actions。Rust 系统源码插件使用 `--kind system`，页面扩展实现 trait 后由 Dill 按具体 `TypeId` 聚合。
 
 `--runtime` 保留 Kotlin 与 TypeScript 的 `page-definition`、`wasm-component`、`process` 高级模板。Kotlin Component 当前明确标记为预览。模板生成锁定工具链、功能目录 README、测试构建入口和本地构建说明；生产安装器只接受通过验证的二进制包。
 

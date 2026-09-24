@@ -37,6 +37,7 @@ pub enum PluginTemplate {
 pub enum WebFramework {
     Nuxt,
     Next,
+    Topcoat,
 }
 
 impl WebFramework {
@@ -44,7 +45,8 @@ impl WebFramework {
         match value {
             "nuxt" => Ok(Self::Nuxt),
             "next" => Ok(Self::Next),
-            _ => bail!("全栈框架必须是 nuxt 或 next: {value}"),
+            "topcoat" => Ok(Self::Topcoat),
+            _ => bail!("全栈框架必须是 nuxt、next 或 topcoat: {value}"),
         }
     }
 }
@@ -95,6 +97,7 @@ impl PluginTemplate {
             Self::Fullstack(PluginLanguage::TypeScript) => "TypeScript 全栈插件",
             Self::WebFullstack(WebFramework::Nuxt) => "Nuxt 全栈插件",
             Self::WebFullstack(WebFramework::Next) => "Next.js 全栈插件",
+            Self::WebFullstack(WebFramework::Topcoat) => "Topcoat 全栈插件",
             Self::Rust => "Rust 源码插件（Dill/TypeId 自动聚合）",
             Self::KotlinPages => "Kotlin 静态页面",
             Self::KotlinComponent => "Kotlin Wasm Component（预览）",

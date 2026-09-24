@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>__TITLE__</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <p class="eyebrow">Topcoat full-stack plugin</p>
+        <h1>__TITLE__</h1>
+        <p class="lede">Rust 服务端路由、共享计数状态与 AIO 隔离前端位于同一个插件包。</p>
+      </header>
+      <section class="panel">
+        <span class="label">当前计数</span>
+        <strong id="counter">0</strong>
+        <button id="increment" type="button">增加一次</button>
+      </section>
+      <section class="panel context">
+        <span class="label">宿主注入身份</span>
+        <p id="context">读取中…</p>
+      </section>
+      <p id="error" class="error" role="alert"></p>
+    </main>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

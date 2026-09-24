@@ -160,18 +160,26 @@ fn parse_plugin_init_arguments(arguments: &[String]) -> Result<RepositoryPluginO
         index += 2;
     }
     let language = language.unwrap_or_else(|| {
-        if framework.is_some() || kind == Some("cli") {
+        if matches!(framework, Some(WebFramework::Topcoat)) {
+            PluginLanguage::Rust
+        } else if framework.is_some() || kind == Some("cli") {
             PluginLanguage::TypeScript
         } else {
             PluginLanguage::default()
         }
     });
     let template = if let Some(framework) = framework {
-        if language != PluginLanguage::TypeScript
+        let expected_language = match framework {
+            WebFramework::Nuxt | WebFramework::Next => PluginLanguage::TypeScript,
+            WebFramework::Topcoat => PluginLanguage::Rust,
+        };
+        if language != expected_language
             || runtime.is_some()
             || !matches!(kind, None | Some("fullstack"))
         {
-            bail!("--framework 仅适用于 TypeScript 全栈插件，不能与 --runtime 或其他 --kind 组合");
+            bail!(
+                "--framework nuxt|next 仅适用于 TypeScript，--framework topcoat 仅适用于 Rust；均不能与 --runtime 或其他 --kind 组合"
+            );
         }
         PluginTemplate::WebFullstack(framework)
     } else {
@@ -307,11 +315,11 @@ fn is_help(argument: &str) -> bool {
 }
 
 fn usage() -> &'static str {
-    "用法:\n  aio helper install|uninstall\n  aio tool install <id> --version <版本>\n  aio tool uninstall <id>\n  aio tool list\n  aio tool release setup|prepare|publish|sync\n  aio open <aio://install/id?version=版本>\n  aio init <目录> [--name <包名>] [--title <标题>] [--network <china|global>]\n  aio plugin init <目录> [--name <包名>] [--title <插件标题>] [--language <rust|kotlin|typescript>] [--framework <nuxt|next>] [--network <china|global>]\n  aio plugin init --help\n  aio plugin install <git> [--rev <分支、标签或提交>]\n  aio plugin package <目录> --version <SemVer> [--git <HTTPS Git>] [-o <文件.aio-plugin>]\n  aio plugin publish [<目录或文件.aio-plugin>] [--git <HTTPS Git>] [--version <SemVer>]\n  aio plugin uninstall <git>\n  aio plugin sync\n  aio plugin list\n  aio plugin validate [<仓库目录>]\n  aio plugin schema [<输出目录>]"
+    "用法:\n  aio helper install|uninstall\n  aio tool install <id> --version <版本>\n  aio tool uninstall <id>\n  aio tool list\n  aio tool release setup|prepare|publish|sync\n  aio open <aio://install/id?version=版本>\n  aio init <目录> [--name <包名>] [--title <标题>] [--network <china|global>]\n  aio plugin init <目录> [--name <包名>] [--title <插件标题>] [--language <rust|kotlin|typescript>] [--framework <nuxt|next|topcoat>] [--network <china|global>]\n  aio plugin init --help\n  aio plugin install <git> [--rev <分支、标签或提交>]\n  aio plugin package <目录> --version <SemVer> [--git <HTTPS Git>] [-o <文件.aio-plugin>]\n  aio plugin publish [<目录或文件.aio-plugin>] [--git <HTTPS Git>] [--version <SemVer>]\n  aio plugin uninstall <git>\n  aio plugin sync\n  aio plugin list\n  aio plugin validate [<仓库目录>]\n  aio plugin schema [<输出目录>]"
 }
 
 fn plugin_init_usage() -> &'static str {
-    "用法:\n  aio plugin init <目录> [--name <包名>] [--title <标题>] [--language <rust|kotlin|typescript>] [--framework <nuxt|next>] [--network <china|global>] [--kind <cli|fullstack|system|runtime>] [--adopt]\n\n默认国内依赖源，初始化不联网；--network global 使用官方源。\n默认生成全栈插件，包含前端、后端、共享模型与自动发布配置。推送默认分支后自动构建上架。\n  --kind cli      TypeScript 本机 CLI，生成 npm 与 AIO 市场自动发布工作流\n  --adopt         将已有 npm CLI 接入 AIO，不覆盖源码\n  --kind system   Rust 系统源码插件，使用 trait + Dill/TypeId\n\nTypeScript 全栈框架（自动选择 TypeScript）:\n  --framework nuxt   Nuxt 全栈示例\n  --framework next   Next.js 全栈示例\n\n高级模板覆盖（Kotlin/TypeScript）:\n  --runtime page-definition   静态页面\n  --runtime wasm-component    Component\n  --runtime process           JVM/Node 服务"
+    "用法:\n  aio plugin init <目录> [--name <包名>] [--title <标题>] [--language <rust|kotlin|typescript>] [--framework <nuxt|next|topcoat>] [--network <china|global>] [--kind <cli|fullstack|system|runtime>] [--adopt]\n\n默认国内依赖源，初始化不联网；--network global 使用官方源。\n默认生成全栈插件，包含前端、后端、共享模型与自动发布配置。推送默认分支后自动构建上架。\n  --kind cli      TypeScript 本机 CLI，生成 npm 与 AIO 市场自动发布工作流\n  --adopt         将已有 npm CLI 接入 AIO，不覆盖源码\n  --kind system   Rust 系统源码插件，使用 trait + Dill/TypeId\n\n全栈框架:\n  --framework nuxt      Nuxt 全栈示例\n  --framework next      Next.js 全栈示例\n  --framework topcoat   Topcoat Rust process 全栈示例\n\n高级模板覆盖（Kotlin/TypeScript）:\n  --runtime page-definition   静态页面\n  --runtime wasm-component    Component\n  --runtime process           JVM/Node 服务"
 }
 fn plugin_publish_usage() -> &'static str {
     "用法:\n  aio plugin publish [<目录或文件.aio-plugin>] [--git <HTTPS Git>] [--version <SemVer>]\n\n默认直接发布到官方插件中心，不依赖 CI。目录可从自己的 origin 推导来源，并从 Cargo.toml 或 package.json 推导版本。已有插件包保留包内来源和版本。\n\n环境变量:\n  AIO_PLUGIN_PUBLISH_TOKEN   插件市场创建的来源绑定发布凭证\n  AIO_PLUGIN_PUBLISH_URL     可选，覆盖官方插件中心发布接口\n\n发布前校验包的清单、版本和内容摘要。构建产物不需要提交到 Git。"
@@ -342,7 +350,11 @@ mod tests {
 
     #[test]
     fn selects_web_framework_and_rejects_conflicting_options() -> Result<()> {
-        for (name, framework) in [("nuxt", WebFramework::Nuxt), ("next", WebFramework::Next)] {
+        for (name, framework, language) in [
+            ("nuxt", WebFramework::Nuxt, "typescript"),
+            ("next", WebFramework::Next, "typescript"),
+            ("topcoat", WebFramework::Topcoat, "rust"),
+        ] {
             let base = ["plugin", "--framework", name];
             let parse = |extra: &[&str]| {
                 parse_plugin_init_arguments(
@@ -358,11 +370,16 @@ mod tests {
                 PluginTemplate::WebFullstack(framework)
             );
             assert_eq!(
-                parse(&["--language", "typescript", "--kind", "fullstack"])?.template,
+                parse(&["--language", language, "--kind", "fullstack"])?.template,
                 PluginTemplate::WebFullstack(framework)
             );
+            let wrong_language = if language == "rust" {
+                "typescript"
+            } else {
+                "rust"
+            };
             for extra in [
-                ["--language", "rust"],
+                ["--language", wrong_language],
                 ["--language", "kotlin"],
                 ["--kind", "system"],
                 ["--kind", "runtime"],
