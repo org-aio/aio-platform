@@ -1,7 +1,9 @@
 use super::model::Worker;
 use az_ui_components::{
+    admin::{AsyncResult, EditorDialog},
     button::{Button, ButtonVariant},
     dialog::{Dialog, DialogTitle},
+    input::TextInput,
 };
 use dioxus::prelude::*;
 use serde::{Serialize, de::DeserializeOwned};
@@ -62,6 +64,8 @@ pub(crate) fn WorkerPanel(pairing: Signal<Option<String>>, on_close: EventHandle
     let mut error = use_signal(|| None::<String>);
     let mut busy = use_signal(|| false);
     let mut revoke = use_signal(|| None::<Worker>);
+    let mut rename = use_signal(|| None::<Worker>);
+    let mut label = use_signal(String::new);
     let code = pairing;
     let mut notice = use_signal(|| None::<String>);
     let mut copied = use_signal(|| None::<String>);
@@ -164,8 +168,11 @@ pub(crate) fn WorkerPanel(pairing: Signal<Option<String>>, on_close: EventHandle
                                     strong{"{worker.label} · {worker.status}"}
                                     small{"{worker.platform}"}
                                 }
-                                if worker.status!="revoked"{
-                                    Button{variant:ButtonVariant::Ghost,onclick:{let worker=worker.clone();move |_|revoke.set(Some(worker.clone()))},"撤销配对"}
+                                div{class:"flex items-center gap-1",
+                                    if worker.status!="revoked"{
+                                        Button{variant:ButtonVariant::Ghost,onclick:{let worker=worker.clone();move |_|{label.set(worker.label.clone());rename.set(Some(worker.clone()));}},"备注"}
+                                        Button{variant:ButtonVariant::Ghost,onclick:{let worker=worker.clone();move |_|revoke.set(Some(worker.clone()))},"撤销配对"}
+                                    }
                                 }
                             }
                         }
@@ -178,6 +185,21 @@ pub(crate) fn WorkerPanel(pairing: Signal<Option<String>>, on_close: EventHandle
             Dialog{open:true,on_open_change:move|open:bool|if !open{revoke.set(None)},DialogTitle{"撤销设备配对"}
                 p{"撤销 {worker.label} 的配对后，该设备无法继续同步、执行任务或访问归档。"}
                 Button{disabled:busy(),onclick:move |_|{let id=worker.id.clone();busy.set(true);spawn(async move{match request::<()>("DELETE",&format!("/api/runtime/workers/{id}"),None::<&()>).await{Ok(())=>{revoke.set(None);workers.restart();},Err(e)=>error.set(Some(e))}busy.set(false);});},"确认撤销"}
+            }
+        }
+        if let Some(worker)=rename(){
+            EditorDialog{title:"设备备注",description:format!("为 {} 设置一个便于识别的名称；设备 ID 和配对状态保持不变。",worker.label),
+                save: {let id=worker.id.clone();move |_| -> AsyncResult<()> {
+                    let id=id.clone();let value=label().trim().to_owned();
+                    Box::pin(async move {
+                        if value.is_empty(){return Err("设备备注不能为空".into());}
+                        request::<Worker>("PATCH",&format!("/api/runtime/workers/{id}"),Some(&serde_json::json!({"label":value}))).await?;
+                        Ok(())
+                    })
+                }},
+                on_saved: move |_|{rename.set(None);workers.restart();},
+                on_close: move |_|rename.set(None),
+                TextInput{label:"备注名称".to_string(),value:label(),on_change:move |value:String|label.set(value),placeholder:"例如：工作笔记本".to_string()}
             }
         }
     }

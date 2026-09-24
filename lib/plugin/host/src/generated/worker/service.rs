@@ -12,6 +12,12 @@ pub(crate) trait WorkerService: Any + Send + Sync {
     async fn poll(&self, token: &str) -> Result<String>;
     async fn identity(&self, token: &str) -> Result<DeviceIdentity>;
     async fn list(&self, session: &SessionContext) -> Result<Vec<Worker>>;
+    async fn update_label(
+        &self,
+        session: &SessionContext,
+        id: &str,
+        request: UpdateLabelRequest,
+    ) -> Result<Worker>;
     async fn revoke(&self, session: &SessionContext, id: &str) -> Result<()>;
     async fn enqueue(&self, session: &SessionContext, request: SubmitTask) -> Result<Task>;
     async fn tasks(&self, session: &SessionContext) -> Result<Vec<Task>>;

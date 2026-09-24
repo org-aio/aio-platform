@@ -57,6 +57,118 @@ async fn post(
     .await?)
 }
 #[tokio::test]
+#[ignore = "需要隔离 PostgreSQL，设置 AIO_TEST_DATABASE_URL"]
+async fn device_label_is_owner_scoped_trimmed_and_persistent() -> Result<()> {
+    let database = std::env::var("AIO_TEST_DATABASE_URL")?;
+    let admin = sqlx::PgPool::connect(&database).await?;
+    let schema = format!("worker_label_{}", uuid::Uuid::new_v4().simple());
+    sqlx::query(&format!("CREATE SCHEMA {schema}"))
+        .execute(&admin)
+        .await?;
+    let mut isolated = reqwest::Url::parse(&database)?;
+    isolated
+        .query_pairs_mut()
+        .append_pair("options", &format!("-c search_path={schema}"));
+    let root = tempfile::tempdir()?;
+    let state = RuntimeState::isolated_admin_test(
+        Arc::new(Identity),
+        &isolated.to_string(),
+        "http://127.0.0.1:1",
+        root.path(),
+    )
+    .await?;
+    let session = SessionContext {
+        session_id: "owner".into(),
+        user_id: "owner".into(),
+        account: "owner".into(),
+        display_name: "Owner".into(),
+        tenant_id: "test".into(),
+        tenant_label: "Test".into(),
+        permissions: vec![],
+    };
+    let pairing = state
+        .workers
+        .pair(PairRequest {
+            label: "host-name".into(),
+            platform: "darwin".into(),
+            capabilities: vec!["space.scan".into()],
+        })
+        .await?;
+    state.workers.approve(&session, &pairing.code).await?;
+    let renamed = state
+        .workers
+        .update_label(
+            &session,
+            &pairing.device_id,
+            UpdateLabelRequest {
+                label: "  工作笔记本  ".into(),
+            },
+        )
+        .await?;
+    assert_eq!(renamed.label, "工作笔记本");
+    assert_eq!(state.workers.list(&session).await?[0].label, "工作笔记本");
+    let stored: String = sqlx::query_scalar("SELECT label FROM worker_devices WHERE id=$1")
+        .bind(&pairing.device_id)
+        .fetch_one(&state.store.pool)
+        .await?;
+    assert_eq!(stored, "工作笔记本");
+    for invalid in ["", "   ", "标".repeat(121)] {
+        assert!(
+            state
+                .workers
+                .update_label(
+                    &session,
+                    &pairing.device_id,
+                    UpdateLabelRequest {
+                        label: invalid.into()
+                    }
+                )
+                .await
+                .is_err()
+        );
+    }
+    let other = SessionContext {
+        user_id: "other".into(),
+        account: "other".into(),
+        ..session.clone()
+    };
+    assert!(
+        state
+            .workers
+            .update_label(
+                &other,
+                &pairing.device_id,
+                UpdateLabelRequest {
+                    label: "越权".into()
+                }
+            )
+            .await
+            .is_err()
+    );
+    let other_tenant = SessionContext {
+        tenant_id: "other-tenant".into(),
+        ..session
+    };
+    assert!(
+        state
+            .workers
+            .update_label(
+                &other_tenant,
+                &pairing.device_id,
+                UpdateLabelRequest {
+                    label: "越权".into()
+                }
+            )
+            .await
+            .is_err()
+    );
+    state.store.pool.close().await;
+    sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
+        .execute(&admin)
+        .await?;
+    Ok(())
+}
+#[tokio::test]
 #[ignore = "需要隔离 PostgreSQL、restic 和已构建的空间 worker，设置 AIO_TEST_DATABASE_URL / AIO_SPACE_TEST_CLI"]
 async fn worker_pairing_tasks_archives_and_revocation_end_to_end() -> Result<()> {
     let root = tempfile::tempdir()?;

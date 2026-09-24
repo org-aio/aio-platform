@@ -7,7 +7,7 @@ use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Path, State},
     http::{HeaderMap, header},
-    routing::{delete, get, post, put},
+    routing::{get, patch, post, put},
 };
 
 pub(crate) fn router() -> Router<RuntimeState> {
@@ -19,7 +19,10 @@ pub(crate) fn router() -> Router<RuntimeState> {
             get(pairing).post(approve),
         )
         .route("/api/runtime/workers", get(list))
-        .route("/api/runtime/workers/{id}", delete(revoke))
+        .route(
+            "/api/runtime/workers/{id}",
+            patch(update_label).delete(revoke),
+        )
         .route("/api/runtime/workers/{id}/desktop", put(desktop))
         .route("/api/runtime/workers/tasks", get(tasks).post(enqueue))
         .route("/api/runtime/workers/tasks/{id}", get(task))
@@ -116,6 +119,17 @@ async fn list(
 ) -> Result<Json<RuntimeResponse<Vec<Worker>>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
     Ok(response(state.workers.list(&session).await?))
+}
+async fn update_label(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(request): Json<UpdateLabelRequest>,
+) -> Result<Json<RuntimeResponse<Worker>>, RuntimeError> {
+    let session = authenticate(&state, &headers).await?;
+    Ok(response(
+        state.workers.update_label(&session, &id, request).await?,
+    ))
 }
 async fn revoke(
     State(state): State<RuntimeState>,

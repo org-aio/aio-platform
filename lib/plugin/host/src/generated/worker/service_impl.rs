@@ -93,6 +93,25 @@ impl WorkerService for WorkerServiceImpl {
             .bind(&session.tenant_id).bind(&session.user_id).fetch_all(&self.pool).await?;
         rows.into_iter().map(worker).collect()
     }
+    async fn update_label(
+        &self,
+        session: &SessionContext,
+        id: &str,
+        request: UpdateLabelRequest,
+    ) -> Result<Worker> {
+        let label = request.label.trim();
+        ensure!(
+            !label.is_empty() && label.chars().count() <= 120,
+            "设备备注需要为 1 至 120 个字符"
+        );
+        let updated=sqlx::query("UPDATE worker_devices SET label=$4 WHERE id=$1 AND tenant_id=$2 AND user_id=$3 AND state='active'")
+            .bind(id).bind(&session.tenant_id).bind(&session.user_id).bind(label)
+            .execute(&self.pool).await?.rows_affected();
+        ensure!(updated == 1, "设备不存在或已撤销");
+        let row=sqlx::query("SELECT *,CASE WHEN last_seen>now()-interval '90 seconds' THEN 'online' ELSE 'offline' END AS status,(extract(epoch FROM last_seen)*1000)::bigint AS last_seen_ms FROM worker_devices WHERE id=$1 AND tenant_id=$2 AND user_id=$3")
+            .bind(id).bind(&session.tenant_id).bind(&session.user_id).fetch_one(&self.pool).await?;
+        worker(row)
+    }
     async fn revoke(&self, session: &SessionContext, id: &str) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         let n = sqlx::query(

@@ -24,6 +24,11 @@ pub struct Worker {
     pub status: String,
     pub last_seen: Option<i64>,
 }
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateLabelRequest {
+    pub label: String,
+}
 /// 任务 ID 用于去重，租约只在领取后交给对应设备。
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Task {
