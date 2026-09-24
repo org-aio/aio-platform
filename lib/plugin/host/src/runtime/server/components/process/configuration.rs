@@ -151,6 +151,9 @@ impl Processes {
                 let upstream_socket = connection
                     .get_socket()
                     .map(|path| path.join(format!(".s.PGSQL.{port}")));
+                eprintln!(
+                    "process 数据库代理上游 host={host} port={port} socket={upstream_socket:?}"
+                );
                 jobs.spawn(async move {
                 let mut clients = JoinSet::new();
                 loop {
