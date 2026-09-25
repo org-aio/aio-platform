@@ -198,6 +198,29 @@ test('foreground takes over an aborted background transfer with its own grant', 
   assert(f.requests[1].url.includes('/foreground/'));
 });
 
+test('foreground immediately replaces an in-flight background download even before abort propagation', async () => {
+  const f = fixture();
+  const controller = new AbortController();
+  let releaseWarm;
+  const warmStarted = new Promise(resolve => { releaseWarm = resolve; });
+  f.env.fetch = async (url, options) => {
+    f.requests.push({ url, options });
+    if (url.includes('/warm/')) {
+      releaseWarm();
+      return new Promise((_, reject) => options.signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true }));
+    }
+    return new Response(f.bytes);
+  };
+  const warm = f.create({ ...f.config, abi: 2, background: true })('app.js', 'warm', controller.signal);
+  await warmStarted;
+  const foreground = f.create({ ...f.config, abi: 2 })('app.js', 'foreground');
+  assert.deepEqual(Buffer.from((await foreground).bytes), f.bytes);
+  assert.equal(f.requests.length, 2);
+  assert(f.requests[1].url.includes('/foreground/'));
+  controller.abort();
+  await assert.rejects(warm, /cancelled/);
+});
+
 test('cancelled readers cannot receive a cached resource', async () => {
   const f = fixture();
   await f.create(f.config)('app.js', 'ticket');
