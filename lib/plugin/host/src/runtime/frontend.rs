@@ -51,19 +51,24 @@ pub(super) fn RuntimeFrontend(page_id: String, label: String) -> Element {
             .as_ref()
             .and_then(|value| value.as_ref().err().cloned())
     });
+    let mut reload = move || {
+        mount.clear();
+        invalid.set(None);
+        mount.restart();
+    };
     if let Some(message) = failure {
         return rsx! {
             p { role: "alert", "加载插件页面失败: {message}" }
             Button {
                 variant: ButtonVariant::Outline,
-                onclick: move |_| { mount.clear(); invalid.set(None); mount.restart(); },
+                onclick: move |_| reload(),
                 "重新打开"
             }
         };
     }
     match mount.read().as_ref() {
         Some(Ok(mount)) => {
-            rsx! { MountedFrontend { key: "{mount.token}", mount: mount.clone(), page_id, label, on_error: move |error| invalid.set(Some(error)), on_retry: move |_| { mount.clear(); invalid.set(None); mount.restart(); } } }
+            rsx! { MountedFrontend { key: "{mount.token}", mount: mount.clone(), page_id, label, on_error: move |error| invalid.set(Some(error)), on_retry: reload } }
         }
         Some(Err(error)) => rsx! { p { role: "alert", "加载插件页面失败: {error}" } },
         None => rsx! { p { role: "status", "正在加载插件页面" } },
