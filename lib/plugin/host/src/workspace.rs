@@ -2,12 +2,33 @@ use crate::{runtime, startup};
 use dioxus::prelude::*;
 
 #[cfg(any(feature = "web", feature = "desktop"))]
+fn runtime_page(page: runtime::PageDefinition) -> az_dioxus_admin_shell::ApplicationRuntimePage {
+    use az_dioxus_admin_shell::{ApplicationMenuGroup, ApplicationRuntimePage};
+
+    ApplicationRuntimePage {
+        id: page.id,
+        label: page.label,
+        icon: page.icon,
+        scene_id: page.scene.id,
+        scene_label: page.scene.label,
+        menu_path: page
+            .menu_path
+            .into_iter()
+            .map(|group| ApplicationMenuGroup {
+                id: group.id,
+                label: group.label,
+                icon: group.icon,
+            })
+            .collect(),
+        required_permission: page.required_permission,
+        definition: serde_json::to_string(&page.body).unwrap_or_default(),
+    }
+}
+
+#[cfg(any(feature = "web", feature = "desktop"))]
 #[dioxus::prelude::component]
 pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prelude::Element {
-    use az_dioxus_admin_shell::{
-        ApplicationAccountItem, ApplicationMenuGroup, ApplicationRuntimePage, ApplicationUser,
-        PluginApplication,
-    };
+    use az_dioxus_admin_shell::{ApplicationAccountItem, ApplicationUser, PluginApplication};
     use dioxus::prelude::*;
 
     let mut worker_open = use_signal(|| false);
@@ -161,24 +182,7 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
                     .iter()
                     .any(|item| item.page_id == page.id)
         })
-        .map(|page| ApplicationRuntimePage {
-            id: page.id,
-            label: page.label,
-            icon: page.icon,
-            scene_id: "workspace".into(),
-            scene_label: "工作空间".into(),
-            menu_path: page
-                .menu_path
-                .into_iter()
-                .map(|group| ApplicationMenuGroup {
-                    id: group.id,
-                    label: group.label,
-                    icon: group.icon,
-                })
-                .collect(),
-            required_permission: page.required_permission,
-            definition: serde_json::to_string(&page.body).unwrap_or_default(),
-        })
+        .map(runtime_page)
         .collect::<Vec<_>>();
     rsx! {
         runtime::frontend_preload::FrontendPreload {
@@ -218,5 +222,34 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
           }
           }
         }
+    }
+}
+
+#[cfg(all(test, any(feature = "web", feature = "desktop")))]
+mod tests {
+    use az_plugin_manifest::{PageBody, PageDefinition, SceneDefinition};
+
+    use super::runtime_page;
+
+    #[test]
+    fn runtime_page_preserves_plugin_scene() {
+        let page = PageDefinition {
+            id: "documentation.home".into(),
+            label: "首页".into(),
+            icon: None,
+            scene: SceneDefinition {
+                id: "documentation-agent".into(),
+                label: "资料员服务平台".into(),
+            },
+            menu_path: Vec::new(),
+            required_permission: None,
+            body: PageBody::Text {
+                title: "首页".into(),
+                content: "ok".into(),
+            },
+        };
+        let converted = runtime_page(page);
+        assert_eq!(converted.scene_id, "documentation-agent");
+        assert_eq!(converted.scene_label, "资料员服务平台");
     }
 }
