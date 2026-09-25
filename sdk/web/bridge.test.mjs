@@ -52,6 +52,22 @@ test('guest transports binary bodies and ignores other windows', async () => {
   await assert.rejects(window.aioPlugin.request({ path: '//outside', body: new Uint8Array() }));
 });
 
+test('guest creates request ids in sandboxed opaque origins without randomUUID', async () => {
+  let receive;
+  let sent;
+  const parent = { postMessage: message => { sent = message; } };
+  const window = { parent, addEventListener: (_kind, listener) => { receive = listener; } };
+  const context = vm.createContext({
+    window, document: { currentScript: { dataset: {} } },
+    Uint8Array, TextEncoder, TextDecoder, URL, setTimeout, clearTimeout,
+  });
+  vm.runInContext(readFileSync(new URL('./guest.js', import.meta.url), 'utf8'), context);
+  const request = window.aioPlugin.request({ path: '/file', body: new Uint8Array() });
+  assert.match(sent.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  receive({ source: parent, data: { protocol: 'aio:plugin@2', kind: 'response', id: sent.id, response: { status: 204, headers: [], body: [] } } });
+  assert.equal((await request).status, 204);
+});
+
 test('host checks opaque origin, frame ownership and revocation', async () => {
   let listener;
   let reply;
