@@ -106,3 +106,10 @@ fn document_bootstrap_replaces_base_and_stays_in_sandbox() -> anyhow::Result<()>
     assert!(nested.contains(&format!("href=\"{prefix}pages/\"")));
     Ok(())
 }
+
+#[test]
+fn module_loader_does_not_treat_javascript_as_typescript() {
+    let source = std::str::from_utf8(frontend_document::MODULES).expect("模块加载器必须是 UTF-8");
+    assert!(source.contains("const tsContentType = /^application\\/typescript(;|$)/;"));
+    assert!(!source.contains("const tsContentType = /^application\\/typescript(;|$)|/;"));
+}
