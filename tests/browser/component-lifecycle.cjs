@@ -19,6 +19,7 @@ const grants = new Map();
 const counts = { mount: 0, delete: 0, request: 0, renew: 0 };
 const requests = [];
 let deleteDelay = 0;
+let renewStatus = 204;
 
 function send(response, status, data) {
   response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -33,7 +34,7 @@ async function body(request) {
 
 async function waitFor(predicate) {
   for (let attempt = 0; attempt < 200; attempt++) {
-    if (predicate()) return;
+    if (await predicate()) return;
     await new Promise(resolve => setTimeout(resolve, 25));
   }
   assert.fail('等待组件票据生命周期状态超时');
@@ -73,7 +74,7 @@ const server = createServer(async (request, response) => {
       if (!grants.has(token)) return send(response, 403, { error: 'Mount revoked' });
       if (action === 'renew') {
         counts.renew++;
-        response.writeHead(204);
+        response.writeHead(renewStatus);
         return response.end();
       }
       counts.request++;
@@ -100,9 +101,9 @@ const server = createServer(async (request, response) => {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  try {
-    await page.goto(origin);
-    const mount = await page.evaluate(async () => (await (await fetch('/api/runtime/frontend/mount', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ page_id: 'component-page' }) })).json()).data);
+
+  const componentSource = await component;
+  const startComponent = async config => {
     await page.evaluate(config => {
       document.body.innerHTML = `<div id="page" data-aio-page-active="true" data-aio-workspace-active="true" data-aio-workspace-context="${config.context}"><iframe id="frame" sandbox="allow-scripts allow-forms"></iframe></div>`;
       window.__hostMessages = [];
@@ -111,8 +112,14 @@ const server = createServer(async (request, response) => {
         recv: () => receive++ === 0 ? Promise.resolve({ ...config, id: 'frame', development: false }) : new Promise(resolve => { window.__finish = resolve; }),
         send: message => window.__hostMessages.push(message),
       };
-    }, mount);
-    await page.addScriptTag({ content: `(async () => {\n${await component}\n})().catch(error => { window.__hostMessages.push({ error: error.message }); });` });
+    }, config);
+    await page.addScriptTag({ content: `(async () => {\n${componentSource}\n})().catch(error => { window.__hostMessages.push({ error: error.message }); });` });
+  };
+
+  try {
+    await page.goto(origin);
+    const mount = await page.evaluate(async () => (await (await fetch('/api/runtime/frontend/mount', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ page_id: 'component-page' }) })).json()).data);
+    await startComponent(mount);
 
     const frame = page.frameLocator('#frame');
     await frame.locator('body').waitFor({ state: 'attached' });
@@ -152,8 +159,20 @@ const server = createServer(async (request, response) => {
     await waitFor(() => grants.size === 0);
     await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
     await waitFor(() => grants.size === 1);
+
+    const mountsBeforeRetry = counts.mount;
+    renewStatus = 403;
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await waitFor(() => page.evaluate(() => window.__hostMessages.some(message => message.retry)).then(Boolean));
+    await waitFor(() => grants.size === 0);
+    const recoveredMount = await page.evaluate(async () => (await (await fetch('/api/runtime/frontend/mount', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ page_id: 'component-page' }) })).json()).data);
+    await startComponent(recoveredMount);
+    await waitFor(() => counts.mount === mountsBeforeRetry + 1 && grants.size === 1);
+    assert.equal(await page.locator('#frame').count(), 1);
+    assert.notEqual(await page.locator('#frame').getAttribute('src'), initialSource);
+    await page.frameLocator('#frame').locator('body').waitFor({ state: 'attached' });
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({ retainedFrame: true, releasedOnSuspend: true, restoredWithNewGrant: true, repeatedCycles: 20, bfcache: true, maxGrants: 1 }));
+    console.log(JSON.stringify({ retainedFrame: true, releasedOnSuspend: true, restoredWithNewGrant: true, recoveredAfterRenewRevocation: true, repeatedCycles: 20, bfcache: true, maxGrants: 1 }));
   } finally {
     await context.close();
     await browser.close();

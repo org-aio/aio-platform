@@ -63,7 +63,7 @@ pub(super) fn RuntimeFrontend(page_id: String, label: String) -> Element {
     }
     match mount.read().as_ref() {
         Some(Ok(mount)) => {
-            rsx! { MountedFrontend { key: "{mount.token}", mount: mount.clone(), page_id, label, on_error: move |error| invalid.set(Some(error)) } }
+            rsx! { MountedFrontend { key: "{mount.token}", mount: mount.clone(), page_id, label, on_error: move |error| invalid.set(Some(error)), on_retry: move |_| { mount.clear(); invalid.set(None); mount.restart(); } } }
         }
         Some(Err(error)) => rsx! { p { role: "alert", "加载插件页面失败: {error}" } },
         None => rsx! { p { role: "status", "正在加载插件页面" } },
@@ -76,6 +76,7 @@ fn MountedFrontend(
     page_id: String,
     label: String,
     on_error: Callback<String>,
+    on_retry: Callback<()>,
 ) -> Element {
     let mut bridge = use_signal(|| None::<document::Eval>);
     let frame_id = format!("aio-frontend-{}", mount.token);
@@ -101,10 +102,19 @@ fn MountedFrontend(
                         Ok(()) => {
                             bridge.set(Some(evaluator));
                             spawn(async move {
-                                if let Ok(message) = evaluator.recv::<serde_json::Value>().await
-                                    && let Some(message) = message.get("error").and_then(|value| value.as_str())
-                                {
-                                    on_error.call(message.to_owned());
+                                if let Ok(message) = evaluator.recv::<serde_json::Value>().await {
+                                    let retry = message
+                                        .get("retry")
+                                        .and_then(|value| value.as_bool())
+                                        .unwrap_or(false);
+                                    if retry {
+                                        on_retry.call(());
+                                    } else if let Some(error) = message
+                                        .get("error")
+                                        .and_then(|value| value.as_str())
+                                    {
+                                        on_error.call(error.to_owned());
+                                    }
                                 }
                             });
                         },
