@@ -41,7 +41,7 @@ pub(super) fn session() -> SessionContext {
 }
 
 #[test]
-fn grants_expire_revoke_and_enforce_per_user_quota() -> anyhow::Result<()> {
+fn grants_expire_revoke_and_evict_the_oldest_over_quota_grant() -> anyhow::Result<()> {
     let access = FrontendAccess::new("http://127.0.0.1:8080")?;
     let token = access.issue(grant())?;
     assert_eq!(access.get(&token)?.page_id, "counter");
@@ -51,10 +51,15 @@ fn grants_expire_revoke_and_enforce_per_user_quota() -> anyhow::Result<()> {
     expired.issued = Instant::now() - Duration::from_secs(1801);
     let expired_token = access.issue(expired)?;
     assert!(access.get(&expired_token).is_err());
-    for _ in 0..16 {
+    let mut oldest = grant();
+    oldest.issued = Instant::now() - Duration::from_secs(60);
+    let oldest_token = access.issue(oldest)?;
+    for _ in 0..15 {
         access.issue(grant())?;
     }
-    assert!(access.issue(grant()).is_err());
+    let replacement_token = access.issue(grant())?;
+    assert!(access.get(&oldest_token).is_err());
+    assert!(access.get(&replacement_token).is_ok());
     Ok(())
 }
 

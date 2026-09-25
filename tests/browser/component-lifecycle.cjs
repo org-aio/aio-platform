@@ -18,6 +18,7 @@ let sequence = 0;
 const grants = new Map();
 const counts = { mount: 0, delete: 0, request: 0, renew: 0 };
 const requests = [];
+let deleteDelay = 0;
 
 function send(response, status, data) {
   response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -51,6 +52,7 @@ const server = createServer(async (request, response) => {
     }
     if (path === '/api/runtime/frontend/mount' && request.method === 'POST') {
       const payload = JSON.parse((await body(request)).toString() || '{}');
+      if (grants.size >= 1) return send(response, 400, { error: '当前用户的前端挂载数量超过配额' });
       const token = `ticket-${++sequence}`;
       const mount = { abi: 2, token, revision: 'revision-a', generation: 'generation-a', session_context: 'session-a', context: 'tenant-a', page_id: payload.page_id, assets: {}, src: `/api/runtime/components/assets/${token}/index.html` };
       grants.set(token, mount);
@@ -60,6 +62,7 @@ const server = createServer(async (request, response) => {
     const revoke = path.match(/^\/api\/runtime\/(?:frontend|components)\/([^/]+)$/);
     if (revoke && request.method === 'DELETE') {
       counts.delete++;
+      if (deleteDelay) await new Promise(resolve => setTimeout(resolve, deleteDelay));
       grants.delete(revoke[1]);
       response.writeHead(204);
       return response.end();
@@ -117,12 +120,17 @@ const server = createServer(async (request, response) => {
     assert.equal(grants.size, 1);
     const initialSource = await page.locator('#frame').getAttribute('src');
 
+    deleteDelay = 250;
     await page.evaluate(() => document.querySelector('#page').dataset.aioWorkspaceActive = 'false');
-    await waitFor(() => counts.delete === 1 && grants.size === 0);
+    await waitFor(() => counts.delete === 1);
     assert.equal(await page.locator('#frame').getAttribute('src'), initialSource);
     assert.equal(await frame.locator('body').evaluate(() => window.marker), 'initial');
 
     await page.evaluate(() => document.querySelector('#page').dataset.aioWorkspaceActive = 'true');
+    await page.waitForTimeout(100);
+    assert.equal(counts.mount, 1);
+    await waitFor(() => counts.mount === 2 && grants.size === 1);
+    deleteDelay = 0;
     await waitFor(() => counts.mount === 2 && grants.size === 1);
     const restoredTicket = [...grants.keys()][0];
     assert.notEqual(restoredTicket, mount.token);
