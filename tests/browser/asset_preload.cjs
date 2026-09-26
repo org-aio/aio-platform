@@ -7,14 +7,18 @@ function fixture() {
   const calls = [], loaded = [], options = [];
   const mount = { abi: 2, token: 'warm', revision: 'r', generation: 'g', session_context: 'session', context: 'tenant', assets: { 'index.html': 'h', 'app.mjs': 'a', 'app.wasm': 'b', 'app.wasm.map': 'c' }, asset_sizes: { 'index.html': 10, 'app.mjs': 10, 'app.wasm': 100, 'app.wasm.map': 20 } };
   const config = { session_context: 'session', context: 'tenant', pages: [{ id: 'one', version: 'r:g' }, { id: 'two', version: 'r:g' }] };
+  const activePages = [];
   const env = {
-    caches: {}, navigator: {}, document: { visibilityState: 'visible' }, AbortSignal,
+    caches: {}, navigator: {}, document: {
+      visibilityState: 'visible',
+      querySelectorAll: selector => selector === '[data-aio-page-active="true"]' ? activePages : [],
+    }, AbortSignal,
     setTimeout: callback => setTimeout(callback, 0),
     fetch: async (url, request) => { calls.push({ url, request }); return { ok: true, status: 200, json: async () => ({ data: mount }) }; },
     createFrontendAssetCache: config => { options.push(config); return async (path, ticket, signal) => { signal.throwIfAborted(); loaded.push({ path, ticket }); }; },
   };
   const warm = runInNewContext(readFileSync('lib/plugin/host/src/runtime/frontend_preload.js', 'utf8') + '\nwarmFrontendAssets', env);
-  return { warm, env, config, mount, loaded, calls, options };
+  return { warm, env, config, mount, loaded, calls, options, activePages };
 }
 
 test('warming only reads package assets, coalesces revisions and releases every grant', async () => {
@@ -90,4 +94,12 @@ test('a stalled preparation stops further instance creation but still warms reso
   await f.warm(f.config, new AbortController().signal, async id => { prepared.push(id); return false; });
   assert.deepEqual(prepared, ['one']);
   assert.equal(f.calls.filter(call => call.request.method === 'DELETE').length, 3);
+});
+
+test('the active page is never warmed in the background', async () => {
+  const f = fixture();
+  f.activePages.push({ dataset: { aioPage: 'one' } });
+  await f.warm(f.config, new AbortController().signal);
+  assert.deepEqual(f.calls.filter(call => call.request.method === 'POST').map(call => JSON.parse(call.request.body).page_id), ['two']);
+  assert.deepEqual(f.loaded.map(item => item.path), ['app.mjs', 'app.wasm']);
 });
