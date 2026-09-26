@@ -21,6 +21,7 @@ pub(super) struct Processes {
     root: PathBuf,
     supervisor: reqwest::Client,
     instances: Mutex<HashMap<(Uuid, String), Arc<model::Instance>>>,
+    recovery: Mutex<()>,
     pub(super) pending: Mutex<HashMap<Uuid, Arc<model::Instance>>>,
 }
 
