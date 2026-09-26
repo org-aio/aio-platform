@@ -113,13 +113,14 @@ fn MountedFrontend(
                                 bridge.set(Some(evaluator));
                                 let mut frame_ready = frame_ready;
                                 spawn(async move {
-                                    let Ok(message) = evaluator.recv::<serde_json::Value>().await else {
-                                        return;
-                                    };
-                                    if let Some(error) = message.get("error").and_then(|value| value.as_str()) {
-                                        on_error.call(error.to_owned());
-                                    } else if message.get("ready").and_then(|value| value.as_bool()) == Some(true) {
-                                        frame_ready.set(true);
+                                    while let Ok(message) = evaluator.recv::<serde_json::Value>().await {
+                                        if let Some(error) = message.get("error").and_then(|value| value.as_str()) {
+                                            on_error.call(error.to_owned());
+                                            break;
+                                        }
+                                        if message.get("ready").and_then(|value| value.as_bool()) == Some(true) {
+                                            frame_ready.set(true);
+                                        }
                                     }
                                 });
                             },
