@@ -104,19 +104,21 @@ const server = createServer(async (request, response) => {
     await page.goto(origin);
     const mount = await page.evaluate(async () => (await (await fetch('/api/runtime/frontend/mount', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ page_id: 'component-page' }) })).json()).data);
     await page.evaluate(config => {
-      document.body.innerHTML = `<div id="page" data-aio-page-active="true" data-aio-workspace-active="true" data-aio-workspace-context="${config.context}"><iframe id="frame" sandbox="allow-scripts allow-forms"></iframe></div>`;
+      document.body.innerHTML = `<div id="page" data-aio-page-active="true" data-aio-workspace-active="true" data-aio-workspace-context="${config.context}"><div class="application-frontend-shell"><div id="frontend-loading" class="application-frontend-loading"></div><iframe id="frame" sandbox="allow-scripts allow-forms"></iframe></div></div>`;
       window.__hostMessages = [];
       let receive = 0;
       window.dioxus = {
         recv: () => receive++ === 0 ? Promise.resolve({ ...config, id: 'frame', development: false }) : new Promise(resolve => { window.__finish = resolve; }),
-        send: message => window.__hostMessages.push(message),
+        send: message => {
+          window.__hostMessages.push(message);
+          if (message?.ready === true) document.querySelector('#frontend-loading')?.remove();
+        },
       };
     }, mount);
     await page.addScriptTag({ content: `(async () => {\n${await component}\n})().catch(error => { window.__hostMessages.push({ error: error.message }); });` });
 
     const frame = page.frameLocator('#frame');
-    await frame.locator('body').waitFor({ state: 'attached' });
-    await page.waitForFunction(() => document.querySelector('#frame')?.dataset.aioPrepared === undefined || true);
+    await page.waitForFunction(() => document.querySelector('#frontend-loading') === null);
     assert.equal(grants.size, 1);
     const initialSource = await page.locator('#frame').getAttribute('src');
 

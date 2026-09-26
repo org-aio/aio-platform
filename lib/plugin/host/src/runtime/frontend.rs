@@ -4,7 +4,8 @@ use serde::Deserialize;
 use super::RuntimeResponse;
 use az_ui_components::button::{Button, ButtonVariant};
 
-const FRAME_LOADING_DOCUMENT: &str = r#"<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="color-scheme" content="light dark"><style>html,body{width:100%;height:100%;margin:0}body{display:grid;place-items:center;background:#f5f7f9;color:#606266;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}.loading{display:flex;align-items:center;gap:10px}.spinner{width:18px;height:18px;border:2px solid #c8d3df;border-top-color:#409eff;border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}@media(prefers-color-scheme:dark){body{background:#101418;color:#a8abb2}.spinner{border-color:#3f4a56;border-top-color:#409eff}}@media(prefers-reduced-motion:reduce){.spinner{animation:none}}</style></head><body><div class="loading" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span><span>正在加载页面</span></div></body></html>"#;
+const FRONTEND_LOADING_STYLE: &str = "position:absolute;inset:0;z-index:1;display:flex;align-items:center;justify-content:center;gap:10px;background:var(--background);color:var(--muted-foreground);font-size:14px";
+const FRONTEND_SPINNER_STYLE: &str = "width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .8s linear infinite";
 
 #[derive(Clone, Deserialize, PartialEq)]
 struct FrontendMount {
@@ -80,6 +81,7 @@ fn MountedFrontend(
     on_error: Callback<String>,
 ) -> Element {
     let mut bridge = use_signal(|| None::<document::Eval>);
+    let frame_ready = use_signal(|| false);
     let frame_id = format!("aio-frontend-{}", mount.token);
     let config = serde_json::json!({ "development": mount.development, "abi": mount.abi, "id": frame_id, "page_id": page_id, "token": mount.token, "src": mount.src, "revision": mount.revision, "generation": mount.generation, "session_context": mount.session_context, "context": mount.context, "assets": mount.assets });
     use_drop(move || {
@@ -88,33 +90,44 @@ fn MountedFrontend(
         }
     });
     rsx! {
-        iframe {
-            id: frame_id,
-            title: label,
-            class: "application-frontend",
-            srcdoc: FRAME_LOADING_DOCUMENT,
-            "sandbox": "allow-scripts allow-forms",
-            allow: "fullscreen; clipboard-write",
-            referrerpolicy: "no-referrer",
-            onmounted: move |_| {
-                if bridge().is_none() {
-                    let script = if mount.abi == Some(2) { concat!(include_str!("frontend_lifecycle.js"), "\n", include_str!("frontend_cache.js"), "\n", include_str!("frontend_assets.js"), "\n", include_str!("frontend_component.js")) } else { concat!(include_str!("frontend_lifecycle.js"), "\n", include_str!("frontend_cache.js"), "\n", include_str!("frontend_host.js")) };
-                    let mut evaluator = document::eval(script);
-                    match evaluator.send(config.clone()) {
-                        Ok(()) => {
-                            bridge.set(Some(evaluator));
-                            spawn(async move {
-                                if let Ok(message) = evaluator.recv::<serde_json::Value>().await
-                                    && let Some(message) = message.get("error").and_then(|value| value.as_str())
-                                {
-                                    on_error.call(message.to_owned());
-                                }
-                            });
-                        },
-                        Err(cause) => on_error.call(format!("启动插件通信桥失败: {cause}")),
-                    }
+        div { class: "application-frontend-shell", style: "position:relative;flex:1 1 auto;width:100%;height:100%;min-width:0;min-height:0",
+            if !frame_ready() {
+                div { class: "application-frontend-loading", style: FRONTEND_LOADING_STYLE, role: "status", aria_live: "polite", aria_busy: "true",
+                    span { style: FRONTEND_SPINNER_STYLE, aria_hidden: "true" }
+                    span { "正在加载页面" }
                 }
-            },
+            }
+            iframe {
+                id: frame_id,
+                title: label,
+                class: "application-frontend",
+                "sandbox": "allow-scripts allow-forms",
+                allow: "fullscreen; clipboard-write",
+                referrerpolicy: "no-referrer",
+                onmounted: move |_| {
+                    if bridge().is_none() {
+                        let script = if mount.abi == Some(2) { concat!(include_str!("frontend_lifecycle.js"), "\n", include_str!("frontend_cache.js"), "\n", include_str!("frontend_assets.js"), "\n", include_str!("frontend_component.js")) } else { concat!(include_str!("frontend_lifecycle.js"), "\n", include_str!("frontend_cache.js"), "\n", include_str!("frontend_host.js")) };
+                        let mut evaluator = document::eval(script);
+                        match evaluator.send(config.clone()) {
+                            Ok(()) => {
+                                bridge.set(Some(evaluator));
+                                let mut frame_ready = frame_ready;
+                                spawn(async move {
+                                    let Ok(message) = evaluator.recv::<serde_json::Value>().await else {
+                                        return;
+                                    };
+                                    if let Some(error) = message.get("error").and_then(|value| value.as_str()) {
+                                        on_error.call(error.to_owned());
+                                    } else if message.get("ready").and_then(|value| value.as_bool()) == Some(true) {
+                                        frame_ready.set(true);
+                                    }
+                                });
+                            },
+                            Err(cause) => on_error.call(format!("启动插件通信桥失败: {cause}")),
+                        }
+                    }
+                },
+            }
         }
     }
 }
