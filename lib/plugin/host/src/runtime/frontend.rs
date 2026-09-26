@@ -4,6 +4,8 @@ use serde::Deserialize;
 use super::RuntimeResponse;
 use az_ui_components::button::{Button, ButtonVariant};
 
+const FRAME_LOADING_DOCUMENT: &str = r#"<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="color-scheme" content="light dark"><style>html,body{width:100%;height:100%;margin:0}body{display:grid;place-items:center;background:#f5f7f9;color:#606266;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}.loading{display:flex;align-items:center;gap:10px}.spinner{width:18px;height:18px;border:2px solid #c8d3df;border-top-color:#409eff;border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}@media(prefers-color-scheme:dark){body{background:#101418;color:#a8abb2}.spinner{border-color:#3f4a56;border-top-color:#409eff}}@media(prefers-reduced-motion:reduce){.spinner{animation:none}}</style></head><body><div class="loading" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span><span>正在加载页面</span></div></body></html>"#;
+
 #[derive(Clone, Deserialize, PartialEq)]
 struct FrontendMount {
     #[serde(default)]
@@ -90,6 +92,7 @@ fn MountedFrontend(
             id: frame_id,
             title: label,
             class: "application-frontend",
+            srcdoc: FRAME_LOADING_DOCUMENT,
             "sandbox": "allow-scripts allow-forms",
             allow: "fullscreen; clipboard-write",
             referrerpolicy: "no-referrer",
