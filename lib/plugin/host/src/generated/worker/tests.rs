@@ -25,7 +25,7 @@ async fn machine_identity_pairing_and_deletion() -> Result<()> {
         .append_pair("options", &format!("-c search_path={schema}"));
     let state = RuntimeState::isolated_admin_test(
         Arc::new(Identity),
-        &isolated.to_string(),
+        isolated.as_str(),
         "http://127.0.0.1:1",
         root.path(),
     )
