@@ -40,3 +40,9 @@ Rust 源码插件由应用编译期装配；页面扩展实现 `ApplicationPlugi
 运行 `aio helper install` 注册 `aio://install/<id>?version=<版本>`；网页点击后在本机终端确认安装。`aio tool install <id> --version <版本>`、`aio tool list`、`aio tool uninstall <id>` 使用共享安装库。完整发布、依赖检查和恢复说明见 [本机 CLI 市场](../docs/tools/README.md)。
 
 AIO 2026.9.18+ 的 CLI 模板默认携带 `skills/<name>/SKILL.md`，市场安装后自动复制到 `~/.agents/skills`；技能与 CLI 使用同一版本发布，用户修改不会被卸载覆盖。
+
+## 远端命令
+
+`aio vibecli connect <base-url>` 验证远端命令目录并保存当前项目连接，`aio vibecli disconnect` 删除连接。连接后，顶层帮助展示当前 catalog，未知命令和参数完整转发到服务端；内置命令优先执行。`AIO_VIBECLI_URL` 可覆盖端点，`AIO_VIBECLI_TOKEN` 只从环境读取。配置、协议和示例见 [远端命令](src/runtime_commands/README.md)。
+
+已安装的 AIO vibecli 组件可通过 `aio vibecli login <origin> --account <account> --password-stdin` 登录，再执行 `aio vibecli connect <origin> --source <UUID> --project <UUID>` 连接；会话保存在专属用户文件，项目仅保存连接元数据。
