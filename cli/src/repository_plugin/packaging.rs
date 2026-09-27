@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::{Context as _, Result, ensure};
+use az_plugin_bundle::{Bundle, MAX_ENCODED_BYTES};
 use az_plugin_package::{
     MAX_ARTIFACT_BYTES, MAX_BUNDLE_BYTES, MAX_MANIFEST_BYTES, MAX_PACKAGE_BYTES, PluginPackage,
     normalize_git_source,
@@ -20,7 +21,7 @@ pub struct PackageOptions {
 }
 
 pub fn package(options: PackageOptions) -> Result<()> {
-    let package = prepare_package(&options.root, options.git, Some(options.version))?;
+    let package = prepare_release(&options.root, options.git, Some(options.version))?;
     let output = options
         .output
         .unwrap_or_else(|| options.root.join("dist/plugin.aio-plugin"));
@@ -33,11 +34,115 @@ pub fn package(options: PackageOptions) -> Result<()> {
     println!(
         "插件已打包: {} version={} revision={} bytes={}",
         output.display(),
-        package.version,
-        package.rev,
+        package.version(),
+        package.revision(),
         bytes.len()
     );
     Ok(())
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum PreparedRelease {
+    Legacy(PluginPackage),
+    Bundle(Bundle),
+}
+
+impl PreparedRelease {
+    pub(super) fn encode(&self) -> Result<Vec<u8>> {
+        match self {
+            Self::Legacy(package) => package.encode(),
+            Self::Bundle(bundle) => bundle.encode(),
+        }
+    }
+
+    pub(super) fn git(&self) -> &str {
+        match self {
+            Self::Legacy(package) => &package.git,
+            Self::Bundle(bundle) => &bundle.git,
+        }
+    }
+
+    pub(super) fn version(&self) -> &str {
+        match self {
+            Self::Legacy(package) => &package.version,
+            Self::Bundle(bundle) => &bundle.version,
+        }
+    }
+
+    pub(super) fn revision(&self) -> &str {
+        match self {
+            Self::Legacy(package) => &package.rev,
+            Self::Bundle(bundle) => &bundle.digest,
+        }
+    }
+}
+
+pub(super) fn read_release(
+    path: &Path,
+    git: Option<&str>,
+    version: Option<&str>,
+) -> Result<PreparedRelease> {
+    let bytes = read_bounded(path, MAX_PACKAGE_BYTES.max(MAX_ENCODED_BYTES))?;
+    let release = if let Ok(bundle) = Bundle::decode(&bytes) {
+        PreparedRelease::Bundle(bundle)
+    } else {
+        PreparedRelease::Legacy(PluginPackage::decode(&bytes).with_context(|| {
+            format!(
+                "插件包既不是 AIO v2 整包，也不是旧版二进制包: {}",
+                path.display()
+            )
+        })?)
+    };
+    if let Some(git) = git {
+        ensure!(
+            release.git() == normalize_git_source(git)?,
+            "--git 与插件包中的来源不一致，请重新打包"
+        );
+    }
+    if let Some(version) = version {
+        ensure!(
+            release.version() == version,
+            "--version 与插件包中的版本不一致，请重新打包"
+        );
+    }
+    Ok(release)
+}
+
+pub(super) fn prepare_release(
+    root: &Path,
+    git: Option<String>,
+    version: Option<String>,
+) -> Result<PreparedRelease> {
+    let manifest = fs::read_to_string(root.join("aio-plugin.toml"))
+        .with_context(|| format!("读取插件清单失败: {}", root.display()))?;
+    if toml::from_str::<toml::Value>(&manifest)?
+        .get("schema_version")
+        .and_then(toml::Value::as_integer)
+        == Some(2)
+    {
+        let root = root
+            .canonicalize()
+            .with_context(|| format!("解析插件目录失败: {}", root.display()))?;
+        let repository = own_git_repository(&root);
+        let git = resolve_git(&root, git, repository)?;
+        let version = version
+            .or_else(|| project_version(&root))
+            .context("缺少插件发布版本，请指定 --version <SemVer>")?;
+        let revision = repository
+            .then(|| git_text(&root, &["rev-parse", "HEAD"]))
+            .flatten()
+            .unwrap_or_else(|| "0".repeat(40));
+        return Ok(PreparedRelease::Bundle(Bundle::from_directory(
+            &root,
+            "aio-plugin.toml",
+            git,
+            revision,
+            version,
+        )?));
+    }
+    Ok(PreparedRelease::Legacy(prepare_package(
+        root, git, version,
+    )?))
 }
 
 pub(super) fn prepare_package(
@@ -94,27 +199,6 @@ pub(super) fn prepare_package(
     )
 }
 
-pub(super) fn read_package(
-    path: &Path,
-    git: Option<&str>,
-    version: Option<&str>,
-) -> Result<PluginPackage> {
-    let package = PluginPackage::decode(&read_bounded(path, MAX_PACKAGE_BYTES)?)?;
-    if let Some(git) = git {
-        ensure!(
-            package.git == normalize_git_source(git)?,
-            "--git 与插件包中的来源不一致，请重新打包"
-        );
-    }
-    if let Some(version) = version {
-        ensure!(
-            package.version == version,
-            "--version 与插件包中的版本不一致，请重新打包"
-        );
-    }
-    Ok(package)
-}
-
 fn project_version(root: &Path) -> Option<String> {
     if let Ok(content) = fs::read_to_string(root.join("Cargo.toml"))
         && let Ok(cargo) = toml::from_str::<toml::Value>(&content)
@@ -144,6 +228,17 @@ fn own_git_repository(root: &Path) -> bool {
     git_text(root, &["rev-parse", "--show-toplevel"])
         .and_then(|path| PathBuf::from(path).canonicalize().ok())
         .is_some_and(|repository| repository == root)
+}
+
+fn resolve_git(root: &Path, git: Option<String>, repository: bool) -> Result<String> {
+    let value = git
+        .or_else(|| {
+            repository
+                .then(|| git_text(root, &["remote", "get-url", "origin"]))
+                .flatten()
+        })
+        .context("没有可用的 HTTPS Git 来源，请指定 --git <URL>")?;
+    normalize_git_source(&value)
 }
 
 fn git_text(root: &Path, arguments: &[&str]) -> Option<String> {

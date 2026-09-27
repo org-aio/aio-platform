@@ -13,12 +13,14 @@ fn packages_standalone_directory_without_git_and_round_trips_file() -> Result<()
         version: "1.0.0".to_owned(),
         output: Some(output.clone()),
     })?;
-    let package = read_package(&output, None, None)?;
+    let PreparedRelease::Legacy(package) = read_release(&output, None, None)? else {
+        anyhow::bail!("旧格式目录必须生成 PluginPackage");
+    };
     assert_eq!(package.git, "https://example.com/team/hello.git");
     assert_eq!(package.source_revision, None);
     assert_eq!(package.version, "1.0.0");
-    assert!(read_package(&output, Some("https://example.com/other.git"), None).is_err());
-    assert!(read_package(&output, None, Some("2.0.0")).is_err());
+    assert!(read_release(&output, Some("https://example.com/other.git"), None).is_err());
+    assert!(read_release(&output, None, Some("2.0.0")).is_err());
     Ok(())
 }
 
@@ -126,13 +128,60 @@ fn packages_frontend_build_and_backend_together_without_git_or_scripts() -> Resu
     let output = root.join("complete.aio-plugin");
     fs::write(&output, package.encode()?)?;
     fs::remove_dir_all(root.join("dist"))?;
-    assert_eq!(read_package(&output, None, None)?, package);
+    let PreparedRelease::Legacy(roundtrip) = read_release(&output, None, None)? else {
+        anyhow::bail!("旧格式目录必须生成 PluginPackage");
+    };
+    assert_eq!(roundtrip, package);
+    Ok(())
+}
+
+#[test]
+fn v2_bundle_packages_and_round_trips() -> Result<()> {
+    let directory = v2_plugin_directory()?;
+    let root = directory.path();
+    let output = root.join("dist/plugin.aio-plugin");
+    package(PackageOptions {
+        root: root.to_path_buf(),
+        git: Some("https://example.com/team/topcoat".to_owned()),
+        version: "1.2.3".to_owned(),
+        output: Some(output.clone()),
+    })?;
+    let PreparedRelease::Bundle(bundle) = read_release(&output, None, None)? else {
+        anyhow::bail!("v2 目录必须生成 Bundle");
+    };
+    assert_eq!(bundle.git, "https://example.com/team/topcoat.git");
+    assert_eq!(bundle.version, "1.2.3");
+    assert_eq!(bundle.commit, "0".repeat(40));
+    assert_eq!(bundle.verify()?.frontend_files().count(), 1);
+    assert_eq!(Bundle::decode(&fs::read(output)?)?.digest, bundle.digest);
     Ok(())
 }
 
 fn plugin_directory() -> Result<TempDir> {
     let directory = tempdir()?;
     write_plugin(directory.path())?;
+    Ok(directory)
+}
+
+fn v2_plugin_directory() -> Result<TempDir> {
+    let directory = tempdir()?;
+    let root = directory.path();
+    fs::create_dir_all(root.join("dist/frontend"))?;
+    fs::write(
+        root.join("aio-plugin.toml"),
+        format!(
+            "schema_version=2\n[plugin.marketplace]\ntitle='Topcoat'\nsummary='Demo'\nlicense='MIT'\ntags=['test']\n[plugin.runtime]\nartifact='dist/server'\nhost_version='>=2026.9.21'\n[plugin.runtime.process]\nimage='sha256:{}'\nendpoints=[]\nhttp_endpoints=[]\nservices=[]\nworker_capabilities=[]\n[plugin.frontend]\npath='dist/frontend'\n",
+            "a".repeat(64)
+        ),
+    )?;
+    let mut server = vec![0; 64];
+    server[..6].copy_from_slice(b"\x7fELF\x02\x01");
+    server[18] = 62;
+    fs::write(root.join("dist/server"), server)?;
+    fs::write(
+        root.join("dist/frontend/index.html"),
+        "<html>Topcoat</html>",
+    )?;
     Ok(directory)
 }
 

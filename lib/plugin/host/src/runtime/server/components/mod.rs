@@ -203,7 +203,8 @@ impl Components {
     }
 
     async fn validate(&self, source: Uuid, bundle: &Bundle) -> Result<model::Description> {
-        let tenant = "component-publication-validation";
+        // 发布校验沿用真实租户的数据路径，避免验证请求依赖另一套数据库代理生命周期。
+        let tenant = "default";
         if bundle.verify()?.manifest().plugin.runtime.process.is_some() {
             let (instance, description) = self.processes.prepare(source, tenant, bundle).await?;
             self.processes.stop_id(&instance.start.id()).await?;

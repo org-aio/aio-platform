@@ -203,6 +203,7 @@ mod tests {
                 label: "device".into(),
                 platform: "darwin".into(),
                 capabilities: vec!["space.scan".into()],
+                machine_id: None,
             })
             .await
             .map_err(|_| anyhow::anyhow!("设备同步测试调用失败"))?;

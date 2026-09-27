@@ -2,6 +2,46 @@ use std::{fs, process::Command};
 
 use tempfile::tempdir;
 
+#[cfg(unix)]
+#[test]
+fn forwards_plugin_cli_arguments_and_exit_status() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for (command, executable, arguments, expected) in [
+        (
+            "space",
+            "aio-space",
+            ["workspace-add", "--name", "demo"].as_slice(),
+            "workspace-add --name demo",
+        ),
+        (
+            "memory",
+            "aio-agent",
+            ["spaces"].as_slice(),
+            "memory spaces",
+        ),
+    ] {
+        let root = tempdir().unwrap();
+        let executable = root.path().join(executable);
+        let output = root.path().join("arguments.txt");
+        let script = format!(
+            "#!/bin/sh\nprintf '%s' \"$*\" > '{}'\nexit 7\n",
+            output.display()
+        );
+        fs::write(&executable, script).unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        let path = std::env::var("PATH").unwrap_or_default();
+        let result = Command::new(env!("CARGO_BIN_EXE_aio"))
+            .arg(command)
+            .args(arguments)
+            .env("PATH", format!("{}:{path}", root.path().display()))
+            .output()
+            .unwrap();
+        assert_eq!(result.status.code(), Some(7), "{command}");
+        assert_eq!(fs::read_to_string(output).unwrap(), expected, "{command}");
+    }
+}
+
 #[test]
 fn initializes_every_template_without_tools_or_network() {
     let root = tempdir().unwrap();

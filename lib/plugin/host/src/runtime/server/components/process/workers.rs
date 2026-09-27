@@ -14,6 +14,7 @@ use std::sync::Arc;
 const DESKTOP: &str = "desktop.open-app";
 const CONTROL: &str = "desktop.control";
 const WORKSPACE: &str = "workspace.execute";
+const WORKSPACE_MANAGE: &str = "workspace.manage";
 
 /// 进程身份与用户范围由宿主验证，模型参数不能指定其他账号。
 #[derive(Deserialize)]
@@ -109,7 +110,7 @@ async fn execute(gateway: &Gateway, headers: &HeaderMap, request: Request) -> Re
         }
         "submit" => {
             ensure!(
-                [WORKSPACE, CONTROL].contains(&capability),
+                [WORKSPACE, WORKSPACE_MANAGE, CONTROL].contains(&capability),
                 "设备执行能力无效"
             );
             let task = components
@@ -159,7 +160,7 @@ fn requested_capabilities<'a>(
         .iter()
         .map(String::as_str)
         .filter(|granted| {
-            [DESKTOP, WORKSPACE, CONTROL].contains(granted)
+            [DESKTOP, WORKSPACE, WORKSPACE_MANAGE, CONTROL].contains(granted)
                 && (capability == "*" || *granted == capability)
         })
         .collect();

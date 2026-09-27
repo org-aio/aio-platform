@@ -2,6 +2,33 @@ use crate::{runtime, startup};
 use dioxus::prelude::*;
 
 #[cfg(any(feature = "web", feature = "desktop"))]
+fn runtime_page(
+    page: runtime::PageDefinition,
+    scene: az_dioxus_admin_shell::ApplicationSceneItem,
+) -> az_dioxus_admin_shell::ApplicationRuntimePage {
+    use az_dioxus_admin_shell::{ApplicationMenuGroup, ApplicationRuntimePage};
+
+    ApplicationRuntimePage {
+        id: page.id,
+        label: page.label,
+        icon: page.icon,
+        scene_id: scene.id,
+        scene_label: scene.label,
+        menu_path: page
+            .menu_path
+            .into_iter()
+            .map(|group| ApplicationMenuGroup {
+                id: group.id,
+                label: group.label,
+                icon: group.icon,
+            })
+            .collect(),
+        required_permission: page.required_permission,
+        definition: serde_json::to_string(&page.body).unwrap_or_default(),
+    }
+}
+
+#[cfg(any(feature = "web", feature = "desktop"))]
 #[dioxus::prelude::component]
 pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prelude::Element {
     use az_dioxus_admin_shell::{
@@ -161,23 +188,11 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
                     .iter()
                     .any(|item| item.page_id == page.id)
         })
+        .map(|page| runtime_page(page.scene.clone(), page))
         .map(|page| ApplicationRuntimePage {
-            id: page.id,
-            label: page.label,
-            icon: page.icon,
-            scene_id: "workspace".into(),
-            scene_label: "工作空间".into(),
-            menu_path: page
-                .menu_path
-                .into_iter()
-                .map(|group| ApplicationMenuGroup {
-                    id: group.id,
-                    label: group.label,
-                    icon: group.icon,
-                })
-                .collect(),
-            required_permission: page.required_permission,
-            definition: serde_json::to_string(&page.body).unwrap_or_default(),
+            scene_id: page.scene.id,
+            scene_label: page.scene.label,
+            ..page
         })
         .collect::<Vec<_>>();
     rsx! {

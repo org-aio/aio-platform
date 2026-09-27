@@ -23,6 +23,36 @@ use manifest::{
 };
 
 pub fn validate(root: &Path) -> Result<()> {
+    let manifest = fs::read_to_string(root.join("aio-plugin.toml"))
+        .with_context(|| format!("读取插件清单失败: {}", root.display()))?;
+    if toml::from_str::<toml::Value>(&manifest)?
+        .get("schema_version")
+        .and_then(toml::Value::as_integer)
+        == Some(2)
+    {
+        let bundle = az_plugin_bundle::Bundle::from_directory(
+            root,
+            "aio-plugin.toml",
+            "https://example.invalid/validation.git".into(),
+            "0".repeat(40),
+            "0.0.0".into(),
+        )?;
+        let verified = bundle.verify()?;
+        let manifest = verified.manifest();
+        let artifact = &manifest.plugin.runtime.artifact;
+        let runtime = if manifest.plugin.runtime.process.is_some() {
+            "process"
+        } else {
+            "wasm-component"
+        };
+        println!(
+            "插件校验通过: runtime={runtime} subplugins={} pages=0 artifact={artifact} frontend={} migrations={}",
+            manifest.plugin.subplugins.len(),
+            verified.frontend_assets().len(),
+            verified.migrations().count(),
+        );
+        return Ok(());
+    }
     let report = az_plugin_manifest::validate_repository(root)?;
     let artifact = report
         .artifact

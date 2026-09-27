@@ -20,3 +20,12 @@
 - 业务模块每个 feature 必须集中在 `src/generated/<feature>/`，固定拆分为 `controller.rs`、`service.rs`、`service_impl.rs`、`model.rs` 和 `util.rs`；`mod.rs` 只负责模块声明、Dill 注册和顶层编排。
 - `controller.rs` 只负责 HTTP endpoint 到 Service 的转发，`service.rs` 只保存 Service trait 契约，`service_impl.rs` 是生成的实现起点并在人工修改后归人工所有，`model.rs` 保存该 feature 的请求/响应模型，`util.rs` 保存该 feature 的局部辅助逻辑。
 - 业务 feature 不得再使用 `src/service/<feature>.rs` 或 `src/generated/<feature>/contract.rs` 的旧布局；元数据迁移时直接更新生成器和调用点，不增加兼容转发层。
+- AIO 工作区根目录不是 Git 或 Cargo 根；跨仓库操作必须逐一进入涉及的子仓库检查状态、上游和脏文件，保留无关改动。
+- 通用 shell API 保持业务无关；AIO 专属文档、组织仓库链接和入口数据属于插件。公共 shell API 改动必须同步 submodule pin 与所有依赖方 Cargo Git revision。
+- `aio-idea` 插件接入需要同时更新依赖、feature、静态注册、catalog、lockfile/config 和相关 revision；不能只改某一处让 IDE 偶然可见。
+- 浏览器验收 Dioxus Web 时使用 `dx serve --platform web`；`cargo run --features web` 只能编译，不能当成 wasm-bindgen Web 运行验收。
+- 租户业务权限从已安装组件派生；菜单隐藏只影响导航和预加载，不能替代组件激活、授权、schema、数据和版本历史。
+- 工作区清理或合并前比较 worktree、HEAD 祖先关系、未跟踪文件和脏文件；无共同 merge base 的分支不是强制合并输入。
+- CLI 模板要生成可运行的前后端示例；`aio plugin init <dir> --framework nuxt|next` 分别使用 Nuxt Nitro routes 和 Next App Router Route Handlers，并保留 AIO 进程产物 `dist/server.cjs`。
+- 发布 npm 或市场包时，必须区分本地构建、`aio plugin validate`、`aio plugin package`、上传、异步校验/激活和已安装包 revision 检查；不能把子仓库 push 或 workflow 提交当成发布完成。
+- `marketplace/registry/` 是权威源，`marketplace/index.json` 是生成物；改发布清单时更新源头并验证生成结果。

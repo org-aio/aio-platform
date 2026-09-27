@@ -17,7 +17,7 @@ worker 配对复用 AIO 当前登录账号、工作区和成员有效性。设�
 
 ## 工作区执行与取消
 
-本地 CLI 使用设备 `Authorization: Bearer <token>` 调用 `POST /api/runtime/workers/workspaces/access`，请求 `{"enabled":true}` 开通、`{"enabled":false}` 关闭本人设备的 `workspace.execute`。接口不接受设备 ID 或能力名，也不接受浏览器会话或归档 Basic 凭据。关闭在同一事务中取消该设备排队和运行中的工作区任务并清除租约，其他能力不受影响。
+本地 CLI 使用设备 `Authorization: Bearer <token>` 调用 `POST /api/runtime/workers/workspaces/access`，请求 `{"enabled":true}` 开通、`{"enabled":false}` 关闭本人设备的 `workspace.execute`。`workspace.manage` 是仅在设备本机选择并登记项目时使用的独立引导能力，不授予文件读写或命令执行。接口不接受设备 ID 或能力名，也不接受浏览器会话或归档 Basic 凭据。关闭在同一事务中取消该设备排队和运行中的工作区任务并清除租约，其他能力不受影响。
 
 工作区任务复用 `worker_tasks`，输入为 `{"action":"describe"}` 或 `{"action":"run","jobs":[...]}`。执行批次包含 1 至 8 个任务，输入序列化后最多 32768 字节。宿主仍每台设备只允许一个领取中的任务，批次内部并行与命令、路径授权由客户端处理。
 
@@ -25,8 +25,8 @@ worker 配对复用 AIO 当前登录账号、工作区和成员有效性。设�
 
 进程 broker 的 `POST /workers` 使用原有 `x-aio-token`，`tenantId`、`userId` 仍由宿主核验插件来源和成员有效性。可选 `capability` 默认 `desktop.open-app`，现有 `openApp` 调用保持不变：
 
-- `{"tenantId":"...","userId":"...","operation":"list","capability":"workspace.execute"}` 发现工作区设备；仅 `list` 支持 `capability:"*"`，返回插件已获授权的 `desktop.open-app`、`workspace.execute` 或 `desktop.control` 任一能力设备。
-- `{"tenantId":"...","userId":"...","operation":"submit","capability":"workspace.execute","workerId":"...","requestId":"UUID","input":{"action":"describe"}}` 创建任务。`submit` 接受 `workspace.execute` 和 `desktop.control`；重复请求 ID 必须具有相同设备、能力和输入。
+- `{"tenantId":"...","userId":"...","operation":"list","capability":"workspace.execute"}` 发现工作区设备；仅 `list` 支持 `capability:"*"`，返回插件已获授权的 `desktop.open-app`、`workspace.execute`、`workspace.manage` 或 `desktop.control` 任一能力设备。
+- `{"tenantId":"...","userId":"...","operation":"submit","capability":"workspace.execute","workerId":"...","requestId":"UUID","input":{"action":"describe"}}` 创建任务。`submit` 接受 `workspace.execute`、`workspace.manage` 和 `desktop.control`；重复请求 ID 必须具有相同设备、能力和输入。
 - `{"tenantId":"...","userId":"...","operation":"task","capability":"workspace.execute","taskId":"UUID"}` 查询任务；把 `operation` 改成 `cancel` 可取消任务。任务实际能力必须与请求一致，并包含在插件授权中。
 
 部署者仍需显式配置 `AIO_PROCESS_WORKER_CAPABILITIES` 和插件清单授权，开通设备能力不会自动扩充宿主进程授权。

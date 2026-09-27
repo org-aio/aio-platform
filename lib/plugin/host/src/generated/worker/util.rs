@@ -26,6 +26,13 @@ pub(super) fn validate_capability(value: &str) -> Result<()> {
 pub(super) fn validate_workspace_input(input: &serde_json::Value) -> Result<()> {
     match input.get("action").and_then(serde_json::Value::as_str) {
         Some("describe") => Ok(()),
+        Some("add") => {
+            ensure!(
+                input.as_object().is_some_and(|value| value.len() == 1),
+                "添加项目不接受路径或名称"
+            );
+            Ok(())
+        }
         Some("run") => {
             ensure!(
                 input

@@ -161,11 +161,13 @@ pub(crate) fn WorkerPanel(pairing: Signal<Option<String>>, on_close: EventHandle
                         for worker in items.iter().cloned(){
                             section{key:"{worker.id}",class:"flex flex-wrap items-center justify-between gap-2 border-b pb-3",
                                 div{class:"grid gap-2",
-                                    strong{"{worker.label} · {worker.status}"}
+                                    strong{ if worker.status=="revoked" {"{worker.label} · 已撤销"} else {"{worker.label} · {worker.status}"} }
                                     small{"{worker.platform}"}
                                 }
-                                if worker.status!="revoked"{
-                                    Button{variant:ButtonVariant::Ghost,onclick:{let worker=worker.clone();move |_|revoke.set(Some(worker.clone()))},"撤销配对"}
+                                if worker.status=="revoked"{
+                                    span{class:"text-sm text-muted-foreground","已撤销"}
+                                }else{
+                                    Button{variant:ButtonVariant::Outline,onclick:{let worker=worker.clone();move |_|revoke.set(Some(worker.clone()))},"撤销配对"}
                                 }
                             }
                         }

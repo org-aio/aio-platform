@@ -23,7 +23,18 @@ pub(crate) fn FrontendPreload(config: String, on_prepare: Callback<String>) -> E
                    }
                    return false;
                  };
-                 const timer = setTimeout(() => { void warmFrontendAssets(config, controller.signal, prepare).catch(() => {}); }, 1500);
+                 const start = async () => {
+                   const deadline = Date.now() + 60000;
+                   while (!controller.signal.aborted && Date.now() < deadline) {
+                     const page = [...document.querySelectorAll('[data-aio-page-active="true"]')].find(node => node.dataset.aioWorkspaceContext === config.context);
+                     if (page?.querySelector('iframe[data-aio-prepared="true"]')) {
+                       await warmFrontendAssets(config, controller.signal, prepare);
+                       return;
+                     }
+                     await new Promise(resolve => setTimeout(resolve, 250));
+                   }
+                 };
+                 const timer = setTimeout(() => { void start().catch(() => {}); }, 0);
                  try { await dioxus.recv(); } finally {
                    clearTimeout(timer); controller.abort();
                    window.removeEventListener('pagehide', leave);

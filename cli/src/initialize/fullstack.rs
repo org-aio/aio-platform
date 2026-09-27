@@ -137,27 +137,25 @@ mod tests {
             fs::read_to_string(root.path().join("aio-dev.toml"))?
                 .parse::<toml_edit::DocumentMut>()?;
         }
-        for framework in [WebFramework::Topcoat] {
-            let root = tempfile::tempdir()?;
-            materialize_web(root.path(), framework, "counter-example", "计数 \"A\"")?;
-            let manifest = az_plugin_bundle::BundleManifest::parse(&fs::read_to_string(
-                root.path().join("aio-plugin.toml"),
-            )?)?;
-            let runtime = &manifest.plugin.runtime;
-            assert!(runtime.process.is_some());
-            assert_eq!(runtime.artifact, "dist/server");
-            assert_eq!(
-                manifest.plugin.marketplace.as_ref().unwrap().title,
-                "计数 \"A\""
-            );
-            assert!(root.path().join("src/main.rs").is_file());
-            assert!(root.path().join("frontend/index.html").is_file());
-            assert!(root.path().join("scripts/build.sh").is_file());
-            let lock = fs::read_to_string(root.path().join("Cargo.lock"))?;
-            assert!(lock.contains("cargo generate-lockfile"));
-            fs::read_to_string(root.path().join("aio-dev.toml"))?
-                .parse::<toml_edit::DocumentMut>()?;
-        }
+        let framework = WebFramework::Topcoat;
+        let root = tempfile::tempdir()?;
+        materialize_web(root.path(), framework, "counter-example", "计数 \"A\"")?;
+        let manifest = az_plugin_bundle::BundleManifest::parse(&fs::read_to_string(
+            root.path().join("aio-plugin.toml"),
+        )?)?;
+        let runtime = &manifest.plugin.runtime;
+        assert!(runtime.process.is_some());
+        assert_eq!(runtime.artifact, "dist/server");
+        assert_eq!(
+            manifest.plugin.marketplace.as_ref().unwrap().title,
+            "计数 \"A\""
+        );
+        assert!(root.path().join("src/main.rs").is_file());
+        assert!(root.path().join("frontend/index.html").is_file());
+        assert!(root.path().join("scripts/build.sh").is_file());
+        let lock = fs::read_to_string(root.path().join("Cargo.lock"))?;
+        assert!(lock.contains("cargo generate-lockfile"));
+        fs::read_to_string(root.path().join("aio-dev.toml"))?.parse::<toml_edit::DocumentMut>()?;
         Ok(())
     }
 

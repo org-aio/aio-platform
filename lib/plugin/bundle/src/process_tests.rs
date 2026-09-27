@@ -43,7 +43,7 @@ fn process_requires_immutable_image_and_explicit_https_services() {
 fn process_accepts_workspace_execution_without_opening_arbitrary_capabilities() {
     assert!(
         BundleManifest::parse(&manifest(
-            "worker_capabilities = ['desktop.open-app', 'desktop.control', 'skills.sync', 'workspace.execute']"
+            "worker_capabilities = ['desktop.open-app', 'desktop.control', 'skills.sync', 'workspace.execute', 'workspace.manage']"
         ))
         .is_ok()
     );
@@ -54,6 +54,15 @@ fn process_accepts_workspace_execution_without_opening_arbitrary_capabilities() 
     ] {
         assert!(BundleManifest::parse(&manifest(extra)).is_err());
     }
+}
+
+#[test]
+fn process_accepts_subplugin_route_declarations() {
+    let manifest = manifest("[[plugin.subplugins]]\nid = 'boxun'\nroutes = ['admin-api']\n");
+    let parsed = BundleManifest::parse(&manifest).expect("子插件声明必须被进程包接受");
+    assert_eq!(parsed.plugin.subplugins.len(), 1);
+    assert_eq!(parsed.plugin.subplugins[0].id, "boxun");
+    assert_eq!(parsed.plugin.subplugins[0].routes, ["admin-api"]);
 }
 
 #[test]

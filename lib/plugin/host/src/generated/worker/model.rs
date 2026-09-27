@@ -7,6 +7,8 @@ pub struct PairRequest {
     pub label: String,
     pub platform: String,
     pub capabilities: Vec<String>,
+    #[serde(default)]
+    pub machine_id: Option<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Pairing {

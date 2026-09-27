@@ -108,11 +108,11 @@ impl Processes {
                 "监督器拒绝启动 process（HTTP {}）",
                 response.status()
             );
-            for _ in 0..100 {
+            for _ in 0..300 {
                 if instance
                     .client
                     .get("http://localhost/health")
-                    .timeout(Duration::from_millis(500))
+                    .timeout(Duration::from_secs(2))
                     .send()
                     .await
                     .is_ok_and(|response| response.status().is_success())

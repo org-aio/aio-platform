@@ -54,7 +54,7 @@ pub(super) async fn is_removed(pool: &PgPool, git: &str) -> anyhow::Result<bool>
     )
 }
 
-// 在合并组件、传统插件和已安装条目之后过滤，避免回填导致下架条目复活。
+// 下架只影响市场可安装目录；租户已安装的条目必须保留，否则会丢失停用和卸载入口。
 pub(super) async fn retain_listed(
     pool: &PgPool,
     entries: &mut Vec<MarketplaceEntry>,
@@ -62,11 +62,64 @@ pub(super) async fn retain_listed(
     let removed: Vec<String> = sqlx::query_scalar("SELECT git FROM marketplace_plugin_removals")
         .fetch_all(pool)
         .await?;
-    let removed: HashSet<String> = removed.into_iter().collect();
-    entries.retain(|entry| !removed.contains(&entry.git));
+    retain_installed_or_listed(&removed.into_iter().collect(), entries);
     Ok(())
+}
+
+fn retain_installed_or_listed(removed: &HashSet<String>, entries: &mut Vec<MarketplaceEntry>) {
+    entries.retain(|entry| entry.installed || !removed.contains(&entry.git));
 }
 
 #[cfg(test)]
 #[path = "marketplace_removal_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+
+    fn entry(git: &str, installed: bool) -> MarketplaceEntry {
+        MarketplaceEntry {
+            parent_git: None,
+            parent_title: None,
+            git: git.into(),
+            rev: "rev".into(),
+            title: git.into(),
+            summary: String::new(),
+            license: "MIT".into(),
+            tags: Vec::new(),
+            installed,
+            menu_hidden: false,
+            source_id: None,
+            state: None,
+            active_revision: None,
+            runtime: None,
+            capabilities: Default::default(),
+        }
+    }
+
+    #[test]
+    fn delisting_hides_only_uninstalled_entries() {
+        let removed = HashSet::from(["https://example.com/removed.git".to_owned()]);
+        let mut entries = vec![
+            entry("https://example.com/removed.git", false),
+            entry("https://example.com/removed.git", true),
+            entry("https://example.com/listed.git", false),
+        ];
+        retain_installed_or_listed(&removed, &mut entries);
+        assert_eq!(entries.len(), 2);
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.installed && e.git.ends_with("removed.git"))
+        );
+        assert!(entries.iter().any(|e| e.git.ends_with("listed.git")));
+    }
+
+    #[test]
+    fn entries_without_removal_records_are_all_kept() {
+        let mut entries = vec![entry("https://example.com/listed.git", false)];
+        retain_installed_or_listed(&HashSet::new(), &mut entries);
+        assert_eq!(entries.len(), 1);
+    }
+}

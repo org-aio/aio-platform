@@ -22,6 +22,6 @@ host_version = ">=2026.9.18"
 http_endpoints = ["https://api.tavily.com/search"]
 ```
 
-管理员在 AIO_PROCESS_HTTP_ENDPOINTS 批准同一完整地址。调用 Unix broker 的 POST /egress/http，以 x-aio-endpoint 选择地址，x-aio-token 使用实例票据，Authorization 可携带插件自己的密钥；只接受 JSON POST，不允许任意方法、子路径和重定向。宿主复核活动安装版本，限制并发、30 秒请求时间与 512 KB 响应。不得向浏览器暴露 broker 票据。模型仍使用 endpoints 与专用 /egress、/egress/models。
+管理员在 AIO_PROCESS_HTTP_ENDPOINTS 批准同一完整地址。调用 Unix broker 的 POST /egress/http，以 x-aio-endpoint 选择地址、x-aio-method 选择受控的 GET 或 POST，x-aio-token 使用实例票据，Authorization 可携带插件自己的密钥；GET 用于受控 HTML/JSON 读取，POST 只接收 JSON，不允许任意方法、重定向或额外转发头。宿主复核活动安装版本，限制并发、30 秒请求时间与 512 KB 响应。不得向浏览器暴露 broker 票据。模型仍使用 endpoints 与专用 /egress、/egress/models。
 
 旧包省略这两个新字段时序列化保持原形；现有 WIT 四种页面类型不变。示例实现见 aio-plugin-agent 的独立 settings.html 与 tools/web-search 接口。

@@ -160,6 +160,7 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
             label: "workspace-device".into(),
             platform: "linux".into(),
             capabilities: vec!["space.scan".into()],
+            machine_id: None,
         })
         .await?;
     state.workers.approve(&owner, &pair.code).await?;
@@ -213,6 +214,14 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
     }
     let device = state.workers.identity(&pair.token).await?;
     assert_eq!(device.capabilities, ["space.scan", WORKSPACE]);
+    let added = state
+        .workers
+        .enqueue(
+            &owner,
+            submit(&device.id, WORKSPACE, json!({"action":"add"})),
+        )
+        .await?;
+    assert_eq!(added.input, json!({"action":"add"}));
     for other in [session("test", "other"), session("other", "owner")] {
         assert!(
             state
@@ -225,6 +234,7 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
     for invalid in [
         json!({}),
         json!({"action":"shell"}),
+        json!({"action":"add","path":"/tmp/project"}),
         json!({"action":"run","jobs":[]}),
         json!({"action":"run","jobs":[{}, {}, {}, {}, {}, {}, {}, {}, {}]}),
         json!({"action":"run","jobs":"bad"}),
@@ -546,6 +556,7 @@ async fn verify_bridge(state: &RuntimeState, worker: &str) -> Result<()> {
             label: "desktop".into(),
             platform: "darwin".into(),
             capabilities: vec![DESKTOP.into()],
+            machine_id: None,
         })
         .await?;
     state.workers.approve(&owner, &desktop.code).await?;
@@ -555,6 +566,7 @@ async fn verify_bridge(state: &RuntimeState, worker: &str) -> Result<()> {
             label: "other".into(),
             platform: "linux".into(),
             capabilities: vec![WORKSPACE.into()],
+            machine_id: None,
         })
         .await?;
     state

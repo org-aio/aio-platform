@@ -26,6 +26,8 @@ pub struct ComponentManifest {
     pub database: Option<DatabaseManifest>,
     #[serde(default)]
     pub capabilities: CapabilityGrants,
+    #[serde(default)]
+    pub subplugins: Vec<az_plugin_manifest::SubpluginManifest>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -146,7 +148,7 @@ impl BundleManifest {
         validate_relative_path(&plugin.runtime.artifact)?;
         if let Some(process) = &plugin.runtime.process {
             ensure!(
-                process.worker_capabilities.len() <= 4
+                process.worker_capabilities.len() <= 5
                     && process
                         .worker_capabilities
                         .iter()
@@ -156,6 +158,7 @@ impl BundleManifest {
                                 | "desktop.control"
                                 | "skills.sync"
                                 | "workspace.execute"
+                                | "workspace.manage"
                         )),
                 "process 设备能力未开放"
             );

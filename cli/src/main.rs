@@ -5,7 +5,7 @@ mod initialize;
 mod repository_plugin;
 mod tools;
 
-use std::{env, path::PathBuf};
+use std::{env, path::PathBuf, process::Command};
 
 use anyhow::{Result, bail};
 use initialize::{
@@ -30,6 +30,16 @@ fn run(arguments: Vec<String>) -> Result<()> {
             Ok(())
         }
         "tool" | "helper" | "open" => tools::run(&arguments),
+        "space" => run_plugin_cli(
+            "aio-space",
+            &arguments[1..],
+            "请先在 AIO 插件市场安装空间助手",
+        ),
+        "memory" => {
+            let mut forwarded = vec!["memory".to_owned()];
+            forwarded.extend_from_slice(&arguments[1..]);
+            run_plugin_cli("aio-agent", &forwarded, "请先安装智能体 CLI")
+        }
         "init" => initialize_application(&arguments[1..]),
         "plugin" => run_plugin_command(&arguments[1..]),
         "help" | "--help" | "-h" => {
@@ -42,6 +52,24 @@ fn run(arguments: Vec<String>) -> Result<()> {
 
 fn initialize_application(arguments: &[String]) -> Result<()> {
     initialize::application(parse_init_arguments(arguments)?)
+}
+
+// 插件 CLI 由各自插件独立发布；主命令只做统一入口转发，不复制插件实现。
+fn run_plugin_cli(executable: &str, arguments: &[String], missing_hint: &str) -> Result<()> {
+    let status = Command::new(executable)
+        .args(arguments)
+        .status()
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                anyhow::anyhow!("未安装 {executable}，{missing_hint}")
+            } else {
+                anyhow::Error::new(error)
+            }
+        })?;
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
+    }
+    Ok(())
 }
 
 fn run_plugin_command(arguments: &[String]) -> Result<()> {
@@ -315,14 +343,14 @@ fn is_help(argument: &str) -> bool {
 }
 
 fn usage() -> &'static str {
-    "用法:\n  aio helper install|uninstall\n  aio tool install <id> --version <版本>\n  aio tool uninstall <id>\n  aio tool list\n  aio tool release setup|prepare|publish|sync\n  aio open <aio://install/id?version=版本>\n  aio init <目录> [--name <包名>] [--title <标题>] [--network <china|global>]\n  aio plugin init <目录> [--name <包名>] [--title <插件标题>] [--language <rust|kotlin|typescript>] [--framework <nuxt|next|topcoat>] [--network <china|global>]\n  aio plugin init --help\n  aio plugin install <git> [--rev <分支、标签或提交>]\n  aio plugin package <目录> --version <SemVer> [--git <HTTPS Git>] [-o <文件.aio-plugin>]\n  aio plugin publish [<目录或文件.aio-plugin>] [--git <HTTPS Git>] [--version <SemVer>]\n  aio plugin uninstall <git>\n  aio plugin sync\n  aio plugin list\n  aio plugin validate [<仓库目录>]\n  aio plugin schema [<输出目录>]"
+    "用法:\n  aio helper install|uninstall\n  aio tool install <id> --version <版本>\n  aio tool uninstall <id>\n  aio tool list\n  aio tool release setup|prepare|publish|sync\n  aio open <aio://install/id?version=版本>\n  aio space <空间助手命令>\n  aio memory <智能体记忆命令>\n  aio init <目录> [--name <包名>] [--title <标题>] [--network <china|global>]\n  aio plugin init <目录> [--name <包名>] [--title <插件标题>] [--language <rust|kotlin|typescript>] [--framework <nuxt|next|topcoat>] [--network <china|global>]\n  aio plugin init --help\n  aio plugin install <git> [--rev <分支、标签或提交>]\n  aio plugin package <目录> --version <SemVer> [--git <HTTPS Git>] [-o <文件.aio-plugin>]\n  aio plugin publish [<目录或文件.aio-plugin>] [--git <HTTPS Git>] [--version <SemVer>]\n  aio plugin uninstall <git>\n  aio plugin sync\n  aio plugin list\n  aio plugin validate [<仓库目录>]\n  aio plugin schema [<输出目录>]"
 }
 
 fn plugin_init_usage() -> &'static str {
     "用法:\n  aio plugin init <目录> [--name <包名>] [--title <标题>] [--language <rust|kotlin|typescript>] [--framework <nuxt|next|topcoat>] [--network <china|global>] [--kind <cli|fullstack|system|runtime>] [--adopt]\n\n默认国内依赖源，初始化不联网；--network global 使用官方源。\n默认生成全栈插件，包含前端、后端、共享模型与自动发布配置。推送默认分支后自动构建上架。\n  --kind cli      TypeScript 本机 CLI，生成 npm 与 AIO 市场自动发布工作流\n  --adopt         将已有 npm CLI 接入 AIO，不覆盖源码\n  --kind system   Rust 系统源码插件，使用 trait + Dill/TypeId\n\n全栈框架:\n  --framework nuxt      Nuxt 全栈示例\n  --framework next      Next.js 全栈示例\n  --framework topcoat   Topcoat Rust process 全栈示例\n\n高级模板覆盖（Kotlin/TypeScript）:\n  --runtime page-definition   静态页面\n  --runtime wasm-component    Component\n  --runtime process           JVM/Node 服务"
 }
 fn plugin_publish_usage() -> &'static str {
-    "用法:\n  aio plugin publish [<目录或文件.aio-plugin>] [--git <HTTPS Git>] [--version <SemVer>]\n\n默认直接发布到官方插件中心，不依赖 CI。目录可从自己的 origin 推导来源，并从 Cargo.toml 或 package.json 推导版本。已有插件包保留包内来源和版本。\n\n环境变量:\n  AIO_PLUGIN_PUBLISH_TOKEN   插件市场创建的来源绑定发布凭证\n  AIO_PLUGIN_PUBLISH_URL     可选，覆盖官方插件中心发布接口\n\n发布前校验包的清单、版本和内容摘要。构建产物不需要提交到 Git。"
+    "用法:\n  aio plugin publish [<目录或文件.aio-plugin>] [--git <HTTPS Git>] [--version <SemVer>]\n\n默认直接发布到官方插件中心，不依赖 CI。AIO v2 整包走同步组件发布接口，旧版二进制包保留后台任务轮询。目录可从自己的 origin 推导来源，并从 Cargo.toml 或 package.json 推导版本。已有插件包保留包内来源和版本。\n\n环境变量:\n  AIO_PLUGIN_PUBLISH_TOKEN   插件市场创建的来源绑定发布凭证\n  AIO_PLUGIN_PUBLISH_URL     可选，覆盖官方插件中心地址或发布接口\n\n发布前校验包的清单、版本和内容摘要。构建产物不需要提交到 Git。"
 }
 
 fn plugin_package_usage() -> &'static str {

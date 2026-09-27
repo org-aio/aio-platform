@@ -1,5 +1,6 @@
 use super::*;
 use crate::{
+    generated::worker::model::{PairRequest, SubmitTask},
     identity::{IdentityProvider, SessionContext},
     runtime::server::RuntimeState,
 };
@@ -531,6 +532,107 @@ async fn worker_pairing_tasks_archives_and_revocation_end_to_end() -> Result<()>
         401
     );
     server.abort();
+    state.store.pool.close().await;
+    sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
+        .execute(&admin)
+        .await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "需要隔离 PostgreSQL，设置 AIO_TEST_DATABASE_URL"]
+async fn pairing_same_machine_revokes_previous_active_device() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let database = std::env::var("AIO_TEST_DATABASE_URL")?;
+    let admin = sqlx::PgPool::connect(&database).await?;
+    let schema = format!("worker_test_{}", uuid::Uuid::new_v4().simple());
+    sqlx::query(&format!("CREATE SCHEMA {schema}"))
+        .execute(&admin)
+        .await?;
+    let mut isolated = reqwest::Url::parse(&database)?;
+    isolated
+        .query_pairs_mut()
+        .append_pair("options", &format!("-c search_path={schema}"));
+    let state = RuntimeState::isolated_admin_test(
+        Arc::new(Identity),
+        &isolated.to_string(),
+        "http://127.0.0.1:1",
+        root.path(),
+    )
+    .await?;
+    let session = SessionContext {
+        session_id: "session".into(),
+        user_id: "owner".into(),
+        account: "owner".into(),
+        display_name: "owner".into(),
+        tenant_id: "test".into(),
+        tenant_label: "test".into(),
+        permissions: vec![],
+    };
+    let request = PairRequest {
+        label: "same-machine".into(),
+        platform: "darwin".into(),
+        capabilities: vec!["space.scan".into()],
+        machine_id: Some("machine-aaa".into()),
+    };
+    let first = state.workers.pair(request.clone()).await?;
+    state.workers.approve(&session, &first.code).await?;
+    state
+        .workers
+        .enqueue(
+            &session,
+            SubmitTask {
+                id: uuid::Uuid::new_v4().to_string(),
+                worker_id: first.device_id.clone(),
+                capability: "space.scan".into(),
+                input: json!({}),
+            },
+        )
+        .await?;
+    // 同一 machine_id 重新配对：旧的 active 记录被撤销，只留一条。
+    let second = state.workers.pair(request.clone()).await?;
+    state.workers.approve(&session, &second.code).await?;
+    let devices = state.workers.list(&session).await?;
+    assert_eq!(
+        devices
+            .iter()
+            .filter(|device| device.status != "revoked")
+            .count(),
+        1
+    );
+    assert_eq!(devices[0].id, second.device_id);
+    let stale_state: String = sqlx::query_scalar("SELECT state FROM worker_devices WHERE id=$1")
+        .bind(&first.device_id)
+        .fetch_one(&state.store.pool)
+        .await?;
+    assert_eq!(stale_state, "revoked");
+    let task_state: String =
+        sqlx::query_scalar("SELECT state FROM worker_tasks WHERE worker_id=$1")
+            .bind(&first.device_id)
+            .fetch_one(&state.store.pool)
+            .await?;
+    assert_eq!(task_state, "cancelled");
+
+    let other = state
+        .workers
+        .pair(PairRequest {
+            // 故意与第一台同名同平台，但 machine_id 不同，必须各自保留。
+            label: "same-machine".into(),
+            platform: "darwin".into(),
+            capabilities: vec!["space.scan".into()],
+            machine_id: Some("machine-bbb".into()),
+        })
+        .await?;
+    state.workers.approve(&session, &other.code).await?;
+    let devices = state.workers.list(&session).await?;
+    assert_eq!(
+        devices
+            .iter()
+            .filter(|device| device.status != "revoked")
+            .count(),
+        2
+    );
+
     state.store.pool.close().await;
     sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
         .execute(&admin)
