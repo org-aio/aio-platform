@@ -543,6 +543,7 @@ dependencies = [
  "base64",
  "dill",
  "dioxus",
+ "dioxus-icons",
  "flate2",
  "futures-util",
  "getrandom 0.4.2",

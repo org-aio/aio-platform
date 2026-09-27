@@ -190,6 +190,7 @@ async fn exercise_devices(
             label: "安装验收设备".into(),
             platform: "darwin".into(),
             capabilities: vec!["space.scan".into()],
+            machine_id: None,
         })
         .await?;
     state.workers.approve(&session, &pairing.code).await?;

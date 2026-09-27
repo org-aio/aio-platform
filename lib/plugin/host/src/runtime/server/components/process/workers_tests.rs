@@ -160,6 +160,7 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
             label: "workspace-device".into(),
             platform: "linux".into(),
             capabilities: vec!["space.scan".into()],
+            machine_id: None,
         })
         .await?;
     state.workers.approve(&owner, &pair.code).await?;
@@ -546,6 +547,7 @@ async fn verify_bridge(state: &RuntimeState, worker: &str) -> Result<()> {
             label: "desktop".into(),
             platform: "darwin".into(),
             capabilities: vec![DESKTOP.into()],
+            machine_id: None,
         })
         .await?;
     state.workers.approve(&owner, &desktop.code).await?;
@@ -555,6 +557,7 @@ async fn verify_bridge(state: &RuntimeState, worker: &str) -> Result<()> {
             label: "other".into(),
             platform: "linux".into(),
             capabilities: vec![WORKSPACE.into()],
+            machine_id: None,
         })
         .await?;
     state

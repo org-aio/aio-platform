@@ -1,9 +1,10 @@
 use super::model::Worker;
 use az_ui_components::{
-    button::{Button, ButtonVariant},
+    button::{Button, ButtonSize, ButtonVariant},
     dialog::{Dialog, DialogTitle},
 };
 use dioxus::prelude::*;
+use dioxus_icons::lucide::{RefreshCw, Trash2, X};
 use serde::{Serialize, de::DeserializeOwned};
 
 fn current_origin() -> String {
@@ -122,8 +123,14 @@ pub(crate) fn WorkerPanel(pairing: Signal<Option<String>>, on_close: EventHandle
     rsx! {
         Dialog{open:true,on_open_change:move|open:bool|if !open{close(())},
             div{class:"grid gap-4",
-                div{class:"flex items-center justify-between gap-2",DialogTitle{"我的设备"}Button{variant:ButtonVariant::Ghost,onclick:move |_|close(()),"关闭"}}
-                section{class:"grid gap-3 rounded-md border p-3",
+                div{class:"flex items-center justify-between gap-2",
+                    DialogTitle{"我的设备"}
+                    div{class:"flex items-center gap-2",
+                        Button{variant:ButtonVariant::Outline,size:ButtonSize::Icon,title:"刷新设备",aria_label:"刷新设备",disabled:busy(),onclick:move |_|workers.restart(),RefreshCw{}}
+                        Button{variant:ButtonVariant::Ghost,size:ButtonSize::Icon,title:"关闭",aria_label:"关闭",onclick:move |_|close(()),X{}}
+                    }
+                }
+                section{class:"grid gap-3 border-b pb-3",
                     div{class:"grid gap-1",
                         h3{"配对新设备"}
                         p{class:"text-sm text-muted-foreground","在需要配对的电脑上运行对应命令，浏览器会打开 AIO 并等待你授权这台设备。"}
@@ -161,11 +168,11 @@ pub(crate) fn WorkerPanel(pairing: Signal<Option<String>>, on_close: EventHandle
                         for worker in items.iter().cloned(){
                             section{key:"{worker.id}",class:"flex flex-wrap items-center justify-between gap-2 border-b pb-3",
                                 div{class:"grid gap-2",
-                                    strong{"{worker.label} · {worker.status}"}
-                                    small{"{worker.platform}"}
+                                    strong{class:"break-all","{worker.label} · " if worker.status=="online"{"在线"}else{"离线"}}
+                                    small{class:"break-all text-muted-foreground","{worker.platform} · {worker.id}"}
                                 }
                                 if worker.status!="revoked"{
-                                    Button{variant:ButtonVariant::Ghost,onclick:{let worker=worker.clone();move |_|revoke.set(Some(worker.clone()))},"撤销配对"}
+                                    Button{variant:ButtonVariant::Outline,disabled:busy(),onclick:{let worker=worker.clone();move |_|revoke.set(Some(worker.clone()))},Trash2{}"删除设备"}
                                 }
                             }
                         }
@@ -175,9 +182,12 @@ pub(crate) fn WorkerPanel(pairing: Signal<Option<String>>, on_close: EventHandle
             }
         }
         if let Some(worker)=revoke(){
-            Dialog{open:true,on_open_change:move|open:bool|if !open{revoke.set(None)},DialogTitle{"撤销设备配对"}
-                p{"撤销 {worker.label} 的配对后，该设备无法继续同步、执行任务或访问归档。"}
-                Button{disabled:busy(),onclick:move |_|{let id=worker.id.clone();busy.set(true);spawn(async move{match request::<()>("DELETE",&format!("/api/runtime/workers/{id}"),None::<&()>).await{Ok(())=>{revoke.set(None);workers.restart();},Err(e)=>error.set(Some(e))}busy.set(false);});},"确认撤销"}
+            Dialog{open:true,on_open_change:move|open:bool|if !open && !busy(){revoke.set(None)},DialogTitle{"删除设备"}
+                p{class:"break-all","删除 {worker.label} 后，该设备的配对将撤销，无法继续同步、执行任务或访问归档。"}
+                div{class:"flex justify-end gap-2",
+                    Button{variant:ButtonVariant::Outline,disabled:busy(),onclick:move |_|revoke.set(None),"取消"}
+                    Button{variant:ButtonVariant::Destructive,disabled:busy(),onclick:move |_|{let id=worker.id.clone();busy.set(true);spawn(async move{match request::<()>("DELETE",&format!("/api/runtime/workers/{id}"),None::<&()>).await{Ok(())=>{revoke.set(None);error.set(None);notice.set(Some("设备已删除".into()));workers.restart();},Err(e)=>error.set(Some(e))}busy.set(false);});},if busy(){"正在删除"}else{"确认删除"}}
+                }
             }
         }
     }
