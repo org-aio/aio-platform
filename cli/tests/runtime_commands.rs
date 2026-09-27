@@ -13,6 +13,8 @@ use anyhow::{Context as _, Result, ensure};
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
+type MockResponse = (u16, String, Vec<(String, String)>);
+
 struct Request {
     method: String,
     path: String,
@@ -36,10 +38,7 @@ impl Server {
         Self::start_with_headers(prefix, responses)
     }
 
-    fn start_with_headers(
-        prefix: &str,
-        responses: Vec<(u16, String, Vec<(String, String)>)>,
-    ) -> Result<Self> {
+    fn start_with_headers(prefix: &str, responses: Vec<MockResponse>) -> Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0")?;
         listener.set_nonblocking(true)?;
         let base = format!("http://{}{prefix}", listener.local_addr()?);

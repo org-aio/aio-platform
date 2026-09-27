@@ -18,7 +18,23 @@ aio plugin publish ./orders.aio-plugin
 
 已经生成的包可以搬到任何目录或机器再发布。包内来源、版本和内容摘要不能通过命令参数改写。默认发布接口为 `https://aio.addzero.site/api/runtime/plugins/publish`，私有中心通过 `AIO_PLUGIN_PUBLISH_URL` 覆盖。CI 只是可选的构建与调用方式，不属于协议要求。
 
-## 版本与内容
+## v2 整包
+
+清单声明 `schema_version = 2` 时，CLI 使用官方 `az-plugin-bundle::Bundle`，把后端、前端和声明的数据库迁移打入同一个包。process 后端必须是 Linux x86_64 ELF；Component 后端必须是对应 ABI 的 `.wasm`。源码提交字段 `commit` 是完整 Git SHA，独立目录使用零 SHA；正式内容身份是 `digest`。
+
+v2 上传到 `/api/runtime/components/publish`，Content-Type 为 `application/vnd.aio.component+gzip`，不设置 Content-Encoding。`AIO_PLUGIN_PUBLISH_URL` 可指定宿主 origin 或完整发布接口；已有 `/plugins/publish` 地址会转换为同源 `/components/publish`。v2 包文件总量最多 64 MiB，文件最多 4096 个，压缩包和解压 JSON 各最多 96 MiB；全部路径和摘要经共享库验证。
+
+宿主同步验证候选运行时并保存 PostgreSQL 组件发布记录，返回：
+
+```json
+{"data":{"source_id":"<来源UUID>","revision":"<整包digest>","state":"published"}}
+```
+
+CLI 校验返回的 digest 和 `published` 状态。发布使版本进入市场，租户安装与激活另行执行；上传成功不能作为租户界面可用的验收。v2 宿主已实现隔离前端挂载、会话调用桥、数据库和加密授权，实际部署仍须确认镜像、端点和数据库配置，并在安装后验收。
+
+## 旧版包内容
+
+以下 `az-plugin-package` 格式、`rev` 字段及后台激活任务用于未声明 `schema_version = 2` 的旧版清单，与 v2 整包协议分别处理。
 
 包由共享库 `az-plugin-package` 编解码，当前格式为 2，是包含清单、后端 artifact 和可选前端编译资产的确定性 gzip JSON 容器。HTTP 直接发送包字节，类型为 `application/vnd.aio.plugin+gzip`，不设置 `Content-Encoding`。限制为清单 128 KiB、前后端合计 32 MiB、前端最多 256 个文件、压缩包与解压 JSON 各 48 MiB；多 gzip 成员、尾随数据、无效路径、缺失市场声明和摘要篡改均会被拒绝。格式 1 的未发布包需要重新打包。
 
@@ -40,7 +56,7 @@ tags = ["orders"]
 
 当前在线目标为 `page-definition`、`wasm-component` 和 `process`。Rust 源码 `client/server` 声明不是可运行二进制包，必须使用源码装配流程；不能把尚未编译的 Dioxus crate 宣称为已交付在线插件。
 
-前端联合包的文件契约见 [frontend-bundle.md](frontend-bundle.md)。共享 CLI 已实现打包，但当前公开宿主尚未接通隔离挂载和调用桥，因此不得把这一契约描述为已经上线的 Dioxus 热替换能力。
+前端联合包的文件契约见 [frontend-bundle.md](frontend-bundle.md)。v2 挂载与调用桥已有实现；Dioxus Web/Desktop 的具体制品仍须单独构建、安装并验收，不能从打包成功推断界面可用。
 
 ## 发布凭证
 
@@ -60,7 +76,7 @@ curl --fail --request DELETE --cookie 'aio_session=<登录会话>' \
   https://aio.addzero.site/api/runtime/publish-credentials/<credential-id>
 ```
 
-## 保存与激活
+## 旧版保存与激活
 
 宿主先检查凭证、包完整性、清单与能力边界，再将完整包和元数据保存 PostgreSQL `plugin_packages`，返回后台 `job_id`。工作队列完成 PageDefinition 校验、Component ABI 或 process 健康检查，最后通过现有生命周期事务激活。上传不是立即执行任意代码；安装器不会执行 Cargo、Kotlin、pnpm 或仓库脚本。
 

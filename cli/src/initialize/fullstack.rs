@@ -137,7 +137,8 @@ mod tests {
             fs::read_to_string(root.path().join("aio-dev.toml"))?
                 .parse::<toml_edit::DocumentMut>()?;
         }
-        for framework in [WebFramework::Topcoat] {
+        {
+            let framework = WebFramework::Topcoat;
             let root = tempfile::tempdir()?;
             materialize_web(root.path(), framework, "counter-example", "计数 \"A\"")?;
             let manifest = az_plugin_bundle::BundleManifest::parse(&fs::read_to_string(

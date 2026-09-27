@@ -23,6 +23,30 @@ use manifest::{
 };
 
 pub fn validate(root: &Path) -> Result<()> {
+    if packaging::uses_bundle_manifest(root)? {
+        let bundle = az_plugin_bundle::Bundle::from_directory(
+            root,
+            "aio-plugin.toml",
+            "https://example.invalid/validation.git".into(),
+            "0".repeat(40),
+            "0.0.0".into(),
+        )?;
+        let verified = bundle.verify()?;
+        let manifest = verified.manifest();
+        let artifact = &manifest.plugin.runtime.artifact;
+        let runtime = if manifest.plugin.runtime.process.is_some() {
+            "process"
+        } else {
+            "wasm-component"
+        };
+        println!(
+            "插件校验通过: runtime={runtime} subplugins={} pages=0 artifact={artifact} frontend={} migrations={}",
+            manifest.plugin.subplugins.len(),
+            verified.frontend_assets().len(),
+            verified.migrations().count(),
+        );
+        return Ok(());
+    }
     let report = az_plugin_manifest::validate_repository(root)?;
     let artifact = report
         .artifact

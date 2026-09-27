@@ -1,7 +1,7 @@
 use std::{env, io::Read, net::IpAddr, path::PathBuf, thread, time::Duration};
 
 use anyhow::{Context as _, Result, bail, ensure};
-use az_plugin_package::{PACKAGE_CONTENT_TYPE, PluginPackage};
+use az_plugin_package::PACKAGE_CONTENT_TYPE;
 use reqwest::{
     Url,
     blocking::{Client, Response},
@@ -9,11 +9,13 @@ use reqwest::{
 };
 use serde::Deserialize;
 
-use super::packaging::{prepare_package, read_package};
+use super::packaging::{PreparedRelease, prepare_release, read_release};
 
 const PUBLISH_URL_ENV: &str = "AIO_PLUGIN_PUBLISH_URL";
 const PUBLISH_TOKEN_ENV: &str = "AIO_PLUGIN_PUBLISH_TOKEN";
 pub(crate) const DEFAULT_PUBLISH_URL: &str = "https://aio.addzero.site/api/runtime/plugins/publish";
+const COMPONENT_PUBLISH_PATH: &str = "/api/runtime/components/publish";
+const COMPONENT_CONTENT_TYPE: &str = "application/vnd.aio.component+gzip";
 const POLL_ATTEMPTS: usize = 90;
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_RESPONSE_BYTES: u64 = 128 * 1024;
@@ -27,23 +29,34 @@ pub struct PublicationOptions {
 
 pub fn publish(options: PublicationOptions) -> Result<()> {
     let package = if options.root.is_file() {
-        read_package(
+        read_release(
             &options.root,
             options.git.as_deref(),
             options.version.as_deref(),
         )?
     } else {
-        prepare_package(&options.root, options.git, options.version)?
+        prepare_release(&options.root, options.git, options.version)?
     };
     let endpoint = env::var(PUBLISH_URL_ENV).unwrap_or_else(|_| DEFAULT_PUBLISH_URL.to_owned());
     let token = env::var(PUBLISH_TOKEN_ENV)
         .with_context(|| format!("缺少 {PUBLISH_TOKEN_ENV}，请先在插件市场创建发布凭证"))?;
     ensure!(!token.trim().is_empty(), "{PUBLISH_TOKEN_ENV} 不能为空");
     let active = publish_to(&package, &endpoint, &token)?;
-    println!(
-        "插件发布已激活: version={} revision={} pages={} detail={}",
-        package.version, active.revision, active.page_count, active.detail
-    );
+    match package {
+        PreparedRelease::Bundle(_) => println!(
+            "组件已发布: version={} revision={} detail={}",
+            package.version(),
+            active.revision,
+            active.detail
+        ),
+        PreparedRelease::Legacy(_) => println!(
+            "插件发布已激活: version={} revision={} pages={} detail={}",
+            package.version(),
+            active.revision,
+            active.page_count,
+            active.detail
+        ),
+    }
     Ok(())
 }
 
@@ -70,8 +83,26 @@ struct PublishedPlugin {
     detail: String,
 }
 
-fn publish_to(package: &PluginPackage, endpoint: &str, token: &str) -> Result<PublishedPlugin> {
-    let endpoint = publish_url(endpoint)?;
+#[derive(Debug, Deserialize)]
+struct PublishedComponent {
+    source_id: String,
+    revision: String,
+    state: String,
+}
+
+#[derive(Debug)]
+struct PublishOutcome {
+    revision: String,
+    page_count: usize,
+    detail: String,
+}
+
+fn publish_to(package: &PreparedRelease, endpoint: &str, token: &str) -> Result<PublishOutcome> {
+    let endpoint = publish_url(endpoint, package)?;
+    let content_type = match package {
+        PreparedRelease::Legacy(_) => PACKAGE_CONTENT_TYPE,
+        PreparedRelease::Bundle(_) => COMPONENT_CONTENT_TYPE,
+    };
     let client = Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(120))
@@ -81,21 +112,44 @@ fn publish_to(package: &PluginPackage, endpoint: &str, token: &str) -> Result<Pu
     let response = client
         .post(endpoint.clone())
         .bearer_auth(token)
-        .header(header::CONTENT_TYPE, PACKAGE_CONTENT_TYPE)
+        .header(header::CONTENT_TYPE, content_type)
         .body(package.encode()?)
         .send()
         .context("请求插件发布接口失败")?;
+    if matches!(package, PreparedRelease::Bundle(_)) {
+        let published = decode_component_response(response)?;
+        ensure!(
+            published.revision == package.revision(),
+            "发布接口返回了不一致的内容版本"
+        );
+        ensure!(
+            published.state == "published",
+            "组件发布状态异常: {}",
+            published.state
+        );
+        return Ok(PublishOutcome {
+            revision: published.revision,
+            page_count: 0,
+            detail: format!("source_id={}", published.source_id),
+        });
+    }
     let mut status = decode_response(response)?;
     let job_id = status.job_id.clone();
     let job_url = publish_job_url(endpoint, &job_id)?;
     for attempt in 0..=POLL_ATTEMPTS {
         ensure!(
-            status.revision == package.rev,
+            status.revision == package.revision(),
             "发布接口返回了不一致的内容版本"
         );
         ensure!(status.job_id == job_id, "发布接口返回了不一致的任务 ID");
         match status.state {
-            PublishState::Active => return Ok(status),
+            PublishState::Active => {
+                return Ok(PublishOutcome {
+                    revision: status.revision,
+                    page_count: status.page_count,
+                    detail: status.detail,
+                });
+            }
             PublishState::Failed => bail!("插件发布失败: {}", status.detail),
             PublishState::Queued | PublishState::Running => {}
         }
@@ -115,6 +169,20 @@ fn publish_to(package: &PluginPackage, endpoint: &str, token: &str) -> Result<Pu
 }
 
 fn decode_response(response: Response) -> Result<PublishedPlugin> {
+    let body = read_response(response)?;
+    serde_json::from_slice::<RuntimeResponse<PublishedPlugin>>(&body)
+        .context("解析插件发布响应失败")
+        .map(|response| response.data)
+}
+
+fn decode_component_response(response: Response) -> Result<PublishedComponent> {
+    let body = read_response(response)?;
+    serde_json::from_slice::<RuntimeResponse<PublishedComponent>>(&body)
+        .context("解析组件发布响应失败")
+        .map(|response| response.data)
+}
+
+fn read_response(response: Response) -> Result<Vec<u8>> {
     let status = response.status();
     let mut body = Vec::new();
     response
@@ -129,23 +197,44 @@ fn decode_response(response: Response) -> Result<PublishedPlugin> {
             detail.chars().take(4096).collect::<String>()
         );
     }
-    serde_json::from_slice::<RuntimeResponse<PublishedPlugin>>(&body)
-        .context("解析插件发布响应失败")
-        .map(|response| response.data)
+    Ok(body)
 }
 
-fn publish_url(value: &str) -> Result<Url> {
-    let url = Url::parse(value).context("AIO_PLUGIN_PUBLISH_URL 不是有效 URL")?;
+fn publish_url(value: &str, package: &PreparedRelease) -> Result<Url> {
+    let mut url = Url::parse(value).context("AIO_PLUGIN_PUBLISH_URL 不是有效 URL")?;
     let loopback_http = url.scheme() == "http" && url_is_loopback(&url);
     ensure!(
         (url.scheme() == "https" || loopback_http)
             && url.username().is_empty()
             && url.password().is_none()
             && url.query().is_none()
-            && url.fragment().is_none()
-            && url.path().ends_with("/plugins/publish"),
+            && url.fragment().is_none(),
         "AIO_PLUGIN_PUBLISH_URL 必须是 HTTPS 发布接口；仅本机开发允许 HTTP"
     );
+    let path = match package {
+        PreparedRelease::Legacy(_) => {
+            if matches!(url.path(), "" | "/") {
+                "/api/runtime/plugins/publish".to_owned()
+            } else {
+                ensure!(url.path().ends_with("/plugins/publish"), "发布接口路径无效");
+                url.path().to_owned()
+            }
+        }
+        PreparedRelease::Bundle(_) => {
+            if matches!(url.path(), "" | "/") {
+                COMPONENT_PUBLISH_PATH.to_owned()
+            } else if let Some(base) = url.path().strip_suffix("/plugins/publish") {
+                format!("{base}/components/publish")
+            } else {
+                ensure!(
+                    url.path().ends_with("/components/publish"),
+                    "发布接口路径无效"
+                );
+                url.path().to_owned()
+            }
+        }
+    };
+    url.set_path(&path);
     Ok(url)
 }
 
