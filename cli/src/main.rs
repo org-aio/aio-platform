@@ -3,6 +3,7 @@
 mod development;
 mod initialize;
 mod repository_plugin;
+mod runtime_commands;
 mod tools;
 
 use std::{env, path::PathBuf};
@@ -32,11 +33,15 @@ fn run(arguments: Vec<String>) -> Result<()> {
         "tool" | "helper" | "open" => tools::run(&arguments),
         "init" => initialize_application(&arguments[1..]),
         "plugin" => run_plugin_command(&arguments[1..]),
+        "vibecli" => runtime_commands::run(&arguments[1..]),
         "help" | "--help" | "-h" => {
             print_usage();
             Ok(())
         }
-        _ => bail!("未知命令: {command}\n\n{}", usage()),
+        _ => match runtime_commands::invoke(&arguments)? {
+            Some(exit_code) => std::process::exit(exit_code),
+            None => bail!("未知命令: {command}\n\n{}", usage()),
+        },
     }
 }
 
@@ -308,6 +313,10 @@ fn no_arguments(action_arguments: &[String], action: impl FnOnce() -> Result<()>
 
 fn print_usage() {
     println!("{}", usage());
+    println!("\n{}", runtime_commands::usage());
+    if let Err(error) = runtime_commands::print_help() {
+        eprintln!("远端帮助暂不可用：{error:#}");
+    }
 }
 
 fn is_help(argument: &str) -> bool {

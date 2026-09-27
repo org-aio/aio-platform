@@ -51,10 +51,11 @@ impl Components {
                 self.processes.activate(source, tenant, &previous).await?;
             }
         }
-        if result.is_ok() && switched_from_wasm {
-            if let Err(error) = self.slot(source, tenant).await?.deactivate().await {
-                eprintln!("清理旧 Component 实例失败: {error:#}");
-            }
+        if result.is_ok()
+            && switched_from_wasm
+            && let Err(error) = self.slot(source, tenant).await?.deactivate().await
+        {
+            eprintln!("清理旧 Component 实例失败: {error:#}");
         }
         result
     }
