@@ -26,22 +26,14 @@ impl WorkerService for WorkerServiceImpl {
         for item in &request.capabilities {
             validate_capability(item)?;
         }
-        let machine_id = request
-            .machine_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| {
-                ensure!(
-                    value.len() <= 128
-                        && value
-                            .bytes()
-                            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')),
-                    "设备标识无效"
-                );
-                Ok(value.to_string())
-            })
-            .transpose()?;
+        let machine_id = match request.machine_id {
+            Some(value) => Some(
+                uuid::Uuid::parse_str(&value)
+                    .context("设备标识无效")?
+                    .to_string(),
+            ),
+            None => None,
+        };
         let mut tx = self.pool.begin().await?;
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('worker-pairing',0))")
             .execute(&mut *tx)
@@ -58,7 +50,7 @@ impl WorkerService for WorkerServiceImpl {
         let token = secret()?;
         let code = uuid::Uuid::new_v4().simple().to_string();
         let expires_at=sqlx::query_scalar("INSERT INTO worker_devices(id,token_hash,pairing_code,label,platform,capabilities,machine_id) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING (extract(epoch FROM expires_at)*1000)::bigint")
-            .bind(&id).bind(digest(&token)).bind(&code).bind(request.label).bind(request.platform).bind(serde_json::to_value(request.capabilities)?).bind(&machine_id).fetch_one(&mut *tx).await?;
+            .bind(&id).bind(digest(&token)).bind(&code).bind(request.label).bind(request.platform).bind(serde_json::to_value(request.capabilities)?).bind(machine_id).fetch_one(&mut *tx).await?;
         tx.commit().await?;
         Ok(Pairing {
             device_id: id,
@@ -81,30 +73,22 @@ impl WorkerService for WorkerServiceImpl {
             ))
             .execute(&mut *tx)
             .await?;
-        let count:i64=sqlx::query_scalar("SELECT count(*) FROM worker_devices WHERE tenant_id=$1 AND user_id=$2 AND state='active'").bind(&session.tenant_id).bind(&session.user_id).fetch_one(&mut *tx).await?;
-        ensure!(count < 32, "当前账号设备数量已达上限");
-        let pending=sqlx::query("SELECT id,label,platform,machine_id FROM worker_devices WHERE pairing_code=$1 AND state='pending' AND expires_at>now() FOR UPDATE")
+        let pending=sqlx::query("SELECT id,machine_id FROM worker_devices WHERE pairing_code=$1 AND state='pending' AND expires_at>now() FOR UPDATE")
             .bind(code).fetch_optional(&mut *tx).await?.context("配对码无效、已使用或已过期")?;
         let id: String = pending.try_get("id")?;
         let machine_id: Option<String> = pending.try_get("machine_id")?;
-        // 同一台机器使用新密钥重新配对时，按本机持久化标识撤销旧记录；不同机器即使同名也各自保留。
-        let stale = match machine_id.as_deref() {
-            Some(machine_id) => {
-                sqlx::query_scalar::<_, String>("UPDATE worker_devices SET state='revoked' WHERE tenant_id=$1 AND user_id=$2 AND state='active' AND machine_id=$3 RETURNING id")
-                    .bind(&session.tenant_id)
-                    .bind(&session.user_id)
-                    .bind(machine_id)
-                    .fetch_all(&mut *tx)
-                    .await?
-            }
-            None => Vec::new(),
-        };
-        if !stale.is_empty() {
-            sqlx::query("UPDATE worker_tasks SET state='cancelled',lease=NULL,lease_until=NULL,error='设备重新配对' WHERE worker_id=ANY($1) AND state IN ('queued','running')")
-                .bind(&stale).execute(&mut *tx).await?;
+        // 按账号和稳定本机身份替换凭据；同名设备不参与去重，旧任务停止执行。
+        if let Some(machine_id) = machine_id {
+            let stale=sqlx::query_scalar::<_,String>("UPDATE worker_devices SET state='revoked' WHERE tenant_id=$1 AND user_id=$2 AND state='active' AND machine_id=$3 RETURNING id")
+                .bind(&session.tenant_id).bind(&session.user_id).bind(machine_id).fetch_all(&mut *tx).await?;
+            sqlx::query("UPDATE worker_tasks SET state='cancelled',lease=NULL,lease_until=NULL,completed_at=now(),error='设备重新配对' WHERE worker_id=ANY($1) AND state IN ('queued','running')")
+                .bind(stale).execute(&mut *tx).await?;
         }
+        // 已达设备上限时，替换已有机器仍然允许；检查失败会回滚撤销操作。
+        let count:i64=sqlx::query_scalar("SELECT count(*) FROM worker_devices WHERE tenant_id=$1 AND user_id=$2 AND state='active'").bind(&session.tenant_id).bind(&session.user_id).fetch_one(&mut *tx).await?;
+        ensure!(count < 32, "当前账号设备数量已达上限");
         let updated=sqlx::query("UPDATE worker_devices SET tenant_id=$1,user_id=$2,state='active',pairing_code=NULL WHERE id=$3 AND state='pending'")
-            .bind(&session.tenant_id).bind(&session.user_id).bind(&id).execute(&mut *tx).await?.rows_affected();
+            .bind(&session.tenant_id).bind(&session.user_id).bind(id).execute(&mut *tx).await?.rows_affected();
         ensure!(updated == 1, "配对码无效、已使用或已过期");
         tx.commit().await?;
         Ok(())
@@ -125,7 +109,7 @@ impl WorkerService for WorkerServiceImpl {
         })
     }
     async fn list(&self, session: &SessionContext) -> Result<Vec<Worker>> {
-        let rows=sqlx::query("SELECT *,CASE WHEN state='active' THEN CASE WHEN last_seen>now()-interval '90 seconds' THEN 'online' ELSE 'offline' END ELSE state END AS status,(extract(epoch FROM last_seen)*1000)::bigint AS last_seen_ms FROM worker_devices WHERE tenant_id=$1 AND user_id=$2 ORDER BY created_at DESC LIMIT 100")
+        let rows=sqlx::query("SELECT *,CASE WHEN last_seen>now()-interval '90 seconds' THEN 'online' ELSE 'offline' END AS status,(extract(epoch FROM last_seen)*1000)::bigint AS last_seen_ms FROM worker_devices WHERE tenant_id=$1 AND user_id=$2 AND state='active' ORDER BY created_at DESC LIMIT 100")
             .bind(&session.tenant_id).bind(&session.user_id).fetch_all(&self.pool).await?;
         rows.into_iter().map(worker).collect()
     }

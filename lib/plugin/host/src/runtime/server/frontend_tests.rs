@@ -41,7 +41,7 @@ pub(super) fn session() -> SessionContext {
 }
 
 #[test]
-fn grants_expire_revoke_and_enforce_per_user_quota() -> anyhow::Result<()> {
+fn grants_expire_revoke_and_evict_the_oldest_over_quota_grant() -> anyhow::Result<()> {
     let access = FrontendAccess::new("http://127.0.0.1:8080")?;
     let token = access.issue(grant())?;
     assert_eq!(access.get(&token)?.page_id, "counter");
@@ -51,10 +51,15 @@ fn grants_expire_revoke_and_enforce_per_user_quota() -> anyhow::Result<()> {
     expired.issued = Instant::now() - Duration::from_secs(1801);
     let expired_token = access.issue(expired)?;
     assert!(access.get(&expired_token).is_err());
-    for _ in 0..16 {
+    let mut oldest = grant();
+    oldest.issued = Instant::now() - Duration::from_secs(60);
+    let oldest_token = access.issue(oldest)?;
+    for _ in 0..15 {
         access.issue(grant())?;
     }
-    assert!(access.issue(grant()).is_err());
+    let replacement_token = access.issue(grant())?;
+    assert!(access.get(&oldest_token).is_err());
+    assert!(access.get(&replacement_token).is_ok());
     Ok(())
 }
 
@@ -105,4 +110,11 @@ fn document_bootstrap_replaces_base_and_stays_in_sandbox() -> anyhow::Result<()>
     )?)?;
     assert!(nested.contains(&format!("href=\"{prefix}pages/\"")));
     Ok(())
+}
+
+#[test]
+fn module_loader_does_not_treat_javascript_as_typescript() {
+    let source = std::str::from_utf8(frontend_document::MODULES).expect("模块加载器必须是 UTF-8");
+    assert!(source.contains("const tsContentType = /^application\\/typescript(;|$)/;"));
+    assert!(!source.contains("const tsContentType = /^application\\/typescript(;|$)|/;"));
 }

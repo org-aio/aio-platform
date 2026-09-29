@@ -4,6 +4,16 @@
   const pending = new Map();
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
+  const createId = () => {
+    if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+    const bytes = new Uint8Array(16);
+    if (typeof globalThis.crypto?.getRandomValues === "function") globalThis.crypto.getRandomValues(bytes);
+    else for (let index = 0; index < bytes.length; index++) bytes[index] = Math.floor(Math.random() * 256);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  };
   window.addEventListener("message", (event) => {
     const message = event.data;
     if (event.source !== window.parent || message?.protocol !== "aio:plugin@2" || message.kind !== "response") return;
@@ -22,7 +32,7 @@
     if (url.search && input.query != null) return reject(new Error("Specify query only once"));
     const body = input.body ?? new Uint8Array();
     if (!(body instanceof Uint8Array) || body.length > 16 * 1024 * 1024) return reject(new Error("Invalid binary body"));
-    const id = crypto.randomUUID();
+    const id = createId();
     const timer = development ? null : setTimeout(() => { pending.delete(id); reject(new Error("Service request timed out")); }, 35000);
     pending.set(id, { resolve, reject, timer });
     window.parent.postMessage({ protocol: "aio:plugin@2", kind: "request", id,
@@ -41,7 +51,7 @@
   };
   const copy = (text) => new Promise((resolve, reject) => {
     if (pending.size >= 16 || typeof text !== "string" || text.length > 100000) return reject(new Error("Invalid clipboard request"));
-    const id = crypto.randomUUID();
+    const id = createId();
     const timer = setTimeout(() => { pending.delete(id); reject(new Error("Clipboard request timed out")); }, 5000);
     pending.set(id, { resolve, reject, timer });
     window.parent.postMessage({ protocol: "aio:plugin@2", kind: "clipboard", id, text }, "*");

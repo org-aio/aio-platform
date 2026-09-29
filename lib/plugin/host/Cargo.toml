@@ -21,6 +21,7 @@ getrandom = { version = "0.4.2", optional = true }
 axum = { version = "0.8.6", optional = true }
 dill = "0.15.0"
 dioxus = { version = "=0.7.9", default-features = false, features = ["macro", "html", "signals"], optional = true }
+dioxus-icons = { version = "0.1.0", default-features = false, optional = true }
 az-dioxus-admin-shell = { git = "https://github.com/zjarlin/dioxus-admin-workbench.git", rev = "067df8cc67a44fbed3638f4ccec3e6379af7ca9f", default-features = false, optional = true }
 az-ui-components = { git = "https://github.com/zjarlin/dioxus-admin-workbench.git", rev = "067df8cc67a44fbed3638f4ccec3e6379af7ca9f", optional = true }
 az-plugin-manifest = { path = "../manifest", default-features = false }
@@ -46,7 +47,7 @@ web-sys = { version = "0.3.77", features = ["AbortSignal", "Document", "Element"
 test-support = ["server"]
 components = ["dep:az-plugin-bundle", "dep:az-plugin-contract", "dep:az-plugin-runtime", "dep:async-trait", "dep:semver", "dep:getrandom", "dep:futures-util"]
 default = []
-ui = ["dep:dioxus", "dep:az-dioxus-admin-shell", "dep:az-ui-components"]
+ui = ["dep:dioxus", "dep:dioxus-icons", "dep:az-dioxus-admin-shell", "dep:az-ui-components"]
 web = ["ui", "dioxus/web", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
 desktop = ["ui", "dioxus/desktop", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
 server = ["dep:jsonwebtoken","components", "az-plugin-manifest/validation", "dep:az-plugin-package", "dep:axum", "dep:flate2", "dep:kuchikiki", "dep:mime_guess", "dep:reqwest", "dep:sha2", "dep:sqlx", "dep:tar", "dep:tokio", "dep:toml", "dep:tower-http", "dep:uuid", "dep:wasmtime"]

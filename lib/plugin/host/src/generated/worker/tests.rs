@@ -9,6 +9,163 @@ use axum::http::HeaderMap;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
+#[tokio::test]
+#[ignore = "需要隔离 PostgreSQL，设置 AIO_TEST_DATABASE_URL"]
+async fn machine_identity_pairing_and_deletion() -> Result<()> {
+    use super::model::{PairRequest, SubmitTask};
+    let root = tempfile::tempdir()?;
+    let database = std::env::var("AIO_TEST_DATABASE_URL")?;
+    let admin = sqlx::PgPool::connect(&database).await?;
+    let schema = format!("worker_test_{}", uuid::Uuid::new_v4().simple());
+    sqlx::query(&format!("CREATE SCHEMA {schema}"))
+        .execute(&admin)
+        .await?;
+    let mut isolated = reqwest::Url::parse(&database)?;
+    isolated
+        .query_pairs_mut()
+        .append_pair("options", &format!("-c search_path={schema}"));
+    let state = RuntimeState::isolated_admin_test(
+        Arc::new(Identity),
+        &isolated.to_string(),
+        "http://127.0.0.1:1",
+        root.path(),
+    )
+    .await?;
+    let session = SessionContext {
+        session_id: "session".into(),
+        user_id: "owner".into(),
+        account: "owner".into(),
+        display_name: "owner".into(),
+        tenant_id: "test".into(),
+        tenant_label: "test".into(),
+        permissions: vec![],
+    };
+    let request = PairRequest {
+        label: "same-name".into(),
+        platform: "darwin".into(),
+        capabilities: vec!["space.scan".into()],
+        machine_id: Some(uuid::Uuid::new_v4().to_string()),
+    };
+    let first = state.workers.pair(request.clone()).await?;
+    state.workers.approve(&session, &first.code).await?;
+    let identity = state.workers.identity(&first.token).await?;
+    for _ in 0..2 {
+        state
+            .workers
+            .enqueue(
+                &session,
+                SubmitTask {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    worker_id: first.device_id.clone(),
+                    capability: "space.scan".into(),
+                    input: json!({}),
+                },
+            )
+            .await?;
+    }
+    assert!(
+        state
+            .workers
+            .claim(&identity, &uuid::Uuid::new_v4().to_string())
+            .await?
+            .is_some()
+    );
+    let second = state.workers.pair(request.clone()).await?;
+    state.workers.approve(&session, &second.code).await?;
+    let devices = state.workers.list(&session).await?;
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0].id, second.device_id);
+    assert!(state.workers.identity(&first.token).await.is_err());
+    let cancelled: i64 = sqlx::query_scalar("SELECT count(*) FROM worker_tasks WHERE worker_id=$1 AND state='cancelled' AND lease IS NULL AND lease_until IS NULL")
+        .bind(&first.device_id).fetch_one(&state.store.pool).await?;
+    assert_eq!(cancelled, 2);
+
+    // 主机名相同、标识不同的机器互不覆盖；没有标识的历史设备也不猜测合并。
+    let other = state
+        .workers
+        .pair(PairRequest {
+            machine_id: Some(uuid::Uuid::new_v4().to_string()),
+            ..request.clone()
+        })
+        .await?;
+    state.workers.approve(&session, &other.code).await?;
+    let legacy = state
+        .workers
+        .pair(PairRequest {
+            machine_id: None,
+            ..request.clone()
+        })
+        .await?;
+    state.workers.approve(&session, &legacy.code).await?;
+    assert_eq!(state.workers.list(&session).await?.len(), 3);
+
+    // 不同用户使用相同标识不能撤销当前用户的设备。
+    let outsider = SessionContext {
+        user_id: "outsider".into(),
+        ..session.clone()
+    };
+    let outside = state.workers.pair(request.clone()).await?;
+    state.workers.approve(&outsider, &outside.code).await?;
+    assert_eq!(state.workers.list(&session).await?.len(), 3);
+    assert!(
+        state
+            .workers
+            .revoke(&outsider, &second.device_id)
+            .await
+            .is_err()
+    );
+
+    // 两次并发授权只留下一个同标识设备。
+    let third = state.workers.pair(request.clone()).await?;
+    let fourth = state.workers.pair(request.clone()).await?;
+    let (a, b) = tokio::join!(
+        state.workers.approve(&session, &third.code),
+        state.workers.approve(&session, &fourth.code)
+    );
+    a?;
+    b?;
+    assert_eq!(state.workers.list(&session).await?.len(), 3);
+    assert_eq!(state.workers.list(&outsider).await?.len(), 1);
+
+    // 填满 32 台后，替换已有标识仍然成功；新增机器被拒绝。
+    sqlx::query("INSERT INTO worker_devices(id,token_hash,label,platform,capabilities,tenant_id,user_id,state) SELECT 'filler-'||n,'filler-'||n,'filler','darwin','[\"space.scan\"]'::jsonb,$1,$2,'active' FROM generate_series(1,29) n")
+        .bind(&session.tenant_id).bind(&session.user_id).execute(&state.store.pool).await?;
+    let replacement = state.workers.pair(request.clone()).await?;
+    state.workers.approve(&session, &replacement.code).await?;
+    assert_eq!(state.workers.list(&session).await?.len(), 32);
+    let excess = state
+        .workers
+        .pair(PairRequest {
+            machine_id: Some(uuid::Uuid::new_v4().to_string()),
+            ..request
+        })
+        .await?;
+    assert!(state.workers.approve(&session, &excess.code).await.is_err());
+    state
+        .workers
+        .revoke(&session, &replacement.device_id)
+        .await?;
+    state
+        .workers
+        .revoke(&session, &replacement.device_id)
+        .await?;
+    assert!(
+        !state
+            .workers
+            .list(&session)
+            .await?
+            .iter()
+            .any(|device| device.id == replacement.device_id)
+    );
+    assert!(state.workers.identity(&replacement.token).await.is_err());
+
+    state.store.pool.close().await;
+    sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
+        .execute(&admin)
+        .await?;
+    Ok(())
+}
+
 struct Identity;
 #[async_trait::async_trait]
 impl IdentityProvider for Identity {

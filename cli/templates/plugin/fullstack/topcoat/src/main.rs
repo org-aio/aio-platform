@@ -41,6 +41,29 @@ async fn main() {
         // Topcoat 使用 PORT；AIO 隔离进程只注入 AIO_PLUGIN_PORT。
         unsafe { env::set_var("PORT", port) };
     }
+    if let Ok(path) = env::var("AIO_PLUGIN_SOCKET") {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let path = std::path::PathBuf::from(path);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            match std::fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => panic!("清理 Topcoat socket 失败: {error}"),
+            }
+            let listener = tokio::net::UnixListener::bind(&path).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).unwrap();
+            topcoat::serve(listener, router()).await.unwrap();
+            return;
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = path;
+        }
+    }
     topcoat::start(router()).await.unwrap();
 }
 

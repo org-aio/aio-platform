@@ -6,9 +6,8 @@ CREATE TABLE IF NOT EXISTS worker_devices (
  last_seen TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS worker_device_owners ON worker_devices(tenant_id,user_id);
--- 本机持久化身份，用于同一物理设备重复配对时的服务端去重。
 ALTER TABLE worker_devices ADD COLUMN IF NOT EXISTS machine_id TEXT;
-CREATE INDEX IF NOT EXISTS worker_device_machine ON worker_devices(tenant_id,user_id,machine_id) WHERE machine_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS worker_device_machine ON worker_devices(tenant_id,user_id,machine_id) WHERE state='active' AND machine_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS worker_tasks (
  id TEXT PRIMARY KEY, worker_id TEXT NOT NULL REFERENCES worker_devices(id),
  tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, capability TEXT NOT NULL,

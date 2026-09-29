@@ -7,6 +7,7 @@ pub struct PairRequest {
     pub label: String,
     pub platform: String,
     pub capabilities: Vec<String>,
+    /// 客户端私有配置目录中持久化的随机 UUID，重复配对时保持不变。
     #[serde(default)]
     pub machine_id: Option<String>,
 }

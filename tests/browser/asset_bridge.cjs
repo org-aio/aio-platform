@@ -30,3 +30,29 @@ test('asset bridge scopes callers, guards paused pages and transfers independent
   assert.equal(calls.length, 1);
   bridge.dispose();
 });
+
+test('asset bridge downloads with the current grant and rejects a response from a suspended ticket', async () => {
+  let receive;
+  let ticket = 'first';
+  let resolveDownload;
+  const replies = [];
+  const child = { postMessage: reply => replies.push(reply) };
+  const create = runInNewContext(readFileSync('lib/plugin/host/src/runtime/frontend_assets.js', 'utf8') + '\nmountFrontendAssets', {
+    AbortController,
+    window: { addEventListener: (_, handler) => { receive = handler; }, removeEventListener: () => {} },
+    createFrontendAssetCache: () => (path, current) => new Promise(resolve => {
+      resolveDownload = () => resolve({ bytes: new Uint8Array([1]).buffer, type: 'application/wasm' });
+      assert.equal(path, 'app.wasm');
+      assert.equal(current, 'first');
+    }),
+  });
+  const bridge = create({ contentWindow: child }, { token: 'initial' }, () => true, async () => ticket);
+  const event = { source: child, origin: 'null', data: { channel: 'aio-assets', token: 'initial', id: '1', path: 'app.wasm' } };
+  const response = receive(event);
+  await new Promise(resolve => setImmediate(resolve));
+  ticket = 'second';
+  resolveDownload();
+  await response;
+  assert.match(replies[0].error, /暂停/);
+  bridge.dispose();
+});

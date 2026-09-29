@@ -31,6 +31,9 @@ pub(super) struct FrontendAccess {
     requests: Arc<tokio::sync::Semaphore>,
 }
 
+const HOST_GRANT_LIMIT: usize = 256;
+const USER_GRANT_LIMIT: usize = 16;
+
 impl FrontendAccess {
     pub fn new(origin: &str) -> Result<Self> {
         Ok(Self {
@@ -67,15 +70,30 @@ impl FrontendAccess {
             .lock()
             .map_err(|_| anyhow::anyhow!("前端挂载记录不可用"))?;
         grants.retain(|_, grant| grant.issued.elapsed() < Duration::from_secs(1800));
-        ensure!(grants.len() < 256, "前端挂载数量超过宿主配额");
-        ensure!(
-            grants
-                .values()
-                .filter(|existing| existing.user_id == grant.user_id)
-                .count()
-                < 16,
-            "当前用户的前端挂载数量超过配额"
-        );
+        if grants.len() >= HOST_GRANT_LIMIT {
+            let oldest = grants
+                .iter()
+                .min_by_key(|(_, existing)| existing.issued)
+                .map(|(token, _)| token.clone());
+            if let Some(token) = oldest {
+                grants.remove(&token);
+            }
+        }
+        if grants
+            .values()
+            .filter(|existing| existing.user_id == grant.user_id)
+            .count()
+            >= USER_GRANT_LIMIT
+        {
+            let oldest = grants
+                .iter()
+                .filter(|(_, existing)| existing.user_id == grant.user_id)
+                .min_by_key(|(_, existing)| existing.issued)
+                .map(|(token, _)| token.clone());
+            if let Some(token) = oldest {
+                grants.remove(&token);
+            }
+        }
         let token = uuid::Uuid::new_v4().simple().to_string();
         grants.insert(token.clone(), grant);
         Ok(token)
