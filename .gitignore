@@ -9,3 +9,9 @@
 /client/dist/
 /npm/artifacts/
 /npm/platform-packages/
+.idea/.gitignore
+.idea/aio.iml
+.idea/misc.xml
+.idea/modules.xml
+.idea/problem4ai-exclusions.xml
+.idea/vcs.xml
