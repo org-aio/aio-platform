@@ -24,6 +24,7 @@
 - 通用 shell API 保持业务无关；AIO 专属文档、组织仓库链接和入口数据属于插件。公共 shell API 改动必须同步 submodule pin 与所有依赖方 Cargo Git revision。
 - `aio-idea` 插件接入需要同时更新依赖、feature、静态注册、catalog、lockfile/config 和相关 revision；不能只改某一处让 IDE 偶然可见。
 - 浏览器验收 Dioxus Web 时使用 `dx serve --platform web`；`cargo run --features web` 只能编译，不能当成 wasm-bindgen Web 运行验收。
+- 新建插件默认使用 Topcoat Rust 全栈模板；除用户明确指定 Dioxus、Nuxt、Next、Kotlin、TypeScript 或其他运行目标外，不得把 Dioxus 作为默认选型。
 - 租户业务权限从已安装组件派生；菜单隐藏只影响导航和预加载，不能替代组件激活、授权、schema、数据和版本历史。
 - 工作区清理或合并前比较 worktree、HEAD 祖先关系、未跟踪文件和脏文件；无共同 merge base 的分支不是强制合并输入。
 - CLI 模板要生成可运行的前后端示例；`aio plugin init <dir> --framework nuxt|next` 分别使用 Nuxt Nitro routes 和 Next App Router Route Handlers，并保留 AIO 进程产物 `dist/server.cjs`。
