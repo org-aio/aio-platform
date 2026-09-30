@@ -19,6 +19,7 @@ const grants = new Map();
 const counts = { mount: 0, delete: 0, request: 0, renew: 0 };
 const requests = [];
 let deleteDelay = 0;
+let rejectedRenewal;
 
 function send(response, status, data) {
   response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -70,6 +71,7 @@ const server = createServer(async (request, response) => {
     const requestRoute = path.match(/^\/api\/runtime\/components\/([^/]+)\/(request|renew)$/);
     if (requestRoute) {
       const [, token, action] = requestRoute;
+      if (token === rejectedRenewal) return send(response, 403, { error: 'Mount expired' });
       if (!grants.has(token)) return send(response, 403, { error: 'Mount revoked' });
       if (action === 'renew') {
         counts.renew++;
@@ -139,6 +141,19 @@ const server = createServer(async (request, response) => {
     await page.evaluate(() => document.querySelector('#frame').contentWindow.postMessage({ channel: 'test-request', id: 'request-after-restore' }, '*'));
     await waitFor(() => requests.includes(restoredTicket));
 
+    rejectedRenewal = restoredTicket;
+    counts.renew = 0;
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await waitFor(() => counts.renew === 1);
+    await waitFor(() => grants.size === 1 && !grants.has(restoredTicket));
+    const renewedTicket = [...grants.keys()][0];
+    assert.notEqual(renewedTicket, restoredTicket);
+    assert.equal(await page.locator('#frame').getAttribute('src'), initialSource);
+    assert.equal(await frame.locator('body').evaluate(() => window.marker), 'initial');
+    await page.evaluate(() => document.querySelector('#frame').contentWindow.postMessage({ channel: 'test-request', id: 'request-after-renewal-expiry' }, '*'));
+    await waitFor(() => requests.includes(renewedTicket));
+    rejectedRenewal = undefined;
+
     for (let index = 0; index < 20; index++) {
       await page.evaluate(active => document.querySelector('#page').dataset.aioWorkspaceActive = String(active), false);
       await waitFor(() => grants.size === 0);
@@ -155,7 +170,7 @@ const server = createServer(async (request, response) => {
     await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
     await waitFor(() => grants.size === 1);
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({ retainedFrame: true, releasedOnSuspend: true, restoredWithNewGrant: true, repeatedCycles: 20, bfcache: true, maxGrants: 1 }));
+    console.log(JSON.stringify({ retainedFrame: true, releasedOnSuspend: true, restoredWithNewGrant: true, expiredLeaseRecoveredInPlace: true, repeatedCycles: 20, bfcache: true, maxGrants: 1 }));
   } finally {
     await context.close();
     await browser.close();
