@@ -76,6 +76,52 @@ pub struct DesktopAccess {
 pub struct WorkspaceAccess {
     pub enabled: bool,
 }
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CreateTerminal {
+    pub worker_id: String,
+    pub cols: u16,
+    pub rows: u16,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct TerminalSession {
+    pub id: String,
+    pub worker_id: String,
+    pub state: String,
+    pub cols: u16,
+    pub rows: u16,
+    pub created_at: i64,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct TerminalInput {
+    pub data: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct TerminalResize {
+    pub cols: u16,
+    pub rows: u16,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct TerminalFinish {
+    pub reason: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct TerminalFrame {
+    pub cursor: u64,
+    pub kind: String,
+    pub data: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct TerminalEvents {
+    pub state: String,
+    pub frames: Vec<TerminalFrame>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct TerminalRead {
+    #[serde(default)]
+    pub after: u64,
+    #[serde(default)]
+    pub wait_seconds: u8,
+}
 #[derive(Clone)]
 pub struct DeviceIdentity {
     pub id: String,

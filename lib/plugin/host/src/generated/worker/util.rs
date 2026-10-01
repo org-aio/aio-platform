@@ -1,4 +1,4 @@
-use super::model::{Task, Worker};
+use super::model::{Task, TerminalFrame, TerminalSession, Worker};
 use anyhow::{Result, ensure};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
@@ -122,6 +122,38 @@ pub(super) fn task(row: sqlx::postgres::PgRow) -> Result<Task> {
         created_at: row.try_get("created_at_ms")?,
     })
 }
+pub(super) fn terminal(row: sqlx::postgres::PgRow) -> Result<TerminalSession> {
+    Ok(TerminalSession {
+        id: row.try_get("id")?,
+        worker_id: row.try_get("worker_id")?,
+        state: row.try_get("state")?,
+        cols: row.try_get::<i32, _>("cols")?.try_into()?,
+        rows: row.try_get::<i32, _>("rows")?.try_into()?,
+        created_at: row.try_get("created_at_ms")?,
+    })
+}
+pub(super) fn terminal_frame(row: sqlx::postgres::PgRow) -> Result<TerminalFrame> {
+    Ok(TerminalFrame {
+        cursor: row.try_get::<i64, _>("cursor")?.try_into()?,
+        kind: row.try_get("kind")?,
+        data: row.try_get("data")?,
+    })
+}
+/// 终端输入和尺寸只接受有限协议，正文本身在设备端按 UTF-8 字节处理。
+pub(super) fn validate_terminal_data(value: &str, limit: usize) -> Result<()> {
+    ensure!(
+        !value.is_empty() && value.len() <= limit,
+        "终端数据长度无效"
+    );
+    Ok(())
+}
+pub(super) fn validate_terminal_size(cols: u16, rows: u16) -> Result<()> {
+    ensure!(
+        (20..=500).contains(&cols) && (5..=300).contains(&rows),
+        "终端尺寸无效"
+    );
+    Ok(())
+}
 
 #[cfg(test)]
 mod desktop_tests {
@@ -141,6 +173,29 @@ mod desktop_tests {
         validate_desktop_input(&observed)?;
         observed["action"] = json!("shell");
         assert!(validate_desktop_input(&observed).is_err());
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod terminal_tests {
+    use super::*;
+    #[test]
+    fn data_length_bounds_are_enforced() -> Result<()> {
+        assert!(validate_terminal_data("", 16).is_err());
+        validate_terminal_data("ls\r", 16)?;
+        assert!(validate_terminal_data(&"a".repeat(17), 16).is_err());
+        validate_terminal_data(&"a".repeat(16), 16)?;
+        Ok(())
+    }
+    #[test]
+    fn size_bounds_are_enforced() -> Result<()> {
+        validate_terminal_size(20, 5)?;
+        validate_terminal_size(500, 300)?;
+        assert!(validate_terminal_size(19, 24).is_err());
+        assert!(validate_terminal_size(80, 4).is_err());
+        assert!(validate_terminal_size(501, 24).is_err());
+        assert!(validate_terminal_size(80, 301).is_err());
         Ok(())
     }
 }

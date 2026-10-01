@@ -22,6 +22,59 @@ pub(crate) trait WorkerService: Any + Send + Sync {
     async fn workspace_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()>;
     async fn desktop_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()>;
     async fn desktop(&self, session: &SessionContext, id: &str, enabled: bool) -> Result<()>;
+    /// 浏览器创建的终端会话只能由同一账号的在线设备领取。
+    async fn terminal_create(
+        &self,
+        session: &SessionContext,
+        request: CreateTerminal,
+    ) -> Result<TerminalSession>;
+    /// 浏览器只能选择同一账号中已启用 terminal.open 的在线设备。
+    async fn terminal_devices(&self, session: &SessionContext) -> Result<Vec<Worker>>;
+    async fn terminal_events(
+        &self,
+        session: &SessionContext,
+        id: &str,
+        after: u64,
+        wait_seconds: u8,
+    ) -> Result<TerminalEvents>;
+    async fn terminal_input(
+        &self,
+        session: &SessionContext,
+        id: &str,
+        request: TerminalInput,
+    ) -> Result<TerminalSession>;
+    async fn terminal_resize(
+        &self,
+        session: &SessionContext,
+        id: &str,
+        request: TerminalResize,
+    ) -> Result<TerminalSession>;
+    async fn terminal_close(&self, session: &SessionContext, id: &str) -> Result<()>;
+    async fn terminal_claim(
+        &self,
+        device: &DeviceIdentity,
+        wait_seconds: u8,
+    ) -> Result<Option<TerminalSession>>;
+    async fn terminal_read(
+        &self,
+        device: &DeviceIdentity,
+        id: &str,
+        after: u64,
+        wait_seconds: u8,
+    ) -> Result<TerminalEvents>;
+    async fn terminal_write(
+        &self,
+        device: &DeviceIdentity,
+        id: &str,
+        request: TerminalInput,
+    ) -> Result<()>;
+    async fn terminal_finish(
+        &self,
+        device: &DeviceIdentity,
+        id: &str,
+        request: TerminalFinish,
+    ) -> Result<()>;
+    async fn terminal_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()>;
     async fn claim(&self, device: &DeviceIdentity, request_id: &str) -> Result<Option<Task>>;
     async fn heartbeat(&self, device: &DeviceIdentity, id: Option<(&str, &str)>) -> Result<()>;
     async fn complete(

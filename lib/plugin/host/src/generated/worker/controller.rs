@@ -29,6 +29,43 @@ pub(crate) fn router() -> Router<RuntimeState> {
             post(workspace_access),
         )
         .route("/api/runtime/workers/desktop/access", post(desktop_access))
+        .route(
+            "/api/runtime/workers/terminals",
+            get(terminal_devices).post(terminal_create),
+        )
+        .route(
+            "/api/runtime/workers/terminals/{id}",
+            delete(terminal_close),
+        )
+        .route(
+            "/api/runtime/workers/terminals/{id}/events",
+            get(terminal_events),
+        )
+        .route(
+            "/api/runtime/workers/terminals/{id}/input",
+            post(terminal_input),
+        )
+        .route(
+            "/api/runtime/workers/terminals/{id}/resize",
+            post(terminal_resize),
+        )
+        .route("/api/runtime/workers/terminals/claim", post(terminal_claim))
+        .route(
+            "/api/runtime/workers/terminals/{id}/read",
+            post(terminal_read),
+        )
+        .route(
+            "/api/runtime/workers/terminals/{id}/write",
+            post(terminal_write),
+        )
+        .route(
+            "/api/runtime/workers/terminals/{id}/finish",
+            post(terminal_finish),
+        )
+        .route(
+            "/api/runtime/workers/terminal/access",
+            post(terminal_access),
+        )
         .route("/api/runtime/workers/claim", post(claim))
         .route("/api/runtime/workers/heartbeat", post(heartbeat))
         .route("/api/runtime/workers/tasks/{id}/heartbeat", post(renew))
@@ -256,6 +293,168 @@ async fn desktop(
         .workers
         .desktop(&session, &id, request.enabled)
         .await?;
+    Ok(response(()))
+}
+async fn terminal_create(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateTerminal>,
+) -> Result<Json<RuntimeResponse<TerminalSession>>, RuntimeError> {
+    let session = authenticate(&state, &headers).await?;
+    Ok(response(
+        state.workers.terminal_create(&session, request).await?,
+    ))
+}
+async fn terminal_devices(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+) -> Result<Json<RuntimeResponse<Vec<Worker>>>, RuntimeError> {
+    let session = authenticate(&state, &headers).await?;
+    Ok(response(state.workers.terminal_devices(&session).await?))
+}
+async fn terminal_events(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    axum::extract::Query(request): axum::extract::Query<TerminalRead>,
+) -> Result<Json<RuntimeResponse<TerminalEvents>>, RuntimeError> {
+    if request.wait_seconds > 25 {
+        return Err(RuntimeError::bad_request("终端长轮询最长等待 25 秒"));
+    }
+    let session = authenticate(&state, &headers).await?;
+    Ok(response(
+        state
+            .workers
+            .terminal_events(&session, &id, request.after, request.wait_seconds)
+            .await?,
+    ))
+}
+async fn terminal_input(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(request): Json<TerminalInput>,
+) -> Result<Json<RuntimeResponse<TerminalSession>>, RuntimeError> {
+    let session = authenticate(&state, &headers).await?;
+    Ok(response(
+        state.workers.terminal_input(&session, &id, request).await?,
+    ))
+}
+async fn terminal_resize(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(request): Json<TerminalResize>,
+) -> Result<Json<RuntimeResponse<TerminalSession>>, RuntimeError> {
+    let session = authenticate(&state, &headers).await?;
+    Ok(response(
+        state
+            .workers
+            .terminal_resize(&session, &id, request)
+            .await?,
+    ))
+}
+async fn terminal_close(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
+    let session = authenticate(&state, &headers).await?;
+    state.workers.terminal_close(&session, &id).await?;
+    Ok(response(()))
+}
+async fn terminal_claim(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Json(request): Json<TerminalRead>,
+) -> Result<Json<RuntimeResponse<Option<TerminalSession>>>, RuntimeError> {
+    if request.wait_seconds > 25 {
+        return Err(RuntimeError::bad_request("终端长轮询最长等待 25 秒"));
+    }
+    let device = device(&state, &headers).await?;
+    state
+        .workers
+        .heartbeat(&device, None)
+        .await
+        .map_err(worker_error)?;
+    let deadline = tokio::time::Instant::now()
+        + std::time::Duration::from_secs(u64::from(request.wait_seconds));
+    loop {
+        let device = self::device(&state, &headers).await?;
+        let session = state
+            .workers
+            .terminal_claim(&device, 1)
+            .await
+            .map_err(worker_error)?;
+        if session.is_some() || tokio::time::Instant::now() >= deadline {
+            return Ok(response(session));
+        }
+    }
+}
+async fn terminal_read(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(request): Json<TerminalRead>,
+) -> Result<Json<RuntimeResponse<TerminalEvents>>, RuntimeError> {
+    if request.wait_seconds > 25 {
+        return Err(RuntimeError::bad_request("终端长轮询最长等待 25 秒"));
+    }
+    let device = device(&state, &headers).await?;
+    Ok(response(
+        state
+            .workers
+            .terminal_read(&device, &id, request.after, request.wait_seconds)
+            .await
+            .map_err(worker_error)?,
+    ))
+}
+async fn terminal_write(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(request): Json<TerminalInput>,
+) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
+    let device = device(&state, &headers).await?;
+    state
+        .workers
+        .terminal_write(&device, &id, request)
+        .await
+        .map_err(worker_error)?;
+    Ok(response(()))
+}
+async fn terminal_finish(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(request): Json<TerminalFinish>,
+) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
+    let device = device(&state, &headers).await?;
+    state
+        .workers
+        .terminal_finish(&device, &id, request)
+        .await
+        .map_err(worker_error)?;
+    Ok(response(()))
+}
+async fn terminal_access(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Json(request): Json<WorkspaceAccess>,
+) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
+    if !headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("Bearer "))
+    {
+        return Err(RuntimeError::unauthorized("缺少设备 Bearer 凭据"));
+    }
+    let device = device(&state, &headers).await?;
+    state
+        .workers
+        .terminal_access(&device, request.enabled)
+        .await
+        .map_err(worker_error)?;
     Ok(response(()))
 }
 async fn heartbeat(
