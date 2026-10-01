@@ -99,6 +99,9 @@ fn document_bootstrap_replaces_base_and_stays_in_sandbox() -> anyhow::Result<()>
         policy
             .contains("connect-src blob: https://aio.example/api/runtime/frontend/assets/token/;")
     );
+    assert!(
+        policy.contains("media-src blob: https://aio.example/api/runtime/frontend/assets/token/;")
+    );
     assert!(FrontendAccess::new("https://aio.example/path").is_err());
     assert!(FrontendAccess::new("http://public.example").is_err());
     let nested = String::from_utf8(frontend_document::render_entry(

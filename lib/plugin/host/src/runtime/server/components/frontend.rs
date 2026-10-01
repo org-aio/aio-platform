@@ -209,7 +209,7 @@ pub(super) async fn asset(
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
     );
-    headers.insert(header::CONTENT_SECURITY_POLICY,HeaderValue::from_str(&format!("sandbox allow-scripts allow-forms; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: {prefix}; connect-src {prefix} blob:; style-src 'unsafe-inline' blob: {prefix}; img-src data: blob: {prefix}; font-src data: {prefix}; object-src 'none'; frame-src 'none'; worker-src blob:; base-uri {prefix}; form-action 'none'; frame-ancestors 'self'"))?);
+    headers.insert(header::CONTENT_SECURITY_POLICY,HeaderValue::from_str(&format!("sandbox allow-scripts allow-forms; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: {prefix}; connect-src {prefix} blob:; style-src 'unsafe-inline' blob: {prefix}; img-src data: blob: {prefix}; media-src blob: {prefix}; font-src data: {prefix}; object-src 'none'; frame-src 'none'; worker-src blob:; base-uri {prefix}; form-action 'none'; frame-ancestors 'self'"))?);
     Ok(response)
 }
 
