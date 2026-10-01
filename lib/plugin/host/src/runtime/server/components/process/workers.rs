@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 const DESKTOP: &str = "desktop.open-app";
 const CONTROL: &str = "desktop.control";
+const SSH: &str = "ssh.manage";
 const WORKSPACE: &str = "workspace.execute";
 const WORKSPACE_MANAGE: &str = "workspace.manage";
 
@@ -110,7 +111,7 @@ async fn execute(gateway: &Gateway, headers: &HeaderMap, request: Request) -> Re
         }
         "submit" => {
             ensure!(
-                [WORKSPACE, WORKSPACE_MANAGE, CONTROL].contains(&capability),
+                [WORKSPACE, WORKSPACE_MANAGE, CONTROL, SSH].contains(&capability),
                 "设备执行能力无效"
             );
             let task = components
@@ -160,7 +161,7 @@ fn requested_capabilities<'a>(
         .iter()
         .map(String::as_str)
         .filter(|granted| {
-            [DESKTOP, WORKSPACE, WORKSPACE_MANAGE, CONTROL].contains(granted)
+            [DESKTOP, WORKSPACE, WORKSPACE_MANAGE, CONTROL, SSH].contains(granted)
                 && (capability == "*" || *granted == capability)
         })
         .collect();
