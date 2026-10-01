@@ -86,15 +86,21 @@ fn applications_do_not_accept_shell_or_paths() {
 
 #[test]
 fn workspace_discovery_intersects_process_grants() -> Result<()> {
-    let grants = vec![DESKTOP.into(), WORKSPACE.into(), "shell.execute".into()];
+    let grants = vec![
+        DESKTOP.into(),
+        WORKSPACE.into(),
+        SSH.into(),
+        "shell.execute".into(),
+    ];
     assert_eq!(
         requested_capabilities(&grants, "*", "list")?,
-        [DESKTOP, WORKSPACE]
+        [DESKTOP, WORKSPACE, SSH]
     );
     assert_eq!(
         requested_capabilities(&grants, WORKSPACE, "submit")?,
         [WORKSPACE]
     );
+    assert_eq!(requested_capabilities(&grants, SSH, "submit")?, [SSH]);
     assert!(requested_capabilities(&grants, "*", "task").is_err());
     assert!(requested_capabilities(&grants, "*", "cancel").is_err());
     assert!(requested_capabilities(&grants, "shell.execute", "list").is_err());

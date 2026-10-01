@@ -148,7 +148,7 @@ impl BundleManifest {
         validate_relative_path(&plugin.runtime.artifact)?;
         if let Some(process) = &plugin.runtime.process {
             ensure!(
-                process.worker_capabilities.len() <= 5
+                process.worker_capabilities.len() <= 6
                     && process
                         .worker_capabilities
                         .iter()
@@ -157,6 +157,7 @@ impl BundleManifest {
                             "desktop.open-app"
                                 | "desktop.control"
                                 | "skills.sync"
+                                | "ssh.manage"
                                 | "workspace.execute"
                                 | "workspace.manage"
                         )),

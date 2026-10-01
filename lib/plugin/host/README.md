@@ -11,7 +11,7 @@
 
 设备通过现有 AIO 会话配对。macOS 设备升级 worker 后，所属账号在“我的设备”启用应用控制；关闭时取消排队和执行中的应用任务。设备和任务查询均按租户及用户限制，设备令牌与任务租约不返回 Agent。
 
-process 插件声明所需 worker 能力，生产宿主同时以 `AIO_PROCESS_WORKER_CAPABILITIES` 逐项授权；本地项目登记使用独立的 `workspace.manage`，实际项目执行仍由 `workspace.execute` 控制。插件通过已有 Unix socket 向 `POST /workers` 发送 `x-aio-token`，并提供宿主验证过的 `tenantId`、`userId`。操作分别为 `list`、`openApp`（`workerId`、应用名称 `application`、UUID `requestId`）、`submit` 和 `task`。该接口返回原始 JSON；任务 `state=complete` 才表示客户端成功回报，排队或超时不能推断操作已完成。
+process 插件声明所需 worker 能力，生产宿主同时以 `AIO_PROCESS_WORKER_CAPABILITIES` 逐项授权；本地项目登记使用独立的 `workspace.manage`，实际项目执行仍由 `workspace.execute` 控制，SSH 主机维护使用 `ssh.manage`，只接受设备端固定动作白名单。插件通过已有 Unix socket 向 `POST /workers` 发送 `x-aio-token`，并提供宿主验证过的 `tenantId`、`userId`。操作分别为 `list`、`openApp`（`workerId`、应用名称 `application`、UUID `requestId`）、`submit` 和 `task`。该接口返回原始 JSON；任务 `state=complete` 才表示客户端成功回报，排队或超时不能推断操作已完成。
 
 宿主检查插件活动版本、已登记用户与有效成员身份。能力只允许打开已安装应用，不接受路径或 shell 命令。应用启动能力的用户范围验证由 worker 的 PostgreSQL 集成测试覆盖。
 
