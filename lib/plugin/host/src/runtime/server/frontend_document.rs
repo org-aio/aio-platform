@@ -96,7 +96,7 @@ pub(super) fn render_entry(
 
 pub(super) fn content_policy(prefix: &str) -> String {
     format!(
-        "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: {prefix}; connect-src blob: {prefix}; style-src 'unsafe-inline' blob: {prefix}; img-src data: blob: {prefix}; font-src data: {prefix}; frame-src 'none'; object-src 'none'; worker-src 'none'; form-action 'none'; base-uri {prefix}; frame-ancestors 'self'"
+        "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: {prefix}; connect-src blob: {prefix}; style-src 'unsafe-inline' blob: {prefix}; img-src data: blob: {prefix}; media-src blob: {prefix}; font-src data: {prefix}; frame-src 'none'; object-src 'none'; worker-src 'none'; form-action 'none'; base-uri {prefix}; frame-ancestors 'self'"
     )
 }
 
