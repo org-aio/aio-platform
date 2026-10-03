@@ -156,6 +156,16 @@ impl WorkerService for WorkerServiceImpl {
             capabilities.contains(&request.capability),
             "设备未声明该任务能力"
         );
+        if request.capability == "adb.control"
+            && request.input.get("action").and_then(|value| value.as_str()) == Some("shell")
+        {
+            ensure!(
+                capabilities
+                    .iter()
+                    .any(|capability| capability == "adb.shell"),
+                "设备未启用原始 ADB Shell"
+            );
+        }
         let pending:i64=sqlx::query_scalar("SELECT count(*) FROM worker_tasks WHERE worker_id=$1 AND state IN ('queued','running')").bind(&request.worker_id).fetch_one(&mut *tx).await?;
         ensure!(pending < 100, "设备等待任务过多");
         sqlx::query("INSERT INTO worker_tasks(id,worker_id,tenant_id,user_id,capability,input) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING")
