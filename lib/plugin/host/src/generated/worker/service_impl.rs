@@ -145,6 +145,9 @@ impl WorkerService for WorkerServiceImpl {
         if request.capability == "desktop.control" {
             validate_desktop_input(&request.input)?;
         }
+        if request.capability == "adb.control" {
+            validate_adb_input(&request.input)?;
+        }
         let mut tx = self.pool.begin().await?;
         let row=sqlx::query("SELECT capabilities FROM worker_devices WHERE id=$1 AND tenant_id=$2 AND user_id=$3 AND state='active' FOR UPDATE")
             .bind(&request.worker_id).bind(&session.tenant_id).bind(&session.user_id).fetch_optional(&mut *tx).await?.context("设备不存在或已撤销")?;
@@ -211,6 +214,12 @@ impl WorkerService for WorkerServiceImpl {
     async fn desktop_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()> {
         self.local_capability(device, "desktop.control", enabled)
             .await
+    }
+    async fn adb_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()> {
+        self.local_capability(device, "adb.control", enabled).await
+    }
+    async fn adb_shell_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()> {
+        self.local_capability(device, "adb.shell", enabled).await
     }
     async fn desktop(&self, session: &SessionContext, id: &str, enabled: bool) -> Result<()> {
         let mut tx = self.pool.begin().await?;

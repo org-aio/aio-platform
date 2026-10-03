@@ -29,6 +29,11 @@ pub(crate) fn router() -> Router<RuntimeState> {
             post(workspace_access),
         )
         .route("/api/runtime/workers/desktop/access", post(desktop_access))
+        .route("/api/runtime/workers/adb/access", post(adb_access))
+        .route(
+            "/api/runtime/workers/adb/shell/access",
+            post(adb_shell_access),
+        )
         .route(
             "/api/runtime/workers/terminals",
             get(terminal_devices).post(terminal_create),
@@ -277,6 +282,48 @@ async fn desktop_access(
     state
         .workers
         .desktop_access(&device, request.enabled)
+        .await
+        .map_err(worker_error)?;
+    Ok(response(()))
+}
+
+async fn adb_access(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Json(request): Json<WorkspaceAccess>,
+) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
+    if !headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("Bearer "))
+    {
+        return Err(RuntimeError::unauthorized("缺少设备 Bearer 凭据"));
+    }
+    let device = device(&state, &headers).await?;
+    state
+        .workers
+        .adb_access(&device, request.enabled)
+        .await
+        .map_err(worker_error)?;
+    Ok(response(()))
+}
+
+async fn adb_shell_access(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Json(request): Json<WorkspaceAccess>,
+) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
+    if !headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("Bearer "))
+    {
+        return Err(RuntimeError::unauthorized("缺少设备 Bearer 凭据"));
+    }
+    let device = device(&state, &headers).await?;
+    state
+        .workers
+        .adb_shell_access(&device, request.enabled)
         .await
         .map_err(worker_error)?;
     Ok(response(()))

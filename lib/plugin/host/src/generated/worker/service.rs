@@ -21,6 +21,10 @@ pub(crate) trait WorkerService: Any + Send + Sync {
     /// 本机设备凭据只管理自己的工作区执行能力。
     async fn workspace_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()>;
     async fn desktop_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()>;
+    /// 设备本机显式开启 ADB 管理；关闭时取消尚未执行的 ADB 任务。
+    async fn adb_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()>;
+    /// 原始 ADB Shell 独立授权，普通遥控、日志和截图不依赖它。
+    async fn adb_shell_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()>;
     async fn desktop(&self, session: &SessionContext, id: &str, enabled: bool) -> Result<()>;
     /// 浏览器创建的终端会话只能由同一账号的在线设备领取。
     async fn terminal_create(

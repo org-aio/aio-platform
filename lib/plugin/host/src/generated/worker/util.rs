@@ -99,6 +99,104 @@ pub(super) fn validate_desktop_input(input: &serde_json::Value) -> Result<()> {
     }
     Ok(())
 }
+/// ADB 页面只提交有限动作；目标序列号和参数在设备端仍会再次校验。
+pub(super) fn validate_adb_input(input: &serde_json::Value) -> Result<()> {
+    let object = input
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("ADB 输入必须为对象"))?;
+    ensure!(
+        object
+            .keys()
+            .all(|key| ["action", "target", "arguments"].contains(&key.as_str())),
+        "ADB 输入字段无效"
+    );
+    let action = input["action"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("ADB 动作缺失"))?;
+    ensure!(
+        [
+            "list_devices",
+            "pair",
+            "connect",
+            "disconnect",
+            "device_info",
+            "screenshot",
+            "shell",
+            "input_key",
+            "input_text",
+            "tap",
+            "swipe",
+            "reboot",
+            "getprop",
+            "logcat",
+            "list_packages",
+            "launch_app",
+            "force_stop",
+            "install_apk",
+            "push",
+            "pull"
+        ]
+        .contains(&action),
+        "ADB 动作未开放"
+    );
+    ensure!(input["arguments"].is_object(), "ADB 参数必须为对象");
+    if let Some(target) = input.get("target") {
+        let target = target
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("ADB 目标必须是字符串"))?;
+        ensure!(
+            !target.is_empty()
+                && target.len() <= 128
+                && !target.starts_with('-')
+                && target
+                    .bytes()
+                    .all(|byte| { byte.is_ascii_alphanumeric() || b"._:-".contains(&byte) }),
+            "ADB 目标无效"
+        );
+    }
+    match action {
+        "pair" => {
+            ensure!(
+                input["arguments"]["host"]
+                    .as_str()
+                    .is_some_and(|value| !value.is_empty() && value.len() <= 253),
+                "无线配对地址无效"
+            );
+            ensure!(
+                input["arguments"]["port"]
+                    .as_u64()
+                    .is_some_and(|value| value <= 65_535),
+                "无线配对端口无效"
+            );
+            ensure!(
+                input["arguments"]["code"]
+                    .as_str()
+                    .is_some_and(|value| (6..=12).contains(&value.len())
+                        && value.bytes().all(|byte| byte.is_ascii_digit())),
+                "无线配对码无效"
+            );
+        }
+        "connect" | "disconnect" => ensure!(
+            input["arguments"]["host"]
+                .as_str()
+                .is_some_and(|value| !value.is_empty() && value.len() <= 253),
+            "ADB 主机地址无效"
+        ),
+        "list_devices" => {}
+        _ => ensure!(
+            input
+                .get("target")
+                .and_then(serde_json::Value::as_str)
+                .is_some(),
+            "ADB 目标设备缺失"
+        ),
+    }
+    ensure!(
+        serde_json::to_vec(&input["arguments"])?.len() <= 30_000,
+        "ADB 参数过大"
+    );
+    Ok(())
+}
 pub(super) fn worker(row: sqlx::postgres::PgRow) -> Result<Worker> {
     Ok(Worker {
         id: row.try_get("id")?,
@@ -173,6 +271,38 @@ mod desktop_tests {
         validate_desktop_input(&observed)?;
         observed["action"] = json!("shell");
         assert!(validate_desktop_input(&observed).is_err());
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod adb_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn actions_and_targets_are_bounded() -> Result<()> {
+        validate_adb_input(&json!({"action":"list_devices","arguments":{}}))?;
+        validate_adb_input(&json!({
+            "action":"input_key",
+            "target":"192.168.1.8:5555",
+            "arguments":{"key":"KEYCODE_DPAD_DOWN"}
+        }))?;
+        validate_adb_input(&json!({
+            "action":"pair",
+            "arguments":{"host":"192.168.1.8","port":37021,"code":"123456"}
+        }))?;
+        assert!(
+            validate_adb_input(&json!({"action":"shell","arguments":{"command":"id"}})).is_err()
+        );
+        assert!(
+            validate_adb_input(&json!({
+                "action":"input_key",
+                "target":"-s",
+                "arguments":{"key":"KEYCODE_HOME"}
+            }))
+            .is_err()
+        );
+        assert!(validate_adb_input(&json!({"action":"raw","arguments":{}})).is_err());
         Ok(())
     }
 }
