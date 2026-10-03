@@ -15,13 +15,15 @@ host_version = ">=2026.9.18"
 
 设置表单、校验和持久化归插件；平台不建立通用明文 Key 表。不把密钥塞进清单、URL、catalog 或前端状态。插件可申请 database/cryptography，按租户及用户/服务配置范围加密，GET 仅返回 hasSecret。留空保留、显式清除由插件接口定义。
 
-需要第三方 JSON API 的原生 v2 process 同时声明完整 HTTPS 地址：
+需要第三方 JSON API 的原生 v2 process 同时声明完整 HTTP(S) 地址：
 
 ```toml
 [plugin.runtime.process]
 http_endpoints = ["https://api.tavily.com/search"]
 ```
 
-管理员在 AIO_PROCESS_HTTP_ENDPOINTS 批准同一完整地址。调用 Unix broker 的 POST /egress/http，以 x-aio-endpoint 选择地址、x-aio-method 选择受控的 GET 或 POST，x-aio-token 使用实例票据，Authorization 可携带插件自己的密钥；GET 用于受控 HTML/JSON 读取，POST 只接收 JSON，不允许任意方法、重定向或额外转发头。宿主复核活动安装版本，限制并发、30 秒请求时间与 512 KB 响应。不得向浏览器暴露 broker 票据。模型仍使用 endpoints 与专用 /egress、/egress/models。
+管理员在 AIO_PROCESS_HTTP_ENDPOINTS 批准同一完整地址。
+
+HTTP 仅适用于已有系统只提供明文接口、且管理员愿意逐项批准的精确地址；地址不能携带凭据、查询参数或片段，也不能使用通配符或前缀授权。调用 Unix broker 的 POST /egress/http，以 x-aio-endpoint 选择地址、x-aio-method 选择受控的 GET 或 POST，x-aio-token 使用实例票据，Authorization 可携带插件自己的密钥；GET 用于受控 HTML/JSON 读取，POST 只接收 JSON，不允许任意方法、重定向或额外转发头。宿主复核活动安装版本，限制并发、30 秒请求时间与 512 KB 响应。不得向浏览器暴露 broker 票据。模型仍使用 endpoints 与专用 /egress、/egress/models。
 
 旧包省略这两个新字段时序列化保持原形；现有 WIT 四种页面类型不变。示例实现见 aio-plugin-agent 的独立 settings.html 与 tools/web-search 接口。

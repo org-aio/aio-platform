@@ -387,7 +387,7 @@ fn local_native_artifacts_do_not_weaken_published_package_validation() -> anyhow
 }
 
 #[test]
-fn validates_settings_and_exact_https_tool_capabilities() -> Result<()> {
+fn validates_settings_and_exact_tool_capabilities() -> Result<()> {
     let settings = MANIFEST.replace(
         "[plugin.runtime]",
         "[plugin]\nsettings_page='settings'\n[plugin.runtime]",
@@ -412,11 +412,16 @@ fn validates_settings_and_exact_https_tool_capabilities() -> Result<()> {
         "a".repeat(64)
     );
     BundleManifest::parse(&process)?;
+    let process_http = process.replace(
+        "https://api.tavily.com/search",
+        "http://101.tangdu.cc:1017/zhgd/projectinfo/ycProjectInfo/openBatchList",
+    );
+    BundleManifest::parse(&process_http)?;
     for url in [
-        "http://api.tavily.com/search",
         "https://secret@api.tavily.com/search",
         "https://api.tavily.com/search?key=secret",
         "https://api.tavily.com/search#token",
+        "ftp://api.tavily.com/search",
     ] {
         assert!(
             BundleManifest::parse(&process.replace("https://api.tavily.com/search", url)).is_err(),

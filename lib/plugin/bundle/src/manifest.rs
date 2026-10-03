@@ -196,9 +196,8 @@ impl BundleManifest {
                     .map_err(anyhow::Error::msg)?;
             }
             for endpoint in &process.http_endpoints {
-                let url = az_plugin_contract::process::model_endpoint(endpoint)
+                az_plugin_contract::process::third_party_http_endpoint(endpoint)
                     .map_err(anyhow::Error::msg)?;
-                ensure!(url.scheme() == "https", "第三方 HTTP 出站仅接受 HTTPS");
             }
             for service in &process.services {
                 ensure!(

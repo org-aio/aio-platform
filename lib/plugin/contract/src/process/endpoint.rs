@@ -21,9 +21,27 @@ pub fn model_endpoint(value: &str) -> Result<url::Url, &'static str> {
     Ok(url)
 }
 
+/// 校验管理员需要逐项批准的第三方 HTTP(S) 地址。
+/// HTTP 仍必须同时出现在宿主白名单中；本函数只负责规范地址形式。
+pub fn third_party_http_endpoint(value: &str) -> Result<url::Url, &'static str> {
+    let url = url::Url::parse(value).map_err(|_| "第三方 HTTP 地址无效")?;
+    if value.len() > 2048
+        || value.ends_with('/')
+        || url.host().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !matches!(url.scheme(), "http" | "https")
+    {
+        return Err("第三方 HTTP 地址必须为无凭据、无查询参数的完整 HTTP(S) 地址");
+    }
+    Ok(url)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::model_endpoint;
+    use super::{model_endpoint, third_party_http_endpoint};
 
     #[test]
     fn permits_https_and_fixed_private_model_addresses() {
@@ -35,6 +53,30 @@ mod tests {
             "http://[fd00::5]:8080/v1",
         ] {
             assert!(model_endpoint(value).is_ok(), "{value}");
+        }
+    }
+
+    #[test]
+    fn permits_exact_third_party_http_and_https_addresses() {
+        for value in [
+            "https://api.tavily.com/search",
+            "http://api.tavily.com/search",
+            "http://101.tangdu.cc:1017/zhgd/projectinfo/ycProjectInfo/openBatchList",
+        ] {
+            assert!(third_party_http_endpoint(value).is_ok(), "{value}");
+        }
+    }
+
+    #[test]
+    fn rejects_unsafe_third_party_addresses() {
+        for value in [
+            "ftp://api.example.com/search",
+            "https://secret@api.example.com/search",
+            "https://api.example.com/search?key=secret",
+            "https://api.example.com/search#token",
+            "https://api.example.com/",
+        ] {
+            assert!(third_party_http_endpoint(value).is_err(), "{value}");
         }
     }
 
