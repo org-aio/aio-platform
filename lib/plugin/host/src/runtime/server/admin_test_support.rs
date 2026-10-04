@@ -36,8 +36,17 @@ impl RuntimeState {
             .add::<crate::generated::personal_config::PersonalConfigServiceImpl>()
             .build()
             .get_one::<dyn crate::generated::personal_config::PersonalConfigService>()?;
+        let clipboard = dill::Catalog::builder()
+            .add_value(store.pool.clone())
+            .add_value(super::components::load_keyring(
+                &cache.join("worker-keyring.json"),
+            )?)
+            .add::<crate::generated::clipboard::ClipboardServiceImpl>()
+            .build()
+            .get_one::<dyn crate::generated::clipboard::ClipboardService>()?;
         Ok(Self {
             personal_config,
+            clipboard,
             workers,
             config: Arc::new(crate::configuration::HostConfig {
                 database_url: database.into(),

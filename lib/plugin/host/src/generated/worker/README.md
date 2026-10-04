@@ -44,3 +44,15 @@ worker 配对复用 AIO 当前登录账号、工作区和成员有效性。设�
 `POST /api/runtime/workers/desktop/access` 使用设备 Bearer 凭据与 `{"enabled":true|false}` 单独开关 `desktop.control`，不接受浏览器凭据。关闭会取消该能力的未完成任务，其他能力保留。宿主 process 清单及 `AIO_PROCESS_WORKER_CAPABILITIES` 也须显式授予此能力。
 
 桌面 submit 输入固定为 session UUID、action、arguments 和可选 observation UUID。允许列举、观察、激活应用、固定鼠标/键盘动作及 create_spreadsheet；建表使用 filename、sheet_name、rows，由 worker 在受控输出目录生成并打开全新 XLSX，不允许指定任意路径或覆盖文件；输入限额沿用 32768 字节，写操作必须带 observation。worker 再校验本机开关、单会话独占和观察凭据有效性。宿主只路由到用户设备，不操作服务端桌面；图片回执沿原任务结果通道传输。原生权限与应用兼容性由设备实际检查，complete 不等于用户目标已完成。
+
+## 剪切板接力
+
+剪切板条目按租户与用户加密存储，网页和已开通通道的设备共用同一服务。设备通道由设备本机凭据开通，网页只能停用。
+
+- 网页（会话凭据）：`GET /api/runtime/clipboard/head`、`GET /api/runtime/clipboard/items?limit=N`、`GET /api/runtime/clipboard/items/{id}`、`POST /api/runtime/clipboard/items`、`GET /api/runtime/clipboard/devices`、`PUT /api/runtime/clipboard/devices/{id}`、`POST /api/runtime/clipboard/items/{id}/push`。
+- 设备（设备 Bearer 凭据，需 `clipboard.sync` 能力）：同路径前缀 `/api/runtime/workers/clipboard`；`PUT .../self` 开通或关闭本人设备的通道，不接受设备 ID 或浏览器凭据。
+- 条目正文为 Base64；`kind` 为 `text`、`image` 或 `binary`，单条上限 8 MiB，`text` 必须是 UTF-8。每个用户保留最近 64 条，超出按序号淘汰最旧记录及其分片。
+- `POST /api/runtime/clipboard/items/{id}/push` 请求体 `{"devices":[]}`：为空时投递到全部已开通通道的设备，否则投递到指定设备。任务能力为 `clipboard.sync`，输入只包含 `{"id":"UUID"}`；设备领取后凭自身通道拉取加密正文，因此图片和二进制不受任务输入 32768 字节配额限制。设备重新上报摘要不一致时任务失败，不会写入本机。
+- 变更轮询 `GET /api/runtime/clipboard/changes?after=N&wait=25` 在版本变化或超时后返回最新序号，与个人配置同步的语义一致。
+
+聚焦回归：`AIO_TEST_DATABASE_URL=... cargo test -p az-plugin-host --features server clipboard -- --include-ignored`，覆盖通道开通、设备鉴权、文本与二进制往返、类型与大小校验、分页、跨用户隔离和撤销。

@@ -329,3 +329,20 @@ mod terminal_tests {
         Ok(())
     }
 }
+
+/// 剪切板任务只携带宿主生成的条目 ID，正文由设备通过受控通道拉取。
+pub(super) fn validate_clipboard_input(input: &serde_json::Value) -> Result<()> {
+    let object = input
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("剪切板任务必须为对象"))?;
+    ensure!(
+        object.len() == 1 && object.contains_key("id"),
+        "剪切板任务字段无效"
+    );
+    uuid::Uuid::parse_str(
+        input["id"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("剪切板条目缺失"))?,
+    )?;
+    Ok(())
+}

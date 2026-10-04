@@ -101,6 +101,9 @@ pub fn router(state: RuntimeState) -> Router {
         .merge(crate::generated::personal_config::controller::router(
             state.clone(),
         ))
+        .merge(crate::generated::clipboard::controller::router(
+            state.clone(),
+        ))
         .with_state(state)
 }
 
