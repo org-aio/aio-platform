@@ -796,3 +796,90 @@ async fn pairing_same_machine_revokes_previous_active_device() -> Result<()> {
         .await?;
     Ok(())
 }
+
+#[tokio::test]
+#[ignore = "需要隔离 PostgreSQL，设置 AIO_TEST_DATABASE_URL"]
+async fn terminal_sessions_single_owner_and_replacement() -> Result<()> {
+    use super::model::CreateTerminal;
+
+    let root = tempfile::tempdir()?;
+    let database = std::env::var("AIO_TEST_DATABASE_URL")?;
+    let admin = sqlx::PgPool::connect(&database).await?;
+    let schema = format!("worker_test_{}", uuid::Uuid::new_v4().simple());
+    sqlx::query(&format!("CREATE SCHEMA {schema}"))
+        .execute(&admin)
+        .await?;
+    let mut isolated = reqwest::Url::parse(&database)?;
+    isolated
+        .query_pairs_mut()
+        .append_pair("options", &format!("-c search_path={schema}"));
+    let state = RuntimeState::isolated_admin_test(
+        Arc::new(Identity),
+        &isolated.to_string(),
+        "http://127.0.0.1:1",
+        root.path(),
+    )
+    .await?;
+    let session = SessionContext {
+        session_id: "session".into(),
+        user_id: "owner".into(),
+        account: "owner".into(),
+        display_name: "owner".into(),
+        tenant_id: "test".into(),
+        tenant_label: "test".into(),
+        permissions: vec![],
+    };
+    let pairing = state
+        .workers
+        .pair(PairRequest {
+            label: "terminal-host".into(),
+            platform: "darwin".into(),
+            capabilities: vec!["terminal.open".into()],
+            machine_id: Some(uuid::Uuid::new_v4().to_string()),
+        })
+        .await?;
+    state.workers.approve(&session, &pairing.code).await?;
+    let device = state.workers.identity(&pairing.token).await?;
+    let create = |cols, rows| CreateTerminal {
+        worker_id: pairing.device_id.clone(),
+        cols,
+        rows,
+    };
+
+    let first = state
+        .workers
+        .terminal_create(&session, create(100, 30))
+        .await?;
+    let claimed = state
+        .workers
+        .terminal_claim(&device, 0)
+        .await?
+        .context("首次终端会话未被领取")?;
+    assert_eq!(claimed.id, first.id);
+
+    let second = state
+        .workers
+        .terminal_create(&session, create(120, 40))
+        .await?;
+    let first_state: String =
+        sqlx::query_scalar("SELECT state FROM worker_terminal_sessions WHERE id=$1")
+            .bind(&first.id)
+            .fetch_one(&state.store.pool)
+            .await?;
+    assert_eq!(first_state, "closing");
+    assert_eq!(second.state, "waiting");
+
+    let replacement = state
+        .workers
+        .terminal_claim(&device, 0)
+        .await?
+        .context("替换终端未被领取")?;
+    assert_eq!(replacement.id, second.id);
+    assert!(state.workers.terminal_claim(&device, 0).await?.is_none());
+
+    state.store.pool.close().await;
+    sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
+        .execute(&admin)
+        .await?;
+    Ok(())
+}

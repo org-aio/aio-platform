@@ -271,6 +271,13 @@ impl WorkerService for WorkerServiceImpl {
         .fetch_one(&mut *tx)
         .await?;
         ensure!(exists, "设备不存在或已撤销");
+        // 每台设备只保持一个浏览器终端；新页面接管时让旧 PTY 主动退出。
+        sqlx::query(
+            "UPDATE worker_terminal_sessions SET state='closing',updated_at=now() WHERE worker_id=$1 AND state IN ('waiting','active')",
+        )
+        .bind(&request.worker_id)
+        .execute(&mut *tx)
+        .await?;
         let id = uuid::Uuid::new_v4().to_string();
         let row = sqlx::query(
             "INSERT INTO worker_terminal_sessions(id,worker_id,tenant_id,user_id,cols,rows) VALUES($1,$2,$3,$4,$5,$6) RETURNING *, (extract(epoch FROM created_at)*1000)::bigint AS created_at_ms",
@@ -432,7 +439,7 @@ impl WorkerService for WorkerServiceImpl {
             .await?;
             ensure!(active, "设备已撤销");
             let row = sqlx::query(
-                "SELECT *, (extract(epoch FROM created_at)*1000)::bigint AS created_at_ms FROM worker_terminal_sessions WHERE worker_id=$1 AND state IN ('waiting','active') ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1",
+                "SELECT *, (extract(epoch FROM created_at)*1000)::bigint AS created_at_ms FROM worker_terminal_sessions WHERE worker_id=$1 AND state='waiting' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1",
             )
             .bind(&device.id)
             .fetch_optional(&mut *tx)
