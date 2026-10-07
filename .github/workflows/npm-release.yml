@@ -131,7 +131,7 @@ jobs:
   publish:
     name: 发布 npm 包
     needs: [verify, build]
-    if: needs.verify.result == 'success' && needs.verify.outputs.should_publish == 'true' && (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.artifacts_run_id != ''))
+    if: always() && !cancelled() && needs.verify.result == 'success' && needs.verify.outputs.should_publish == 'true' && (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.artifacts_run_id != ''))
     runs-on: ubuntu-24.04
     permissions:
       contents: read

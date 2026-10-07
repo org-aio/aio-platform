@@ -74,3 +74,41 @@ jobs:
             console.log('相同版本已发布，无需重复上传');
           }
           NODE
+
+  publish-root:
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: npm
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      ARTIFACTS_RUN_ID: '37632318715'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fad027a1d8c1536bfa6364d90eb67bb4c6adb3e3
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: 验证同一提交的五平台构建产物
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node npm/aio/scripts/verify-reuse.cjs
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          path: npm/artifacts
+          run-id: '37632318715'
+          github-token: ${{ github.token }}
+      - run: node npm/aio/scripts/check-release.cjs v2026.10.7
+      - run: npm test --prefix npm/aio
+      - run: node npm/aio/scripts/stage-platform-packages.cjs npm/artifacts npm/platform-packages
+      - name: 发布平台包和统一入口
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node npm/aio/scripts/publish-packages.cjs npm/platform-packages
