@@ -30,10 +30,10 @@ fn run(arguments: Vec<String>) -> Result<()> {
             Ok(())
         }
         "tool" | "helper" | "open" => tools::run(&arguments),
-        "space" => run_plugin_cli(
-            "aio-space",
+        "device" => run_plugin_cli(
+            "aio-device",
             &arguments[1..],
-            "请先在 AIO 插件市场安装空间助手",
+            "请通过 @zjarlin/aio 安装设备助手，或在 AIO 插件市场安装 aio-plugin-device",
         ),
         "memory" => {
             let mut forwarded = vec!["memory".to_owned()];
@@ -343,7 +343,7 @@ fn is_help(argument: &str) -> bool {
 }
 
 fn usage() -> &'static str {
-    "用法:\n  aio helper install|uninstall\n  aio tool install <id> --version <版本>\n  aio tool uninstall <id>\n  aio tool list\n  aio tool release setup|prepare|publish|sync\n  aio open <aio://install/id?version=版本>\n  aio space <空间助手命令>\n  aio memory <智能体记忆命令>\n  aio init <目录> [--name <包名>] [--title <标题>] [--network <china|global>]\n  aio plugin init <目录> [--name <包名>] [--title <插件标题>] [--language <rust|kotlin|typescript>] [--framework <nuxt|next|topcoat>] [--network <china|global>]\n  aio plugin init --help\n  aio plugin install <git> [--rev <分支、标签或提交>]\n  aio plugin package <目录> --version <SemVer> [--git <HTTPS Git>] [-o <文件.aio-plugin>]\n  aio plugin publish [<目录或文件.aio-plugin>] [--git <HTTPS Git>] [--version <SemVer>]\n  aio plugin uninstall <git>\n  aio plugin sync\n  aio plugin list\n  aio plugin validate [<仓库目录>]\n  aio plugin schema [<输出目录>]"
+    "用法:\n  aio helper install|uninstall\n  aio tool install <id> --version <版本>\n  aio tool uninstall <id>\n  aio tool list\n  aio tool release setup|prepare|publish|sync\n  aio open <aio://install/id?version=版本>\n  aio device <设备助手命令>\n  aio memory <智能体记忆命令>\n  aio init <目录> [--name <包名>] [--title <标题>] [--network <china|global>]\n  aio plugin init <目录> [--name <包名>] [--title <插件标题>] [--language <rust|kotlin|typescript>] [--framework <nuxt|next|topcoat>] [--network <china|global>]\n  aio plugin init --help\n  aio plugin install <git> [--rev <分支、标签或提交>]\n  aio plugin package <目录> --version <SemVer> [--git <HTTPS Git>] [-o <文件.aio-plugin>]\n  aio plugin publish [<目录或文件.aio-plugin>] [--git <HTTPS Git>] [--version <SemVer>]\n  aio plugin uninstall <git>\n  aio plugin sync\n  aio plugin list\n  aio plugin validate [<仓库目录>]\n  aio plugin schema [<输出目录>]"
 }
 
 fn plugin_init_usage() -> &'static str {

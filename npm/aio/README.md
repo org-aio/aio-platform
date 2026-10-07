@@ -1,6 +1,6 @@
 # AIO CLI
 
-AIO 的应用和社区插件命令行工具。npm 包只包含平台选择器；实际命令由仓库中的 Rust `az-aio-cli` 编译而来。
+AIO 的统一命令行入口。应用和社区插件命令由 Rust `az-aio-cli` 执行；`aio device` 从随包的 `@zjarlin/aio-device` 启动设备组件，不需要第二个全局 CLI。运行需要 Node.js 22.14 或更新版本。
 
 ```bash
 npm install --global @zjarlin/aio
@@ -12,6 +12,16 @@ aio --help
 ```bash
 npx @zjarlin/aio --help
 ```
+
+设备连接、后台 worker、终端、桌面、文件和技能同步统一使用：
+
+```sh
+aio device --help
+aio device connect
+aio device worker --background
+```
+
+临时运行使用 `npx -y @zjarlin/aio device --help`；长期 worker 建议全局安装，以保留组件及原生依赖的固定位置。
 
 支持 macOS arm64/x64、Linux arm64/x64 和 Windows x64。Linux 包使用静态 musl 二进制。
 

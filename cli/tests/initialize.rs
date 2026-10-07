@@ -9,8 +9,8 @@ fn forwards_plugin_cli_arguments_and_exit_status() {
 
     for (command, executable, arguments, expected) in [
         (
-            "space",
-            "aio-space",
+            "device",
+            "aio-device",
             ["workspace-add", "--name", "demo"].as_slice(),
             "workspace-add --name demo",
         ),

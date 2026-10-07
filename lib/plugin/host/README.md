@@ -19,7 +19,7 @@ process 插件声明所需 worker 能力，生产宿主同时以 `AIO_PROCESS_WO
 
 配对、设备身份和租户权限属于宿主公共设施，不依赖智能体安装。客户端携设备凭据主动连接，
 不保存 AIO 登录密码、不开放本机监听端口。智能体通过宿主授权能力使用设备；
-空间管家和 Skill 同步共用这一条设备连接，业务数据仍由各插件自己的 schema 保存。
+设备助手和 Skill 同步共用这一条设备连接，业务数据仍由各插件自己的 schema 保存。
 
 `skills.sync` 同时需要进程清单 `worker_capabilities`、宿主环境
 `AIO_PROCESS_WORKER_CAPABILITIES=desktop.open-app,skills.sync` 和设备本机 opt-in。

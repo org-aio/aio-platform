@@ -15,14 +15,14 @@ fn current_origin() -> String {
 
 fn macos_command() -> String {
     format!(
-        "npm install -g @zjarlin/aio-space\nbrew install restic\naio-space connect --server {}",
+        "npm install -g @zjarlin/aio\nbrew install restic\naio device connect --server {}",
         current_origin()
     )
 }
 
 fn windows_command() -> String {
     format!(
-        "npm install -g @zjarlin/aio-space\naio-space connect --server {} --no-browser --foreground",
+        "npm install -g @zjarlin/aio\naio device connect --server {} --no-browser --foreground",
         current_origin()
     )
 }

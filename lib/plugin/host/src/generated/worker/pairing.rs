@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 
 use super::{model::Worker, view::decode_response};
 
-pub(super) const UNAVAILABLE: &str = "这个一次性配对链接已使用或失效，不影响已配对设备。连接新设备时，请在那台设备上重新运行 aio-space connect。";
+pub(super) const UNAVAILABLE: &str = "这个一次性配对链接已使用或失效，不影响已配对设备。连接新设备时，请在那台设备上重新运行 aio device connect。";
 
 /// 结束一次配对入口，保留页面参数、锚点和路由状态，刷新不再重放旧配对码。
 pub(super) fn finish(mut code: Signal<Option<String>>) -> Result<(), String> {

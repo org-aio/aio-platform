@@ -35,6 +35,14 @@ function isPublished(name, version) {
   }
 }
 
+function verifyRequiredDependencies(manifest, checkPublished = isPublished) {
+  for (const [name, version] of Object.entries(manifest.dependencies ?? {})) {
+    if (!checkPublished(name, version)) {
+      throw new Error(`必须先发布依赖 ${name}@${version}，再发布 ${manifest.name}`);
+    }
+  }
+}
+
 function publish(directory, name, version) {
   if (isPublished(name, version)) {
     console.log(`已发布，跳过 ${name}@${version}`);
@@ -52,6 +60,7 @@ function main() {
   }
   const platformRoot = path.resolve(platformRootArgument);
 
+  verifyRequiredDependencies(rootManifest);
   for (const platform of PLATFORMS) {
     publish(path.join(platformRoot, platform.id), platform.name, rootManifest.version);
   }
@@ -62,4 +71,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { isMissingPackage };
+module.exports = { isMissingPackage, verifyRequiredDependencies };
