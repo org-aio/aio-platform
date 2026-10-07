@@ -71,10 +71,6 @@ jobs:
             const archive = await readFile('aio-device-0.11.0.tgz');
             assert.deepEqual(published.aio.source, pkg.aio.source);
             assert.equal(published.dist.integrity, 'sha512-' + createHash('sha512').update(archive).digest('base64'));
-            console.log('相同版本已发布，继续绑定自动发布身份');
+            console.log('相同版本已发布，无需重复上传');
           }
           NODE
-      - name: 绑定设备仓库的自动发布身份
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm trust github @zjarlin/aio-device --repo org-aio/aio-plugin-device --file aio-cli.yml --allow-publish --yes
