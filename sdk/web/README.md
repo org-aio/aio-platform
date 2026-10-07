@@ -17,3 +17,5 @@
 宿主在两种 iframe ABI 的入口前注入 `navigation.js`，`aioPlugin.navigate(fragment, { replace })` 更新外层 URL，`aioPlugin.onNavigationChange(listener)` 恢复外层浏览器历史。hash router 自动同步；memory router 需显式在回调中恢复，并把业务筛选编码入自己的 hash 契约。模块沿用当前挂载票据、父窗口和 opaque-origin 校验，不暴露宿主 DOM 或 Cookie。
 
 窗口滚动和 `data-url-scroll="稳定名称"` 标记的内部容器同步为外层有界 `scroll` 参数，连续滚动只 replace。刷新或复制链接到新浏览器上下文后，在页面内容出现时恢复；要跨数据变化精确定位，使用稳定记录锚点，而不是承诺像素偏移永远精确。
+
+原生 hash 变化已经创建 iframe 的联合浏览器历史，宿主同步时只 replace，避免一次后退停在重复视图。逐节点滚动暂存于 iframe 的 history.state，保留已有对象型 router state；当前可分享位置仍写在外层 URL，重新打开不依赖这份本地历史。显式调用 aioPlugin.navigate 的导航由宿主创建历史节点。

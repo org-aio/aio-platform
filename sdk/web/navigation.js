@@ -7,6 +7,25 @@
   let restoringScroll = null;
   let scrollTimer = null;
   let visible = window.aioLifecycle?.activated !== false;
+  const scrollPositions = value => {
+    const positions = new Map();
+    for (const part of (value || '').split(';').slice(0, 16)) {
+      const match = /^guest-([a-zA-Z0-9_-]{1,34}):(\d{1,8}):(\d{1,8})$/.exec(part);
+      if (match) positions.set(match[1], { x: Number(match[2]), y: Number(match[3]) });
+    }
+    return positions;
+  };
+  const saveHistoryScroll = value => {
+    const state = history.state;
+    if (state !== null && (typeof state !== 'object' || Array.isArray(state))) return;
+    history.replaceState({ ...state, __aioNavigationScroll: value }, '');
+  };
+  const rememberScroll = (key, x, y) => {
+    const positions = scrollPositions(history.state?.__aioNavigationScroll);
+    if (positions.size >= 16 && !positions.has(key)) return;
+    positions.set(key, { x: Math.max(0, Math.min(99999999, Math.round(x))), y: Math.max(0, Math.min(99999999, Math.round(y))) });
+    saveHistoryScroll([...positions].map(([key, point]) => `guest-${key}:${point.x}:${point.y}`).join(';'));
+  };
   const call = payload => new Promise((resolve, reject) => {
     if (pending.size >= 16) return reject(new Error('导航请求超过限制'));
     const id = String(++sequence);
@@ -47,11 +66,7 @@
     }
   };
   const restoreScroll = value => {
-    const positions = new Map();
-    for (const part of value.split(';').slice(0, 16)) {
-      const match = /^guest-([a-zA-Z0-9_-]{1,34}):(\d{1,8}):(\d{1,8})$/.exec(part);
-      if (match) positions.set(match[1], { x: Number(match[2]), y: Number(match[3]) });
-    }
+    const positions = scrollPositions(value);
     if (!positions.has('window')) positions.set('window', { x: 0, y: 0 });
     for (const element of document.querySelectorAll('[data-url-scroll]')) {
       const key = element.dataset.urlScroll;
@@ -72,7 +87,8 @@
     if (restoredHash !== null && location.hash === restoredHash) { restoredHash = null; return; }
     restoredHash = null;
     notify(location.hash);
-    void navigate(location.hash).catch(error => console.error(error));
+    // hash 已经创建联合浏览器历史，宿主只同步当前节点，不能再 push 一次。
+    void call({ navigation: location.hash, replace: true, history_scroll: history.state?.__aioNavigationScroll || '' }).catch(error => console.error(error));
   });
   addEventListener('scroll', event => {
     if (!visible || (restoringScroll && Date.now() <= restoringScroll.deadline)) return;
@@ -80,6 +96,7 @@
     const element = event.target === document ? document.scrollingElement : event.target;
     const key = element === document.scrollingElement ? 'window' : element?.dataset?.urlScroll;
     if (!key || !/^[a-zA-Z0-9_-]{1,34}$/.test(key)) return;
+    rememberScroll(key, element.scrollLeft, element.scrollTop);
     clearTimeout(scrollTimer);
     scrollTimer = setTimeout(() => { scrollTimer = null; if (visible) void call({ scroll: { key, x: element.scrollLeft, y: element.scrollTop } }).catch(error => console.error(error)); }, 120);
   }, { capture: true, passive: true });
@@ -95,6 +112,7 @@
       if (typeof message.scroll === 'string' && message.scroll.length <= 2048) {
         clearTimeout(scrollTimer);
         scrollTimer = null;
+        saveHistoryScroll(message.scroll);
         restoreScroll(message.scroll);
       }
       return;

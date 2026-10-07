@@ -10,17 +10,18 @@ function guest() {
   const parent = { postMessage: value => sent.push(value) };
   const window = { aioLifecycle: { activated: true } };
   const location = { hash: '', replace(value) { this.hash = value === '#' ? '' : value; } };
+  const history = { state: null, replaceState(value) { this.state = value; } };
   const items = { dataset: { urlScroll: 'items' }, scrollHeight: 2500, clientHeight: 200, scrollWidth: 200, clientWidth: 200, scrollTop: 0, scrollLeft: 0 };
   const document = { currentScript: { dataset: { token: 'grant' } }, documentElement: {},
     scrollingElement: { scrollHeight: 600, clientHeight: 600, scrollWidth: 600, clientWidth: 600, scrollTop: 0, scrollLeft: 0 },
     querySelectorAll: () => [items], querySelector: () => items };
-  const context = vm.createContext({ window, parent, location, document, Date, Map, console, setTimeout, clearTimeout,
+  const context = vm.createContext({ window, parent, location, history, document, Date, Map, console, setTimeout, clearTimeout,
     MutationObserver: class { observe() {} }, requestAnimationFrame: callback => frames.push(callback),
     addEventListener: (name, callback) => events.set(name, callback),
   });
   vm.runInContext(readFileSync(new URL('./navigation.js', import.meta.url), 'utf8'), context);
   const receive = data => events.get('message')({ source: parent, data: { channel: 'aio-navigation', token: 'grant', ...data } });
-  return { window, location, events, sent, parent, receive, document, frames, items };
+  return { window, location, history, events, sent, parent, receive, document, frames, items };
 }
 
 test('guest navigation is scoped, bounded and supports replace without exposing its asset URL', async () => {
@@ -58,10 +59,26 @@ test('native hash navigation is reported and inactive guest scroll is ignored', 
   g.location.hash = '#/items?status=open';
   g.events.get('hashchange')();
   assert.equal(g.sent[0].navigation, g.location.hash);
+  assert.equal(g.sent[0].replace, true);
   g.receive({ id: g.sent[0].id, response: g.location.hash });
   g.events.get('aio:visibility')({ detail: false });
   g.events.get('scroll')({ target: g.document });
   assert.equal(g.sent.length, 1);
+});
+
+test('native hash history carries per-entry scroll while leaving unrelated router state intact', () => {
+  const g = guest();
+  g.history.state = { router: 'existing' };
+  g.receive({ navigation: '#/details', scroll: 'guest-items:0:300' });
+  assert.equal(g.history.state.router, 'existing');
+  assert.equal(g.history.state.__aioNavigationScroll, 'guest-items:0:300');
+  g.frames.shift()(); g.frames.shift()();
+  g.events.get('hashchange')();
+  g.location.hash = '#/items';
+  g.events.get('hashchange')();
+  assert.equal(g.sent[0].replace, true);
+  assert.equal(g.sent[0].history_scroll, 'guest-items:0:300');
+  g.receive({ id: g.sent[0].id, response: '#/items' });
 });
 
 test('empty scroll resets retained containers and an old completion cannot cancel a newer restore', () => {
