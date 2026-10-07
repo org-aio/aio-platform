@@ -124,8 +124,9 @@ pub(super) fn public_origin(configured: &str) -> Result<String> {
 
 pub(super) static BRIDGE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
     format!(
-        "{}\n{}",
+        "{}\n{}\n{}",
         az_plugin_runtime::FRONTEND_LIFECYCLE,
+        az_plugin_runtime::FRONTEND_NAVIGATION,
         include_str!("frontend_guest.js")
     )
 });

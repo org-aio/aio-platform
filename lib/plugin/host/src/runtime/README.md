@@ -22,3 +22,9 @@
 - 插件可通过 `aioPlugin.visible` / `onVisibilityChange` 暂停后台动画、轮询；壳不把局部状态操作转换成后端请求。沙箱不开放 `allow-same-origin`、Cookie、宿主 DOM 或任意网络权限。
 
 验证：`node --test tests/browser/asset_cache.cjs tests/browser/asset_preload.cjs`；`node tests/browser/preparation.cjs` 检查真实 Compose 后台零业务调用、预备实例首次交互、刷新和画布计数；`node tests/browser/keepalive.cjs` 覆盖桌面/移动端、A/B/A 状态隔离、旧票据撤销、刷新资源复用、会话失效和 LRU。真实服务端测试使用 `AIO_TEST_DATABASE_URL` 的隔离数据库。
+
+## 可分享前端状态
+
+宿主的通用导航以外层 `page` / `account` 参数为权威来源。iframe 的 hash 路由通过已有挂载票据桥同步为外层 `route` 参数，初次挂载、浏览器前进后退与保活页面恢复均回传到同一个 iframe，不暴露资产票据，不增加服务端权限。
+
+插件可调用 `aioPlugin.navigate('#/items?status=open', { replace: false })`，使用 `aioPlugin.onNavigationChange(fragment => ...)` 将外层历史恢复接回内部 router；普通 hash router 的 `hashchange` 自动上报。memory router 和业务筛选必须显式接入，宿主无法推断任意应用 store。iframe 内部滚动容器声明稳定的 `data-url-scroll`，窗口滚动与标记容器的有界偏移通过同一桥同步为外层 `scroll`，只合并当前历史节点。

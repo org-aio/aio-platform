@@ -56,5 +56,7 @@
     pending.set(id, { resolve, reject, timer });
     window.parent.postMessage({ protocol: "aio:plugin@2", kind: "clipboard", id, text }, "*");
   });
-  Object.defineProperty(window, "aioPlugin", { value: Object.freeze({ request, json, copy }), writable: false, configurable: false });
+  const navigate = (fragment, options) => window.aioNavigation.navigate(fragment, options);
+  const onNavigationChange = listener => window.aioNavigation.onNavigationChange(listener);
+  Object.defineProperty(window, "aioPlugin", { value: Object.freeze({ request, json, copy, navigate, onNavigationChange }), writable: false, configurable: false });
 })();

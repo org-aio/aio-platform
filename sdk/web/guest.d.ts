@@ -7,6 +7,8 @@ declare global {
       request(input: Request): Promise<Response>;
       json<T>(method: string, path: string, value?: unknown): Promise<T>;
       copy(text: string): Promise<Response>;
+      navigate(fragment: string, options?: { replace?: boolean }): Promise<string>;
+      onNavigationChange(listener: (fragment: string) => void): () => void;
     };
   }
 }

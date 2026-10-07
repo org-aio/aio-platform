@@ -36,6 +36,7 @@ pub const FRONTEND_HOST: &str = include_str!("../../../../sdk/web/host.mjs");
 pub const FRONTEND_GUEST: &str = include_str!("../../../../sdk/web/guest.js");
 pub const FRONTEND_WASM: &str = include_str!("../../../../sdk/web/wasm.js");
 pub const FRONTEND_LIFECYCLE: &str = include_str!("../../../../sdk/web/lifecycle.js");
+pub const FRONTEND_NAVIGATION: &str = include_str!("../../../../sdk/web/navigation.js");
 
 pub mod bindings {
     wasmtime::component::bindgen!({

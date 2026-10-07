@@ -25,6 +25,7 @@
 - `aio-idea` 插件接入需要同时更新依赖、feature、静态注册、catalog、lockfile/config 和相关 revision；不能只改某一处让 IDE 偶然可见。
 - 浏览器验收 Dioxus Web 时使用 `dx serve --platform web`；`cargo run --features web` 只能编译，不能当成 wasm-bindgen Web 运行验收。
 - 新建插件默认使用 Topcoat Rust 全栈模板；除用户明确指定 Dioxus、Nuxt、Next、Kotlin、TypeScript 或其他运行目标外，不得把 Dioxus 作为默认选型。
+- Web 导航与可分享业务状态采用 URL 驱动设计：壳保存 page/account，原生页面使用通用壳的 use_page_url_state，iframe 使用 aioPlugin.navigate/onNavigationChange 同步路由及筛选。内部滚动容器声明稳定的 data-url-scroll；滚动只 replace，复制外层链接、新浏览器打开、刷新和前进后退必须实际验收。凭据、未提交表单及批量操作选择不进入链接。
 - 租户业务权限从已安装组件派生；菜单隐藏只影响导航和预加载，不能替代组件激活、授权、schema、数据和版本历史。
 - 工作区清理或合并前比较 worktree、HEAD 祖先关系、未跟踪文件和脏文件；无共同 merge base 的分支不是强制合并输入。
 - CLI 模板要生成可运行的前后端示例；`aio plugin init <dir> --framework nuxt|next` 分别使用 Nuxt Nitro routes 和 Next App Router Route Handlers，并保留 AIO 进程产物 `dist/server.cjs`。

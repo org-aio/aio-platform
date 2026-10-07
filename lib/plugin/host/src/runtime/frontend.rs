@@ -106,7 +106,7 @@ fn MountedFrontend(
                 referrerpolicy: "no-referrer",
                 onmounted: move |_| {
                     if bridge().is_none() {
-                        let script = if mount.abi == Some(2) { concat!(include_str!("frontend_lifecycle.js"), "\n", include_str!("frontend_cache.js"), "\n", include_str!("frontend_assets.js"), "\n", include_str!("frontend_component.js")) } else { concat!(include_str!("frontend_lifecycle.js"), "\n", include_str!("frontend_cache.js"), "\n", include_str!("frontend_host.js")) };
+                        let script = if mount.abi == Some(2) { concat!(include_str!("frontend_lifecycle.js"), "\n", include_str!("frontend_navigation.js"), "\n", include_str!("frontend_cache.js"), "\n", include_str!("frontend_assets.js"), "\n", include_str!("frontend_component.js")) } else { concat!(include_str!("frontend_lifecycle.js"), "\n", include_str!("frontend_navigation.js"), "\n", include_str!("frontend_cache.js"), "\n", include_str!("frontend_host.js")) };
                         let mut evaluator = document::eval(script);
                         match evaluator.send(config.clone()) {
                             Ok(()) => {

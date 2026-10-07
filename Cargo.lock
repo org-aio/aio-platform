@@ -449,6 +449,9 @@ dependencies = [
  "dill",
  "dioxus",
  "icons",
+ "serde",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]

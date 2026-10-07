@@ -282,6 +282,7 @@ fn render(
     for source in [
         az_plugin_runtime::FRONTEND_LIFECYCLE,
         az_plugin_runtime::FRONTEND_WASM,
+        az_plugin_runtime::FRONTEND_NAVIGATION,
         az_plugin_runtime::FRONTEND_GUEST,
         include_str!("frontend_assets.js"),
     ] {

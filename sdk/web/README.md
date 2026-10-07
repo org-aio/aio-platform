@@ -11,3 +11,9 @@
 `aioPlugin.copy(text)` 请求宿主复制文本，要求挂载时显式授予 `{clipboard: true}`、页面具有焦点及当前用户手势。文本有长度上限，拒绝或超时返回错误；不会把剪贴板内容转发给插件服务或模型。该授权不提供读取剪贴板能力。
 
 此 SDK 使用 v2 消息；正式产品会话撤销、全屏和账户挂载仍在迁移中，不能把开发预览服务用作公网宿主。
+
+## URL 导航与滚动
+
+宿主在两种 iframe ABI 的入口前注入 `navigation.js`，`aioPlugin.navigate(fragment, { replace })` 更新外层 URL，`aioPlugin.onNavigationChange(listener)` 恢复外层浏览器历史。hash router 自动同步；memory router 需显式在回调中恢复，并把业务筛选编码入自己的 hash 契约。模块沿用当前挂载票据、父窗口和 opaque-origin 校验，不暴露宿主 DOM 或 Cookie。
+
+窗口滚动和 `data-url-scroll="稳定名称"` 标记的内部容器同步为外层有界 `scroll` 参数，连续滚动只 replace。刷新或复制链接到新浏览器上下文后，在页面内容出现时恢复；要跨数据变化精确定位，使用稳定记录锚点，而不是承诺像素偏移永远精确。
