@@ -1,0 +1,80 @@
+name: Device npm bootstrap
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha256:
+        description: "已审核设备安装包的 SHA-256"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: device-npm-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: npm
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: npm install --global npm@11
+      - name: 下载已审核的首次发布包
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA256: ${{ inputs.sha256 }}
+        run: |
+          [[ "$EXPECTED_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          gh release download v2026.10.7 --repo "$GITHUB_REPOSITORY" --pattern aio-device-0.11.0.tgz
+          printf '%s  aio-device-0.11.0.tgz\n' "$EXPECTED_SHA256" | sha256sum --check
+          tar -xzf aio-device-0.11.0.tgz
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {readFile} from 'node:fs/promises';
+          const pkg = JSON.parse(await readFile('package/package.json', 'utf8'));
+          assert.equal(pkg.name, '@zjarlin/aio-device');
+          assert.equal(pkg.version, '0.11.0');
+          assert.equal(pkg.aio.cli.id, 'aio-plugin-device');
+          assert.equal(pkg.aio.cli.command, 'aio-device');
+          assert.deepEqual(pkg.aio.source, {
+            repository: 'org-aio/aio-plugin-device',
+            revision: '3f0f84adba5d56501f49a2e9c5e9fc9af7049899',
+            reference: 'refs/tags/v0.11.0'
+          });
+          NODE
+      - name: 验证安装包命令
+        run: npm exec --yes --package=./aio-device-0.11.0.tgz -- aio-device --version
+      - name: 首次发布设备组件
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {execFileSync} from 'node:child_process';
+          import {createHash} from 'node:crypto';
+          import {readFile} from 'node:fs/promises';
+          const response = await fetch('https://registry.npmjs.org/@zjarlin%2Faio-device/0.11.0');
+          if (response.status === 404) {
+            execFileSync('npm', ['publish', './aio-device-0.11.0.tgz', '--registry', 'https://registry.npmjs.org', '--access', 'public', '--tag', 'latest', '--ignore-scripts'], {stdio: 'inherit'});
+          } else {
+            assert.equal(response.status, 200, '读取 npm 发布状态失败');
+            const published = await response.json();
+            const pkg = JSON.parse(await readFile('package/package.json', 'utf8'));
+            const archive = await readFile('aio-device-0.11.0.tgz');
+            assert.deepEqual(published.aio.source, pkg.aio.source);
+            assert.equal(published.dist.integrity, 'sha512-' + createHash('sha512').update(archive).digest('base64'));
+            console.log('相同版本已发布，继续绑定自动发布身份');
+          }
+          NODE
+      - name: 绑定设备仓库的自动发布身份
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm trust github @zjarlin/aio-device --repo org-aio/aio-plugin-device --file aio-cli.yml --allow-publish --yes
