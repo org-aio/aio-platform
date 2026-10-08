@@ -83,4 +83,5 @@ test('guest file drop subscriptions bind deliveries to the parent and discard st
   receive({source:parent,data:{protocol:'aio:plugin@2',kind:'file-drop',id:second,roots:[]}});assert.equal(handled.length,1);
   disposeSecond();window.aioPlugin.fileDrag();assert.equal(sent.at(-1).enabled,false);
   receive({source:parent,data:{protocol:'aio:plugin@2',kind:'file-drop',id:second,roots:[]}});assert.equal(handled.length,1);
+  receive({source:parent,data:{protocol:'aio:plugin@2',kind:'file-drop',roots:[]}});assert.equal(handled.length,1);
 });

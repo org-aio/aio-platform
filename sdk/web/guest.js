@@ -25,7 +25,7 @@
   };
   window.addEventListener("message", (event) => {
     const message = event.data;
-    if (event.source === window.parent && message?.protocol === "aio:plugin@2" && message.kind === "file-drop" && message.id === fileDrop?.id) {
+    if (fileDrop && event.source === window.parent && message?.protocol === "aio:plugin@2" && message.kind === "file-drop" && message.id === fileDrop.id) {
       fileDrop.listener(message);
       return;
     }
