@@ -23,6 +23,8 @@ aio device worker --background
 
 临时运行使用 `npx -y @zjarlin/aio device --help`；长期 worker 建议全局安装，以保留组件及原生依赖的固定位置。
 
+`2026.10.10` 随包设备组件更新到 `0.12.1`，支持 Codex 网页中的文件选择、文件拖入和文件粘贴。设备保持现有配对并显式启用 Codex 网页访问；文件完整传到设备后再向原版界面提供路径。连接库测试与沙箱测试不代替真实 Codex/Buddy 使用验收。
+
 支持 macOS arm64/x64、Linux arm64/x64 和 Windows x64。Linux 包使用静态 musl 二进制。
 
 本项目以 MIT 或 Apache-2.0 双重许可发布，完整文本见 `LICENSE-MIT` 和 `LICENSE-APACHE`。
