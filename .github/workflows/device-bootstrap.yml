@@ -33,7 +33,7 @@ jobs:
           EXPECTED_SHA256: ${{ inputs.sha256 }}
         run: |
           [[ "$EXPECTED_SHA256" =~ ^[a-f0-9]{64}$ ]]
-          gh release download v0.12.0 --repo org-aio/aio-plugin-device --pattern aio-device-0.12.0.tgz
+          gh release download v2026.10.9 --repo org-aio/aio-platform --pattern aio-device-0.12.0.tgz
           printf '%s  aio-device-0.12.0.tgz\n' "$EXPECTED_SHA256" | sha256sum --check
           tar -xzf aio-device-0.12.0.tgz
           node --input-type=module <<'NODE'
