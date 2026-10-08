@@ -26,7 +26,7 @@ async fn machine_identity_pairing_and_deletion() -> Result<()> {
         .append_pair("options", &format!("-c search_path={schema}"));
     let state = RuntimeState::isolated_admin_test(
         Arc::new(Identity),
-        &isolated.to_string(),
+        isolated.as_ref(),
         "http://127.0.0.1:1",
         root.path(),
     )
@@ -712,7 +712,7 @@ async fn pairing_same_machine_revokes_previous_active_device() -> Result<()> {
         .append_pair("options", &format!("-c search_path={schema}"));
     let state = RuntimeState::isolated_admin_test(
         Arc::new(Identity),
-        &isolated.to_string(),
+        isolated.as_ref(),
         "http://127.0.0.1:1",
         root.path(),
     )
@@ -815,7 +815,7 @@ async fn terminal_sessions_single_owner_and_replacement() -> Result<()> {
         .append_pair("options", &format!("-c search_path={schema}"));
     let state = RuntimeState::isolated_admin_test(
         Arc::new(Identity),
-        &isolated.to_string(),
+        isolated.as_ref(),
         "http://127.0.0.1:1",
         root.path(),
     )

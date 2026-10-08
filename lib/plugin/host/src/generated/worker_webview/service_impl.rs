@@ -271,10 +271,10 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
                 .map_err(|_| RuntimeError::unavailable("设备资源连接已关闭"))
         }
         .await;
-        if let Ok(mut views) = self.views.lock() {
-            if let Some(view) = views.get_mut(id) {
-                view.assets.remove(&request);
-            }
+        if let Ok(mut views) = self.views.lock()
+            && let Some(view) = views.get_mut(id)
+        {
+            view.assets.remove(&request);
         }
         result
     }
