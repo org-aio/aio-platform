@@ -45,3 +45,5 @@ npx -y @zjarlin/aio tool list
 `npm release` 由 main 或版本标签推送触发，发布任务使用既有 `npm` 环境的 `NPM_TOKEN`，遵循该环境的审核规则；构建任务不读取发布凭据。
 
 维护者修正 npm 元数据或发布工作流后，可手动运行 `npm release` 并指定 `artifacts_run_id` 复用同版本构建。允许变更仅限 `npm/aio/`、npm 发布工作流和独立设备发布工作流。工作流验证五个平台已构建成功、产物未过期，且源码、前端、依赖和子模块均未变化；否则必须重新构建。仅发布阶段失败的运行也可以复用已成功的构建。
+
+独立设备组件需要通过现有发布身份发布时，使用 `Device npm publication` 工作流。先审核设备标签对应的源码和测试，生成包含 `aio.source` 的 `aio-device-<version>.tgz`，把它放入 Platform Release，再提交 `version`、完整源码 `revision`、保存安装包的 `release_tag` 和整包 `sha256`。工作流复用 `npm` 环境审核，校验摘要、包名、版本、CLI 描述与源码绑定后发布；同版本已存在时必须与来源和整包完整性一致。设备发布完成后再更新统一 CLI 的随包依赖。
