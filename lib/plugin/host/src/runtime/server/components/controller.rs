@@ -31,7 +31,10 @@ pub(in crate::runtime::server) fn router(state: RuntimeState) -> Router<RuntimeS
             "/api/runtime/components/bridge.js",
             get(|| async {
                 (
-                    [(header::CONTENT_TYPE, "application/javascript")],
+                    [
+                        (header::CONTENT_TYPE, "application/javascript"),
+                        (header::CACHE_CONTROL, "no-store"),
+                    ],
                     az_plugin_runtime::FRONTEND_HOST,
                 )
             }),

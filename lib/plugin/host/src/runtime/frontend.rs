@@ -83,7 +83,7 @@ fn MountedFrontend(
     let mut bridge = use_signal(|| None::<document::Eval>);
     let frame_ready = use_signal(|| false);
     let frame_id = format!("aio-frontend-{}", mount.token);
-    let config = serde_json::json!({ "development": mount.development, "abi": mount.abi, "id": frame_id, "page_id": page_id, "token": mount.token, "src": mount.src, "revision": mount.revision, "generation": mount.generation, "session_context": mount.session_context, "context": mount.context, "assets": mount.assets });
+    let config = serde_json::json!({ "host_version": env!("CARGO_PKG_VERSION"), "development": mount.development, "abi": mount.abi, "id": frame_id, "page_id": page_id, "token": mount.token, "src": mount.src, "revision": mount.revision, "generation": mount.generation, "session_context": mount.session_context, "context": mount.context, "assets": mount.assets });
     use_drop(move || {
         if let Some(bridge) = bridge() {
             let _ = bridge.send(serde_json::json!({ "dispose": true }));
