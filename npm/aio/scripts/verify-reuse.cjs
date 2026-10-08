@@ -26,7 +26,7 @@ assert.equal(previous.version, manifest.version, "复用产物必须与发布版
 // 仅重新包装 npm 文件；任何 Rust、前端、依赖或子模块变化都要求重新构建。
 const changed = execFileSync("git", ["diff", "--name-only", run.head_sha, "HEAD"], { encoding: "utf8" }).trim().split("\n").filter(Boolean);
 for (const file of changed) {
-  assert.ok(file.startsWith("npm/aio/") || file === ".github/workflows/npm-release.yml", `构建输入已变化，不能复用：${file}`);
+  assert.ok(file.startsWith("npm/aio/") || file === ".github/workflows/npm-release.yml" || file === ".github/workflows/device-bootstrap.yml", `构建输入已变化，不能复用：${file}`);
 }
 const jobs = api(`actions/runs/${runId}/jobs?per_page=100`).jobs;
 const artifacts = api(`actions/runs/${runId}/artifacts?per_page=100`).artifacts;
