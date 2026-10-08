@@ -129,6 +129,9 @@ impl PluginStore {
         sqlx::raw_sql(include_str!("../../generated/personal_config/schema.sql"))
             .execute(&self.pool)
             .await?;
+        sqlx::raw_sql(include_str!("../../generated/worker_webview/schema.sql"))
+            .execute(&self.pool)
+            .await?;
         sqlx::raw_sql(include_str!("../../generated/clipboard/schema.sql"))
             .execute(&self.pool)
             .await?;

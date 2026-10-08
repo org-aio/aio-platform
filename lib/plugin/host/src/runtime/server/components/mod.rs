@@ -34,6 +34,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 pub(super) use controller::router;
+pub(super) use frontend::device_view_grant;
 pub(super) use frontend::mount;
 
 pub(super) struct Components {

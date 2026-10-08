@@ -9,13 +9,13 @@ function guest() {
   const frames = [];
   const parent = { postMessage: value => sent.push(value) };
   const window = { aioLifecycle: { activated: true } };
-  const location = { hash: '', replace(value) { this.hash = value === '#' ? '' : value; } };
+  const location = { href: 'https://aio.test/assets/grant/index.html', hash: '', replace(value) { this.href = value; this.hash = new URL(value).hash; } };
   const history = { state: null, replaceState(value) { this.state = value; } };
   const items = { dataset: { urlScroll: 'items' }, scrollHeight: 2500, clientHeight: 200, scrollWidth: 200, clientWidth: 200, scrollTop: 0, scrollLeft: 0 };
   const document = { currentScript: { dataset: { token: 'grant' } }, documentElement: {},
     scrollingElement: { scrollHeight: 600, clientHeight: 600, scrollWidth: 600, clientWidth: 600, scrollTop: 0, scrollLeft: 0 },
     querySelectorAll: () => [items], querySelector: () => items };
-  const context = vm.createContext({ window, parent, location, history, document, Date, Map, console, setTimeout, clearTimeout,
+  const context = vm.createContext({ window, parent, location, history, document, Date, Map, URL, console, setTimeout, clearTimeout,
     MutationObserver: class { observe() {} }, requestAnimationFrame: callback => frames.push(callback),
     addEventListener: (name, callback) => events.set(name, callback),
   });
@@ -46,6 +46,7 @@ test('host restore updates the existing guest and does not echo a new history no
   assert.equal(g.location.hash, '');
   g.receive({ navigation: message.navigation, scroll: '' });
   assert.equal(g.location.hash, message.navigation);
+  assert.equal(new URL(g.location.href).pathname, '/assets/grant/index.html');
   g.events.get('hashchange')();
   assert.equal(g.sent.length, 0);
   assert.deepEqual(values, ['', message.navigation]);
