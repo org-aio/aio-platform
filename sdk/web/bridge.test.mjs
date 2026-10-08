@@ -130,3 +130,68 @@ test('guest splits service URLs into the v2 path and query fields', async () => 
   }
   await assert.rejects(window.aioPlugin.request({path:'/graph?spaceId=one',query:'spaceId=two'}), /Specify query only once/);
 });
+
+test('download bridge requires a visible owned frame and active gesture, and preserves binary content', async () => {
+  let listener, reply, clicked, blob;
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const originalURL = globalThis.URL;
+  const originalTimeout = globalThis.setTimeout;
+  const activation = { isActive: false };
+  const child = { postMessage: (message) => { reply = message; } };
+  const frame = { contentWindow: child, checkVisibility: () => true };
+  const link = { click: () => { clicked = { name: link.download, href: link.href }; }, remove: () => {} };
+  globalThis.window = { addEventListener: (_, callback) => { listener = callback; }, removeEventListener: () => {} };
+  globalThis.document = { hasFocus: () => true, createElement: () => link, body: { append: () => {} } };
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { userActivation: activation } });
+  globalThis.URL = { createObjectURL: (value) => { blob = value; return 'blob:host-file'; }, revokeObjectURL: () => {} };
+  globalThis.setTimeout = () => 0;
+  const event = { source: child, origin: 'null', data: { protocol: 'aio:plugin@2', kind: 'download', id: 'download', name: 'note.md', mime: 'text/markdown', body: new Uint8Array([0, 255, 128]) } };
+  const dispose = mountBridge(frame, () => assert.fail('download must not reach the service'));
+  try {
+    await listener(event);
+    assert.match(reply.error, /denied/);
+    assert.equal(clicked, undefined);
+    activation.isActive = true;
+    await listener({ ...event, source: {} });
+    assert.equal(clicked, undefined);
+    frame.checkVisibility = () => false;
+    await listener(event);
+    assert.match(reply.error, /denied/);
+    frame.checkVisibility = () => true;
+    for (const name of ['../note.md', 'bad\\name.md', 'bad\nname.md']) {
+      await listener({ ...event, data: { ...event.data, name } });
+      assert.match(reply.error, /denied/);
+    }
+    await listener({ ...event, data: { ...event.data, body: new Uint8Array(16 * 1024 * 1024 + 1) } });
+    assert.match(reply.error, /denied/);
+    await listener(event);
+    assert.equal(reply.response.status, 204);
+    assert.equal(clicked.name, 'note.md');
+    assert.deepEqual([...new Uint8Array(await blob.arrayBuffer())], [0, 255, 128]);
+    dispose();
+    const deny = mountBridge(frame, () => {}, { download: false });
+    await listener(event);
+    assert.match(reply.error, /denied/);
+    deny();
+  } finally {
+    dispose();
+    delete globalThis.window;
+    delete globalThis.document;
+    if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor); else delete globalThis.navigator;
+    globalThis.URL = originalURL;
+    globalThis.setTimeout = originalTimeout;
+  }
+});
+
+test('guest download sends binary data and validates filenames before transport', async () => {
+  let receive, sent;
+  const parent = { postMessage: (message) => { sent = message; } };
+  const window = { parent, addEventListener: (_, callback) => { receive = callback; } };
+  vm.runInContext(readFileSync(new URL('./guest.js', import.meta.url), 'utf8'), guestContext(window));
+  await assert.rejects(window.aioPlugin.download('../bad.md', new Uint8Array()), /Invalid download/);
+  const pending = window.aioPlugin.download('note.md', new Uint8Array([0, 255]), 'text/markdown');
+  assert.equal(sent.kind, 'download');
+  assert.deepEqual([...sent.body], [0, 255]);
+  receive({ source: parent, data: { protocol: 'aio:plugin@2', kind: 'response', id: sent.id, response: { status: 204, headers: [], body: [] } } });
+  assert.equal((await pending).status, 204);
+});

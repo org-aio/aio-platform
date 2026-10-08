@@ -19,3 +19,5 @@
 窗口滚动和 `data-url-scroll="稳定名称"` 标记的内部容器同步为外层有界 `scroll` 参数，连续滚动只 replace。刷新或复制链接到新浏览器上下文后，在页面内容出现时恢复；要跨数据变化精确定位，使用稳定记录锚点，而不是承诺像素偏移永远精确。
 
 原生 hash 变化已经创建 iframe 的联合浏览器历史，宿主同步时只 replace，避免一次后退停在重复视图。逐节点滚动暂存于 iframe 的 history.state，保留已有对象型 router state；当前可分享位置仍写在外层 URL，重新打开不依赖这份本地历史。显式调用 aioPlugin.navigate 的导航由宿主创建历史节点。
+
+`aioPlugin.download(name, bytes, mime)` 让宿主下载浏览器内编辑产生的文件，不上传内容。要求当前用户手势、宿主焦点和可见 iframe，最大 16 MiB，拒绝带路径或控制字符的文件名。`mountBridge` 可用 `{download: false}` 禁止下载；不放宽 iframe sandbox/CSP。返回 204 表示已发起浏览器下载，不表示用户已经将文件保存到磁盘。

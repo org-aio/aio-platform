@@ -56,7 +56,18 @@
     pending.set(id, { resolve, reject, timer });
     window.parent.postMessage({ protocol: "aio:plugin@2", kind: "clipboard", id, text }, "*");
   });
+  // 下载由宿主执行，沙箱始终保持禁止直接下载和顶层导航。
+  const download = (name, body, mime = "application/octet-stream") => new Promise((resolve, reject) => {
+    if (pending.size >= 16 || typeof name !== "string" || !name.length || name.length > 255 || /[\\/\x00-\x1f]/.test(name) ||
+        !(body instanceof Uint8Array) || body.length > 16 * 1024 * 1024 || typeof mime !== "string" || mime.length > 200 || /[\r\n]/.test(mime)) {
+      return reject(new Error("Invalid download request"));
+    }
+    const id = createId();
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error("Download request timed out")); }, 5000);
+    pending.set(id, { resolve, reject, timer });
+    window.parent.postMessage({ protocol: "aio:plugin@2", kind: "download", id, name, mime, body }, "*");
+  });
   const navigate = (fragment, options) => window.aioNavigation.navigate(fragment, options);
   const onNavigationChange = listener => window.aioNavigation.onNavigationChange(listener);
-  Object.defineProperty(window, "aioPlugin", { value: Object.freeze({ request, json, copy, navigate, onNavigationChange }), writable: false, configurable: false });
+  Object.defineProperty(window, "aioPlugin", { value: Object.freeze({ request, json, copy, download, navigate, onNavigationChange }), writable: false, configurable: false });
 })();
