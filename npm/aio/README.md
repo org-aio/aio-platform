@@ -42,4 +42,6 @@ npx -y @zjarlin/aio tool list
 
 2026.9.18 起，`aio tool install <id> --version <version>` 自动将 npm 包内 `skills/<name>/` 安装到 `~/.agents/skills/<name>/`。`aio plugin init --kind cli` 默认生成使用技能；已有 CLI 使用 `--adopt` 接入时补齐缺失技能。卸载只清理 AIO 安装且内容未被用户修改的文件。
 
-维护者修正 npm 元数据后，可手动运行 `npm release` 并指定 `artifacts_run_id` 复用同版本构建。工作流验证五个平台已构建成功、产物未过期，且源码、前端、依赖和子模块均未变化；否则必须重新构建。
+`npm release` 由 main 或版本标签推送触发，发布任务使用既有 `npm` 环境的 `NPM_TOKEN`，遵循该环境的审核规则；构建任务不读取发布凭据。
+
+维护者修正 npm 元数据或发布工作流后，可手动运行 `npm release` 并指定 `artifacts_run_id` 复用同版本构建。允许变更仅限 `npm/aio/`、npm 发布工作流和独立设备发布工作流。工作流验证五个平台已构建成功、产物未过期，且源码、前端、依赖和子模块均未变化；否则必须重新构建。仅发布阶段失败的运行也可以复用已成功的构建。
