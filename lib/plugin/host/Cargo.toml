@@ -1,6 +1,6 @@
 [package]
 name = "az-plugin-host"
-version = "2026.10.7"
+version = "2026.10.9"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
@@ -18,7 +18,7 @@ az-plugin-contract = { path = "../contract", optional = true }
 az-plugin-runtime = { path = "../runtime", optional = true }
 semver = { version = "1", optional = true }
 getrandom = { version = "0.4.2", optional = true }
-axum = { version = "0.8.6", optional = true }
+axum = { version = "0.8.6", features = ["ws"], optional = true }
 dill = "0.15.0"
 dioxus = { version = "=0.7.9", default-features = false, features = ["macro", "html", "signals"], optional = true }
 dioxus-icons = { version = "0.1.0", default-features = false, optional = true }

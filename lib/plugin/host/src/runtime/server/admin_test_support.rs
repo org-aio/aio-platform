@@ -28,6 +28,11 @@ impl RuntimeState {
             .add::<crate::generated::worker::WorkerServiceImpl>()
             .build()
             .get_one::<dyn crate::generated::worker::WorkerService>()?;
+        let worker_webviews = dill::Catalog::builder()
+            .add_value(store.pool.clone())
+            .add::<crate::generated::worker_webview::WorkerWebviewServiceImpl>()
+            .build()
+            .get_one::<dyn crate::generated::worker_webview::WorkerWebviewService>()?;
         let personal_config = dill::Catalog::builder()
             .add_value(store.pool.clone())
             .add_value(super::components::load_keyring(
@@ -48,6 +53,7 @@ impl RuntimeState {
             personal_config,
             clipboard,
             workers,
+            worker_webviews,
             config: Arc::new(crate::configuration::HostConfig {
                 database_url: database.into(),
                 cache_root: cache.into(),

@@ -4,6 +4,7 @@ export interface Response { status: number; headers: Header[]; body: Uint8Array 
 declare global {
   interface Window {
     readonly aioPlugin: {
+      deviceView(input: { operation: "list" } | { operation: "open"; device: string; route?: string } | { operation: "close"; id: string }): Promise<unknown>;
       request(input: Request): Promise<Response>;
       json<T>(method: string, path: string, value?: unknown): Promise<T>;
       copy(text: string): Promise<Response>;

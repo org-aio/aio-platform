@@ -137,6 +137,34 @@ async fn validate(
     Ok(grant)
 }
 
+pub(in crate::runtime::server) async fn device_view_grant(
+    state: &RuntimeState,
+    session: &SessionContext,
+    token: &str,
+) -> Result<FrontendGrant, RuntimeError> {
+    let grant = validate(state, session, token).await?;
+    let bundle = state
+        .components()?
+        .bundle(Uuid::parse_str(&grant.source_id)?, &grant.tenant_id)
+        .await?;
+    let allowed = bundle
+        .manifest()
+        .plugin
+        .runtime
+        .process
+        .as_ref()
+        .is_some_and(|process| {
+            process
+                .worker_capabilities
+                .iter()
+                .any(|capability| capability == "codex.web")
+        });
+    if !allowed {
+        return Err(RuntimeError::forbidden("插件未获 Codex 设备视图授权"));
+    }
+    Ok(grant)
+}
+
 pub(super) async fn asset(
     State(state): State<RuntimeState>,
     Path((token, path)): Path<(String, String)>,
@@ -209,7 +237,23 @@ pub(super) async fn asset(
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
     );
-    headers.insert(header::CONTENT_SECURITY_POLICY,HeaderValue::from_str(&format!("sandbox allow-scripts allow-forms; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: {prefix}; connect-src {prefix} blob:; style-src 'unsafe-inline' blob: {prefix}; img-src data: blob: {prefix}; font-src data: {prefix}; object-src 'none'; frame-src 'none'; worker-src blob:; base-uri {prefix}; form-action 'none'; frame-ancestors 'self'"))?);
+    let frame_policy = if bundle
+        .manifest()
+        .plugin
+        .runtime
+        .process
+        .as_ref()
+        .is_some_and(|process| {
+            process
+                .worker_capabilities
+                .iter()
+                .any(|capability| capability == "codex.web")
+        }) {
+        format!("{prefix}__device_view/")
+    } else {
+        "'none'".into()
+    };
+    headers.insert(header::CONTENT_SECURITY_POLICY,HeaderValue::from_str(&format!("sandbox allow-scripts allow-forms; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: {prefix}; connect-src {prefix} blob:; style-src 'unsafe-inline' blob: {prefix}; img-src data: blob: {prefix}; font-src data: {prefix}; object-src 'none'; frame-src {frame_policy}; worker-src blob:; base-uri {prefix}; form-action 'none'; frame-ancestors 'self'"))?);
     Ok(response)
 }
 
@@ -367,9 +411,10 @@ mod tests {
         assert_eq!(
             scripts[0].text_contents(),
             format!(
-                "{}{}{}{}",
+                "{}{}{}{}{}",
                 az_plugin_runtime::FRONTEND_LIFECYCLE,
                 az_plugin_runtime::FRONTEND_WASM,
+                az_plugin_runtime::FRONTEND_NAVIGATION,
                 az_plugin_runtime::FRONTEND_GUEST,
                 include_str!("frontend_assets.js")
             )

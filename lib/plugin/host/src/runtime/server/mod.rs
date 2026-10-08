@@ -8,6 +8,7 @@ mod delivery;
 pub mod development;
 mod frontend_access;
 mod frontend_delivery;
+mod frontend_devices;
 mod frontend_document;
 mod frontend_model;
 mod frontend_package;
@@ -67,6 +68,7 @@ pub struct RuntimeState {
     pub(crate) personal_config: Arc<dyn crate::generated::personal_config::PersonalConfigService>,
     pub(crate) clipboard: Arc<dyn crate::generated::clipboard::ClipboardService>,
     pub(crate) workers: Arc<dyn crate::generated::worker::WorkerService>,
+    pub(crate) worker_webviews: Arc<dyn crate::generated::worker_webview::WorkerWebviewService>,
     activation_locks: Arc<Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>>,
     publication_slots: Arc<tokio::sync::Semaphore>,
     frontend: Arc<frontend_access::FrontendAccess>,
@@ -131,6 +133,11 @@ impl RuntimeState {
             .add::<crate::generated::worker::WorkerServiceImpl>()
             .build()
             .get_one::<dyn crate::generated::worker::WorkerService>()?;
+        let worker_webviews = dill::Catalog::builder()
+            .add_value(store.pool.clone())
+            .add::<crate::generated::worker_webview::WorkerWebviewServiceImpl>()
+            .build()
+            .get_one::<dyn crate::generated::worker_webview::WorkerWebviewService>()?;
         let keyring_path = config
             .component_storage
             .as_ref()
@@ -152,6 +159,7 @@ impl RuntimeState {
             personal_config,
             clipboard,
             workers,
+            worker_webviews,
             development: Arc::default(),
             store,
             repository,

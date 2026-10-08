@@ -21,3 +21,11 @@
 原生 hash 变化已经创建 iframe 的联合浏览器历史，宿主同步时只 replace，避免一次后退停在重复视图。逐节点滚动暂存于 iframe 的 history.state，保留已有对象型 router state；当前可分享位置仍写在外层 URL，重新打开不依赖这份本地历史。显式调用 aioPlugin.navigate 的导航由宿主创建历史节点。
 
 `aioPlugin.download(name, bytes, mime)` 让宿主下载浏览器内编辑产生的文件，不上传内容。要求当前用户手势、宿主焦点和可见 iframe，最大 16 MiB，拒绝带路径或控制字符的文件名。`mountBridge` 可用 `{download: false}` 禁止下载；不放宽 iframe sandbox/CSP。返回 204 表示已发起浏览器下载，不表示用户已经将文件保存到磁盘。
+
+## 配对设备视图
+
+Component v2 插件声明 `worker_capabilities=["codex.web"]` 后，可调用 `aioPlugin.deviceView({operation:"list"})` 读取本人设备，调用 `{operation:"open",device:"UUID",route:"/local/thread-id"}` 得到短期 `{id,src}`，以及 `{operation:"close",id}` 关闭视图。`route` 仅支持应用 pathname，不带查询、片段或凭据。
+
+将 `src` 放入 `sandbox="allow-scripts"` iframe。消息协议 `aio:device-view@1` 提供 ready、error 和 route 通知；接收方必须验证 `event.source` 是该 iframe。视图地址不是可分享链接，不得写入外层 URL；仅将设备 UUID 与应用 pathname 通过现有 `aioPlugin.navigate` 保存。设备凭据、账户、原生运行时和文件路径由设备保管。
+
+设备撤权、登录失效、插件停用/更新、30 分钟视图过期或连接中断要求重新建立视图，旧写请求不重放。其他插件和旧 PageDefinition 入口不能使用此接口。宿主通道与权限说明见 `lib/plugin/host/src/generated/worker_webview/README.md`。

@@ -98,6 +98,7 @@ pub fn router(state: RuntimeState) -> Router {
         .merge(super::navigation::router())
         .merge(super::tools::router())
         .merge(crate::generated::worker::controller::router())
+        .merge(crate::generated::worker_webview::controller::router())
         .merge(crate::generated::personal_config::controller::router(
             state.clone(),
         ))

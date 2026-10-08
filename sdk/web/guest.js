@@ -1,5 +1,13 @@
 (() => {
   "use strict";
+  const deviceRoot = document.currentScript?.dataset.root;
+  const deviceView = async (request) => {
+    if (!deviceRoot) throw new Error("宿主未提供设备视图通道");
+    const response = await window.fetch(new URL("__device_view", deviceRoot), { method: "POST", headers: { "content-type": "text/plain" }, body: JSON.stringify(request), credentials: "omit" });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    return result.data;
+  };
   const development = document.currentScript?.dataset.development === "true";
   const pending = new Map();
   const encoder = new TextEncoder();
@@ -69,5 +77,5 @@
   });
   const navigate = (fragment, options) => window.aioNavigation.navigate(fragment, options);
   const onNavigationChange = listener => window.aioNavigation.onNavigationChange(listener);
-  Object.defineProperty(window, "aioPlugin", { value: Object.freeze({ request, json, copy, download, navigate, onNavigationChange }), writable: false, configurable: false });
+  Object.defineProperty(window, "aioPlugin", { value: Object.freeze({ request, json, copy, download, navigate, onNavigationChange, deviceView }), writable: false, configurable: false });
 })();

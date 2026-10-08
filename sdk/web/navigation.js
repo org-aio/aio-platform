@@ -106,7 +106,10 @@
     if (typeof message.navigation === 'string' && (message.navigation === '' || message.navigation.startsWith('#')) && message.navigation.length <= 2048) {
       if (location.hash !== message.navigation) {
         restoredHash = message.navigation;
-        location.replace(message.navigation || '#');
+        // base 指向资产目录，片段必须相对当前文档解析，避免离开入口页面。
+        const target = new URL(location.href);
+        target.hash = message.navigation || '#';
+        location.replace(target.href);
         notify(message.navigation);
       }
       if (typeof message.scroll === 'string' && message.scroll.length <= 2048) {
