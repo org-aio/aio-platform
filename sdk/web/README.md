@@ -22,6 +22,10 @@
 
 `aioPlugin.download(name, bytes, mime)` 让宿主下载浏览器内编辑产生的文件，不上传内容。要求当前用户手势、宿主焦点和可见 iframe，最大 16 MiB，拒绝带路径或控制字符的文件名。`mountBridge` 可用 `{download: false}` 禁止下载；不放宽 iframe sandbox/CSP。返回 204 表示已发起浏览器下载，不表示用户已经将文件保存到磁盘。
 
+`aioPlugin.onFileDrop(listener)` 注册当前插件的文件拖入接收器，返回注销函数；插件内部或嵌套设备视图收到带 `Files` 的 `dragenter` 时调用 `aioPlugin.fileDrag()`。宿主以 `mountBridge` 的 `fileDrop` 回调确认页面激活、可见和当前挂载票据，短暂将 iframe 设为 inert 以接收真实 drop，随后恢复原实例。目录由真实来源的宿主读取，传给插件的是 File、目录名称、相对目录项和拖入坐标；不传原始绝对路径、目录句柄或宿主票据，也不修改沙箱。
+
+同一次拖入最多 4096 个文件/目录项、32 层相对路径，单文件最多 128 MiB、合计 512 MiB；保留空目录和分页读取结果。读取失败向当前接收器报告错误。挂载票据变化、重新注册、卸载或后续拖入使旧读取结果失效。宿主只读取用户实际拖入的对象，设备上传与保存仍由插件自己的协议负责。
+
 ## 配对设备视图
 
 Component v2 插件声明 `worker_capabilities=["codex.web"]` 后，可调用 `aioPlugin.deviceView({operation:"list"})` 读取本人设备，调用 `{operation:"open",device:"UUID",route:"/local/thread-id"}` 得到短期 `{id,src}`，以及 `{operation:"close",id}` 关闭视图。`route` 仅支持应用 pathname，不带查询、片段或凭据。

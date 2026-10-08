@@ -10,6 +10,7 @@
   };
   const development = document.currentScript?.dataset.development === "true";
   const pending = new Map();
+  let fileDrop;
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   const createId = () => {
@@ -24,6 +25,10 @@
   };
   window.addEventListener("message", (event) => {
     const message = event.data;
+    if (event.source === window.parent && message?.protocol === "aio:plugin@2" && message.kind === "file-drop" && message.id === fileDrop?.id) {
+      fileDrop.listener(message);
+      return;
+    }
     if (event.source !== window.parent || message?.protocol !== "aio:plugin@2" || message.kind !== "response") return;
     const call = pending.get(message.id);
     if (!call) return;
@@ -77,5 +82,19 @@
   });
   const navigate = (fragment, options) => window.aioNavigation.navigate(fragment, options);
   const onNavigationChange = listener => window.aioNavigation.onNavigationChange(listener);
-  Object.defineProperty(window, "aioPlugin", { value: Object.freeze({ request, json, copy, download, navigate, onNavigationChange, deviceView }), writable: false, configurable: false });
+  const onFileDrop = listener => {
+    if (typeof listener !== "function") { throw new TypeError("文件拖入监听器必须是函数"); }
+    const registration = { id: createId(), listener };
+    fileDrop = registration;
+    window.parent.postMessage({ protocol: "aio:plugin@2", kind: "file-drop-subscribe", id: registration.id, enabled: true }, "*");
+    return () => {
+      if (fileDrop !== registration) { return; }
+      fileDrop = undefined;
+      window.parent.postMessage({ protocol: "aio:plugin@2", kind: "file-drop-subscribe", id: registration.id, enabled: false }, "*");
+    };
+  };
+  const fileDrag = () => {
+    if (fileDrop) { window.parent.postMessage({ protocol: "aio:plugin@2", kind: "file-drag", id: fileDrop.id }, "*"); }
+  };
+  Object.defineProperty(window, "aioPlugin", { value: Object.freeze({ request, json, copy, download, navigate, onNavigationChange, deviceView, onFileDrop, fileDrag }), writable: false, configurable: false });
 })();
