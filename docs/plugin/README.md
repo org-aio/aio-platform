@@ -4,6 +4,8 @@ aio-platform 提供开发契约和 CLI，aio-idea 宿主负责租户组合、权
 
 插件配置入口与第三方服务 Key 管理见 [插件设置](settings.md)。
 
+局域网入口、凭据边界与断线回退见 [配对设备的局域网传输](device-transport.md)。
+
 ## 运行形态
 
 | 形态 | 适用能力 | 生命周期 |

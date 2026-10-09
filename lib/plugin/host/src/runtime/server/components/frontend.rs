@@ -167,6 +167,7 @@ pub(in crate::runtime::server) async fn device_view_grant(
 
 pub(super) async fn asset(
     State(state): State<RuntimeState>,
+    request_headers: HeaderMap,
     Path((token, path)): Path<(String, String)>,
 ) -> Result<Response, RuntimeError> {
     az_plugin_bundle::validate_relative_path(&path)?;
@@ -198,7 +199,7 @@ pub(super) async fn asset(
     };
     let prefix = format!(
         "{}/api/runtime/components/assets/{token}/",
-        state.frontend.origin
+        state.transport.request_origin(&request_headers)
     );
     let bytes = if path == grant.entry {
         render(
@@ -207,6 +208,7 @@ pub(super) async fn asset(
             &path,
             &token,
             state.config.development.is_some(),
+            &state.transport.lan_origins,
         )?
     } else {
         bytes.to_vec()
@@ -249,11 +251,24 @@ pub(super) async fn asset(
                 .iter()
                 .any(|capability| capability == "codex.web")
         }) {
-        format!("{prefix}__device_view/")
+        std::iter::once(format!("{prefix}__device_view/"))
+            .chain(state.transport.lan_origins.iter().map(|origin| {
+                format!("{origin}/api/runtime/components/assets/{token}/__device_view/")
+            }))
+            .collect::<Vec<_>>()
+            .join(" ")
     } else {
         "'none'".into()
     };
-    headers.insert(header::CONTENT_SECURITY_POLICY,HeaderValue::from_str(&format!("sandbox allow-scripts allow-forms; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: {prefix}; connect-src {prefix} blob:; style-src 'unsafe-inline' blob: {prefix}; img-src data: blob: {prefix}; font-src data: {prefix}; object-src 'none'; frame-src {frame_policy}; worker-src blob:; base-uri {prefix}; form-action 'none'; frame-ancestors 'self'"))?);
+    let probes = state
+        .transport
+        .lan_origins
+        .iter()
+        .map(|origin| format!("{origin}/api/runtime/transport"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let view_connections = frame_policy.replace("'none'", "");
+    headers.insert(header::CONTENT_SECURITY_POLICY,HeaderValue::from_str(&format!("sandbox allow-scripts allow-forms; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: {prefix}; connect-src {prefix} {view_connections} {probes} blob:; style-src 'unsafe-inline' blob: {prefix}; img-src data: blob: {prefix}; font-src data: {prefix}; object-src 'none'; frame-src {frame_policy}; worker-src blob:; base-uri {prefix}; form-action 'none'; frame-ancestors 'self'"))?);
     Ok(response)
 }
 
@@ -263,6 +278,7 @@ fn render(
     entry: &str,
     token: &str,
     development: bool,
+    lan_origins: &[String],
 ) -> Result<Vec<u8>> {
     let document = kuchikiki::parse_html()
         .one(std::str::from_utf8(bytes)?)
@@ -317,6 +333,10 @@ fn render(
         .attributes
         .borrow_mut()
         .insert("data-root", prefix.to_owned());
+    script
+        .attributes
+        .borrow_mut()
+        .insert("data-lan-origins", serde_json::to_string(lan_origins)?);
     script
         .attributes
         .borrow_mut()
@@ -399,6 +419,7 @@ mod tests {
             "index.html",
             "ticket",
             false,
+            &["https://lan.example:3443".into()],
         )?;
         let document = kuchikiki::parse_html()
             .one(String::from_utf8(output)?)
@@ -408,6 +429,13 @@ mod tests {
             .map_err(|_| anyhow::anyhow!("script selector failed"))?
             .collect::<Vec<_>>();
         assert_eq!(scripts.len(), 3);
+        assert!(
+            scripts[0]
+                .attributes
+                .borrow()
+                .get("data-lan-origins")
+                .is_some_and(|value| value.contains("https://lan.example:3443"))
+        );
         assert_eq!(
             scripts[0].text_contents(),
             format!(

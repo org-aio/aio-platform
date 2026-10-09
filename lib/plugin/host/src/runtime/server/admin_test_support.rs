@@ -50,6 +50,7 @@ impl RuntimeState {
             .build()
             .get_one::<dyn crate::generated::clipboard::ClipboardService>()?;
         Ok(Self {
+            transport: super::transport::TransportOrigins::from_env(origin)?,
             personal_config,
             clipboard,
             workers,

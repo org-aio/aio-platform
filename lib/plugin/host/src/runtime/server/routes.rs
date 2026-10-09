@@ -33,6 +33,10 @@ use crate::runtime::{
 pub fn router(state: RuntimeState) -> Router {
     Router::new()
         .route(
+            "/api/runtime/transport",
+            get(super::transport::discover).options(super::transport::preflight),
+        )
+        .route(
             "/api/runtime/{*unknown}",
             any(|| async { StatusCode::NOT_FOUND }),
         )

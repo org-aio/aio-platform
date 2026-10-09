@@ -42,6 +42,7 @@ mod supervisor;
 #[cfg(feature = "test-support")]
 pub mod test_support;
 mod tools;
+pub(crate) mod transport;
 mod wasm;
 
 use std::{
@@ -61,6 +62,7 @@ pub use supervisor::run as run_supervisor;
 #[derive(Clone)]
 pub struct RuntimeState {
     pub config: Arc<crate::configuration::HostConfig>,
+    pub(crate) transport: transport::TransportOrigins,
     development: Arc<development::DevelopmentState>,
     pub store: Arc<store::PluginStore>,
     pub repository: Arc<repository::RepositoryInstaller>,
@@ -92,6 +94,7 @@ impl RuntimeState {
         config: crate::configuration::HostConfig,
         identity: Arc<dyn crate::identity::IdentityProvider>,
     ) -> Result<Self> {
+        let transport = transport::TransportOrigins::from_env(&config.public_origin)?;
         let pool = PgPoolOptions::new()
             .max_connections(8)
             .connect(&config.database_url)
@@ -156,6 +159,7 @@ impl RuntimeState {
             .build()
             .get_one::<dyn crate::generated::clipboard::ClipboardService>()?;
         let state = Self {
+            transport,
             personal_config,
             clipboard,
             workers,
