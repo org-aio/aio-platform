@@ -49,6 +49,32 @@ async fn machine_identity_pairing_and_deletion() -> Result<()> {
     let first = state.workers.pair(request.clone()).await?;
     state.workers.approve(&session, &first.code).await?;
     let identity = state.workers.identity(&first.token).await?;
+    state
+        .workers
+        .note(&session, &first.device_id, "办公室 Mac mini".into())
+        .await?;
+    assert_eq!(
+        state.workers.list(&session).await?[0].note.as_deref(),
+        Some("办公室 Mac mini")
+    );
+    let foreign_user = SessionContext {
+        user_id: "other".into(),
+        ..session.clone()
+    };
+    let foreign_tenant = SessionContext {
+        tenant_id: "other".into(),
+        ..session.clone()
+    };
+    for outsider in [&foreign_user, &foreign_tenant] {
+        assert!(
+            state
+                .workers
+                .note(outsider, &first.device_id, "覆盖".into())
+                .await
+                .is_err()
+        );
+    }
+
     for _ in 0..2 {
         state
             .workers
@@ -73,6 +99,13 @@ async fn machine_identity_pairing_and_deletion() -> Result<()> {
     let second = state.workers.pair(request.clone()).await?;
     state.workers.approve(&session, &second.code).await?;
     let devices = state.workers.list(&session).await?;
+    assert_eq!(devices[0].note.as_deref(), Some("办公室 Mac mini"));
+    state
+        .workers
+        .note(&session, &second.device_id, " ".into())
+        .await?;
+    assert!(state.workers.list(&session).await?[0].note.is_none());
+
     assert_eq!(devices.len(), 1);
     assert_eq!(devices[0].id, second.device_id);
     assert!(state.workers.identity(&first.token).await.is_err());

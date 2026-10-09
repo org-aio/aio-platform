@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS worker_devices (
 );
 CREATE INDEX IF NOT EXISTS worker_device_owners ON worker_devices(tenant_id,user_id);
 ALTER TABLE worker_devices ADD COLUMN IF NOT EXISTS machine_id TEXT;
+ALTER TABLE worker_devices ADD COLUMN IF NOT EXISTS note TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS worker_device_machine ON worker_devices(tenant_id,user_id,machine_id) WHERE state='active' AND machine_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS worker_tasks (
  id TEXT PRIMARY KEY, worker_id TEXT NOT NULL REFERENCES worker_devices(id),

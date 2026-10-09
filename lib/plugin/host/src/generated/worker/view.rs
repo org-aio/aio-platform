@@ -2,6 +2,7 @@ use super::model::Worker;
 use az_ui_components::{
     button::{Button, ButtonSize, ButtonVariant},
     dialog::{Dialog, DialogTitle},
+    input::Input,
 };
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{RefreshCw, Trash2, X};
@@ -63,6 +64,8 @@ pub(crate) fn WorkerPanel(pairing: Signal<Option<String>>, on_close: EventHandle
     let mut error = use_signal(|| None::<String>);
     let mut busy = use_signal(|| false);
     let mut revoke = use_signal(|| None::<Worker>);
+    let mut editing = use_signal(|| None::<Worker>);
+    let mut note_value = use_signal(String::new);
     let code = pairing;
     let mut notice = use_signal(|| None::<String>);
     let mut copied = use_signal(|| None::<String>);
@@ -168,16 +171,39 @@ pub(crate) fn WorkerPanel(pairing: Signal<Option<String>>, on_close: EventHandle
                         for worker in items.iter().cloned(){
                             section{key:"{worker.id}",class:"flex flex-wrap items-center justify-between gap-2 border-b pb-3",
                                 div{class:"grid gap-2",
+                                    if let Some(note)=worker.note.as_ref(){strong{class:"break-all","{note}"}}
                                     strong{class:"break-all","{worker.label} · " if worker.status=="online"{"在线"}else{"离线"}}
                                     small{class:"break-all text-muted-foreground","{worker.platform} · {worker.id}"}
                                 }
                                 if worker.status!="revoked"{
+                                    Button{variant:ButtonVariant::Outline,disabled:busy(),onclick:{let worker=worker.clone();move |_|{error.set(None);note_value.set(worker.note.clone().unwrap_or_default());editing.set(Some(worker.clone()));}},"备注"}
                                     Button{variant:ButtonVariant::Outline,disabled:busy(),onclick:{let worker=worker.clone();move |_|revoke.set(Some(worker.clone()))},Trash2{}"删除设备"}
                                 }
                             }
                         }
                     },
                     Some(Err(e))=>rsx!{p{role:"alert","{e}"}},None=>rsx!{p{"正在加载设备…"}}
+                }
+            }
+        }
+        if let Some(worker)=editing(){
+            Dialog{open:true,on_open_change:move|open:bool|if !open && !busy(){editing.set(None)},
+                DialogTitle{"设备备注"}
+                p{class:"text-sm text-muted-foreground","{worker.label} · {worker.platform}"}
+                label{r#for:"device-note","备注名称"}
+                Input{id:"device-note",maxlength:"120",disabled:busy(),value:note_value(),placeholder:"例如：办公室 Mac mini",oninput:move|event:FormEvent|note_value.set(event.value())}
+                p{class:"text-sm text-muted-foreground","最多 120 个字符，留空可清除备注。"}
+                if let Some(message)=error(){p{role:"alert","{message}"}}
+                div{class:"flex justify-end gap-2",
+                    Button{variant:ButtonVariant::Outline,disabled:busy(),onclick:move |_|editing.set(None),"取消"}
+                    Button{disabled:busy(),onclick:move |_|{let id=worker.id.clone();busy.set(true);error.set(None);spawn(async move{
+                        let body=super::model::DeviceNote{note:note_value()};
+                        match request::<()>("PUT",&format!("/api/runtime/workers/{id}/note"),Some(&body)).await{
+                            Ok(())=>{editing.set(None);notice.set(Some("设备备注已保存".into()));workers.restart();},
+                            Err(message)=>error.set(Some(message)),
+                        }
+                        busy.set(false);
+                    });},if busy(){"保存中…"}else{"保存"}}
                 }
             }
         }

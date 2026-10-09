@@ -50,7 +50,7 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
     }
 
     async fn devices(&self, owner: &ViewOwner) -> Result<Vec<Worker>, RuntimeError> {
-        let rows = sqlx::query("SELECT id,label,platform,capabilities FROM worker_devices WHERE tenant_id=$1 AND user_id=$2 AND state='active' AND capabilities ? 'codex.web' ORDER BY created_at DESC LIMIT 100")
+        let rows = sqlx::query("SELECT id,label,note,platform,capabilities FROM worker_devices WHERE tenant_id=$1 AND user_id=$2 AND state='active' AND capabilities ? 'codex.web' ORDER BY created_at DESC LIMIT 100")
             .bind(&owner.tenant).bind(&owner.user).fetch_all(&self.pool).await?;
         let peers = self
             .peers
@@ -63,6 +63,7 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
                 Ok(Worker {
                     id,
                     label: row.try_get("label")?,
+                    note: row.try_get("note")?,
                     platform: row.try_get("platform")?,
                     capabilities: serde_json::from_value(row.try_get("capabilities")?)?,
                     status: if online { "online" } else { "offline" }.into(),

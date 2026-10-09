@@ -79,6 +79,10 @@ impl WorkerService for WorkerServiceImpl {
         let machine_id: Option<String> = pending.try_get("machine_id")?;
         // 按账号和稳定本机身份替换凭据；同名设备不参与去重，旧任务停止执行。
         if let Some(machine_id) = machine_id {
+            // 同一账号重新配对同一机器时保留用户备注，不依据主机名猜测。
+            sqlx::query("UPDATE worker_devices SET note=(SELECT note FROM worker_devices WHERE tenant_id=$1 AND user_id=$2 AND machine_id=$3 AND state='active' LIMIT 1) WHERE id=$4")
+                .bind(&session.tenant_id).bind(&session.user_id).bind(&machine_id).bind(&id)
+                .execute(&mut *tx).await?;
             let stale=sqlx::query_scalar::<_,String>("UPDATE worker_devices SET state='revoked' WHERE tenant_id=$1 AND user_id=$2 AND state='active' AND machine_id=$3 RETURNING id")
                 .bind(&session.tenant_id).bind(&session.user_id).bind(machine_id).fetch_all(&mut *tx).await?;
             sqlx::query("UPDATE worker_tasks SET state='cancelled',lease=NULL,lease_until=NULL,completed_at=now(),error='设备重新配对' WHERE worker_id=ANY($1) AND state IN ('queued','running')")
@@ -112,6 +116,14 @@ impl WorkerService for WorkerServiceImpl {
         let rows=sqlx::query("SELECT *,CASE WHEN last_seen>now()-interval '90 seconds' THEN 'online' ELSE 'offline' END AS status,(extract(epoch FROM last_seen)*1000)::bigint AS last_seen_ms FROM worker_devices WHERE tenant_id=$1 AND user_id=$2 AND state='active' ORDER BY created_at DESC LIMIT 100")
             .bind(&session.tenant_id).bind(&session.user_id).fetch_all(&self.pool).await?;
         rows.into_iter().map(worker).collect()
+    }
+    async fn note(&self, session: &SessionContext, id: &str, note: String) -> Result<()> {
+        let note = validate_device_note(&note)?;
+        let updated = sqlx::query("UPDATE worker_devices SET note=NULLIF($4,'') WHERE id=$1 AND tenant_id=$2 AND user_id=$3 AND state='active'")
+            .bind(id).bind(&session.tenant_id).bind(&session.user_id).bind(note)
+            .execute(&self.pool).await?.rows_affected();
+        ensure!(updated == 1, "设备不存在或无权编辑");
+        Ok(())
     }
     async fn revoke(&self, session: &SessionContext, id: &str) -> Result<()> {
         let mut tx = self.pool.begin().await?;

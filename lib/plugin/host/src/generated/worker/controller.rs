@@ -20,6 +20,7 @@ pub(crate) fn router() -> Router<RuntimeState> {
         )
         .route("/api/runtime/workers", get(list))
         .route("/api/runtime/workers/{id}", delete(revoke))
+        .route("/api/runtime/workers/{id}/note", put(note))
         .route("/api/runtime/workers/{id}/desktop", put(desktop))
         .route("/api/runtime/workers/tasks", get(tasks).post(enqueue))
         .route("/api/runtime/workers/tasks/{id}", get(task))
@@ -158,6 +159,18 @@ async fn list(
 ) -> Result<Json<RuntimeResponse<Vec<Worker>>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
     Ok(response(state.workers.list(&session).await?))
+}
+async fn note(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(request): Json<DeviceNote>,
+) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
+    let session = authenticate(&state, &headers).await?;
+    super::util::validate_device_note(&request.note)
+        .map_err(|error| RuntimeError::bad_request(error.to_string()))?;
+    state.workers.note(&session, &id, request.note).await?;
+    Ok(response(()))
 }
 async fn revoke(
     State(state): State<RuntimeState>,
