@@ -239,7 +239,7 @@ pub(super) async fn asset(
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
     );
-    let frame_policy = if bundle
+    let device_views = bundle
         .manifest()
         .plugin
         .runtime
@@ -250,26 +250,52 @@ pub(super) async fn asset(
                 .worker_capabilities
                 .iter()
                 .any(|capability| capability == "codex.web")
-        }) {
-        std::iter::once(format!("{prefix}__device_view/"))
-            .chain(state.transport.lan_origins.iter().map(|origin| {
-                format!("{origin}/api/runtime/components/assets/{token}/__device_view/")
+        });
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_str(&content_policy(
+            &prefix,
+            &token,
+            device_views,
+            &state.transport.lan_origins,
+        ))?,
+    );
+    Ok(response)
+}
+
+fn content_policy(prefix: &str, token: &str, device_views: bool, lan_origins: &[String]) -> String {
+    let view_roots = if device_views {
+        std::iter::once(format!("{prefix}__device_view"))
+            .chain(lan_origins.iter().map(|origin| {
+                format!("{origin}/api/runtime/components/assets/{token}/__device_view")
             }))
             .collect::<Vec<_>>()
-            .join(" ")
     } else {
-        "'none'".into()
+        Vec::new()
     };
-    let probes = state
-        .transport
-        .lan_origins
+    let frame_policy = if view_roots.is_empty() {
+        "'none'".into()
+    } else {
+        view_roots
+            .iter()
+            .map(|root| format!("{root}/"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    // CSP 的目录规则不包含无尾斜杠的 POST 入口，连接须分别允许入口与子路径。
+    let view_connections = view_roots
+        .iter()
+        .flat_map(|root| [root.clone(), format!("{root}/")])
+        .collect::<Vec<_>>()
+        .join(" ");
+    let probes = lan_origins
         .iter()
         .map(|origin| format!("{origin}/api/runtime/transport"))
         .collect::<Vec<_>>()
         .join(" ");
-    let view_connections = frame_policy.replace("'none'", "");
-    headers.insert(header::CONTENT_SECURITY_POLICY,HeaderValue::from_str(&format!("sandbox allow-scripts allow-forms; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: {prefix}; connect-src {prefix} {view_connections} {probes} blob:; style-src 'unsafe-inline' blob: {prefix}; img-src data: blob: {prefix}; font-src data: {prefix}; object-src 'none'; frame-src {frame_policy}; worker-src blob:; base-uri {prefix}; form-action 'none'; frame-ancestors 'self'"))?);
-    Ok(response)
+    format!(
+        "sandbox allow-scripts allow-forms; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: {prefix}; connect-src {prefix} {view_connections} {probes} blob:; style-src 'unsafe-inline' blob: {prefix}; img-src data: blob: {prefix}; font-src data: {prefix}; object-src 'none'; frame-src {frame_policy}; worker-src blob:; base-uri {prefix}; form-action 'none'; frame-ancestors 'self'"
+    )
 }
 
 fn render(
@@ -410,6 +436,47 @@ pub(super) async fn renew(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_view_policy_allows_ticket_scoped_post_and_subpaths() {
+        let policy = content_policy(
+            "https://aio.test/api/runtime/components/assets/ticket/",
+            "ticket",
+            true,
+            &["https://lan.example:3443".into()],
+        );
+        let directives = policy
+            .split(';')
+            .map(str::trim)
+            .filter_map(|directive| directive.split_once(' '))
+            .collect::<BTreeMap<_, _>>();
+        let connections = directives["connect-src"]
+            .split_whitespace()
+            .collect::<Vec<_>>();
+        let frames = directives["frame-src"]
+            .split_whitespace()
+            .collect::<Vec<_>>();
+        let root = "https://lan.example:3443/api/runtime/components/assets/ticket/__device_view";
+        assert!(connections.contains(&root));
+        assert!(connections.contains(&format!("{root}/").as_str()));
+        assert!(frames.contains(&format!("{root}/").as_str()));
+        assert!(!frames.contains(&root));
+        assert!(!connections.contains(&"https://lan.example:3443"));
+        assert!(!frames.contains(&"https://lan.example:3443"));
+    }
+
+    #[test]
+    fn plugin_without_codex_capability_cannot_connect_to_device_views() {
+        let policy = content_policy(
+            "https://aio.test/api/runtime/components/assets/ticket/",
+            "ticket",
+            false,
+            &["https://lan.example:3443".into()],
+        );
+        assert!(!policy.contains("__device_view"));
+        assert!(policy.contains("frame-src 'none'"));
+        assert!(policy.contains("https://lan.example:3443/api/runtime/transport"));
+    }
 
     #[test]
     fn installs_shared_loaders_before_plugin_scripts() -> Result<()> {
