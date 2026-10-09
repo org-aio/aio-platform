@@ -29,7 +29,7 @@ pub(crate) fn router() -> Router<RuntimeState> {
         .route("/api/runtime/workers/webviews/channel", get(worker_channel))
         .route(
             "/api/runtime/components/assets/{token}/__device_view",
-            post(view_request),
+            post(view_request).options(crate::runtime::server::transport::preflight),
         )
         .route(
             "/api/runtime/components/assets/{token}/__device_view/{id}/__channel",
@@ -37,7 +37,7 @@ pub(crate) fn router() -> Router<RuntimeState> {
         )
         .route(
             "/api/runtime/components/assets/{token}/__device_view/{id}/{*path}",
-            get(asset),
+            get(asset).options(crate::runtime::server::transport::preflight),
         )
 }
 
@@ -56,6 +56,7 @@ fn response(value: Value) -> Response {
 async fn view_request(
     State(state): State<RuntimeState>,
     Path(token): Path<String>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, RuntimeError> {
     let owner = state.device_view_owner(&token).await?;
@@ -69,7 +70,7 @@ async fn view_request(
             let id = state.worker_webviews.create(&owner, &device, route).await?;
             let mut src = reqwest::Url::parse(&format!(
                 "{}/api/runtime/components/assets/{token}/__device_view/{id}/index.html",
-                state.config.public_origin.trim_end_matches('/')
+                state.transport.request_origin(&headers)
             ))?;
             src.query_pairs_mut().append_pair("initialRoute", route);
             let src = src.to_string();
@@ -163,7 +164,7 @@ async fn browser_channel(
         .get(header::ORIGIN)
         .and_then(|value| value.to_str().ok());
     if !matches!(origin, Some("null"))
-        && origin != Some(state.config.public_origin.trim_end_matches('/'))
+        && !origin.is_some_and(|value| state.transport.accepts(value))
     {
         return Err(RuntimeError::forbidden("网页通道来源无效"));
     }
@@ -219,6 +220,7 @@ async fn browser_socket(
 async fn asset(
     State(state): State<RuntimeState>,
     Path((token, id, path)): Path<(String, String, String)>,
+    request_headers: HeaderMap,
 ) -> Result<Response, RuntimeError> {
     let owner = state.device_view_owner(&token).await?;
     let asset = state.worker_webviews.asset(&owner, &id, &path).await?;
@@ -246,7 +248,7 @@ async fn asset(
         .ok_or_else(|| RuntimeError::bad_request("资源类型缺失"))?;
     let prefix = format!(
         "{}/api/runtime/components/assets/{token}/__device_view/{id}/",
-        state.config.public_origin.trim_end_matches('/')
+        state.transport.request_origin(&request_headers)
     );
     let websocket_prefix = prefix
         .replacen("https:", "wss:", 1)

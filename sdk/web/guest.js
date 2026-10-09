@@ -1,9 +1,43 @@
 (() => {
   "use strict";
   const deviceRoot = document.currentScript?.dataset.root;
-  const deviceView = async (request) => {
+  const lanOrigins = JSON.parse(document.currentScript?.dataset.lanOrigins || "[]");
+  let selectedRoot;
+  let checked = 0;
+  let selecting;
+  const blockedOrigins = new Map();
+  const deviceTransport = async () => {
     if (!deviceRoot) throw new Error("宿主未提供设备视图通道");
-    const response = await window.fetch(new URL("__device_view", deviceRoot), { method: "POST", headers: { "content-type": "text/plain" }, body: JSON.stringify(request), credentials: "omit" });
+    if (selectedRoot && Date.now() - checked < 30000) return selectedRoot;
+    if (selecting) return selecting;
+    selecting = (async () => {
+      const canonical = new URL(deviceRoot);
+      selectedRoot = canonical;
+      // 候选由宿主注入；只读探测不发送 Cookie 或设备票据。
+      for (const candidate of lanOrigins) {
+        if ((blockedOrigins.get(candidate) || 0) > Date.now()) continue;
+        try {
+          const origin = new URL(candidate);
+          if (origin.protocol !== "https:" || origin.origin !== candidate) continue;
+          const probe = await fetch(new URL("/api/runtime/transport", origin), { credentials: "omit", redirect: "error", cache: "no-store", signal: AbortSignal.timeout(1800) });
+          const offer = (await probe.json()).data;
+          if (!probe.ok || offer.public_origin !== canonical.origin || !offer.lan_origins.includes(candidate)) continue;
+          selectedRoot = new URL(canonical.pathname, origin);
+          break;
+        } catch (_) {}
+      }
+      checked = Date.now();
+      return selectedRoot;
+    })().finally(() => { selecting = null; });
+    return selecting;
+  };
+  const deviceView = async (request) => {
+    const root = await deviceTransport();
+    const response = await window.fetch(new URL("__device_view", root), { method: "POST", headers: { "content-type": "text/plain" }, body: JSON.stringify(request), credentials: "omit", redirect: "error", signal: AbortSignal.timeout(35000) }).catch(error => {
+      // 不重放已提交的操作；下次连接重新探测入口。
+      if (root.origin !== new URL(deviceRoot).origin) blockedOrigins.set(root.origin, Date.now() + 30000);
+      selectedRoot = null; checked = 0; throw error;
+    });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
     return result.data;
