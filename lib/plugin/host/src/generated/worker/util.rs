@@ -201,6 +201,7 @@ pub(super) fn worker(row: sqlx::postgres::PgRow) -> Result<Worker> {
     Ok(Worker {
         id: row.try_get("id")?,
         label: row.try_get("label")?,
+        note: row.try_get("note")?,
         platform: row.try_get("platform")?,
         capabilities: serde_json::from_value(row.try_get("capabilities")?)?,
         status: row.try_get("status")?,
@@ -345,4 +346,31 @@ pub(super) fn validate_clipboard_input(input: &serde_json::Value) -> Result<()> 
             .ok_or_else(|| anyhow::anyhow!("剪切板条目缺失"))?,
     )?;
     Ok(())
+}
+
+/// 备注按字符长度校验，拒绝控制字符，空值用于清除备注。
+pub(super) fn validate_device_note(value: &str) -> Result<String> {
+    let note = value.trim();
+    ensure!(note.chars().count() <= 120, "设备备注最多 120 个字符");
+    ensure!(
+        !note.chars().any(char::is_control),
+        "设备备注不能包含控制字符"
+    );
+    Ok(note.to_owned())
+}
+
+#[cfg(test)]
+mod note_tests {
+    use super::*;
+    #[test]
+    fn notes_support_chinese_clear_and_reject_invalid_content() -> Result<()> {
+        assert_eq!(
+            validate_device_note("  办公室 Mac mini  ")?,
+            "办公室 Mac mini"
+        );
+        assert_eq!(validate_device_note("  ")?, "");
+        assert!(validate_device_note(&"中".repeat(121)).is_err());
+        assert!(validate_device_note("电脑\n名称").is_err());
+        Ok(())
+    }
 }

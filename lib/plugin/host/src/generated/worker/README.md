@@ -56,3 +56,7 @@ worker 配对复用 AIO 当前登录账号、工作区和成员有效性。设�
 - 变更轮询 `GET /api/runtime/clipboard/changes?after=N&wait=25` 在版本变化或超时后返回最新序号，与个人配置同步的语义一致。
 
 聚焦回归：`AIO_TEST_DATABASE_URL=... cargo test -p az-plugin-host --features server clipboard -- --include-ignored`，覆盖通道开通、设备鉴权、文本与二进制往返、类型与大小校验、分页、跨用户隔离和撤销。
+
+## 设备备注
+
+账号菜单“我的设备”点击“备注”打开编辑弹窗，保存到 PostgreSQL 的 `worker_devices.note`，留空清除。`PUT /api/runtime/workers/{id}/note` 接受 `{"note":"办公室 Mac mini"}`，只允许当前租户中设备所属用户编辑，最多 120 个字符且不接受控制字符。备注独立于主机名，并在同一稳定机器身份重新配对时保留；设备和剪切板清单返回 `note`。

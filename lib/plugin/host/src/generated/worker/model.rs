@@ -18,9 +18,17 @@ pub struct Pairing {
     pub token: String,
     pub expires_at: i64,
 }
+/// 用户维护的备注不改变设备自身名称，可清空。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceNote {
+    pub note: String,
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Worker {
     pub id: String,
+    #[serde(default)]
+    pub note: Option<String>,
     pub label: String,
     pub platform: String,
     pub capabilities: Vec<String>,

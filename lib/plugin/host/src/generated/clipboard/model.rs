@@ -59,6 +59,8 @@ pub struct ClipHead {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ClipboardDevice {
     pub id: String,
+    #[serde(default)]
+    pub note: Option<String>,
     pub label: String,
     pub platform: String,
     pub enabled: bool,

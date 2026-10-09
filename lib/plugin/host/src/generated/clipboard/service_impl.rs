@@ -104,7 +104,7 @@ impl ClipboardService for ClipboardServiceImpl {
         util::item(&row)
     }
     async fn devices(&self, owner: &Owner) -> Result<Vec<ClipboardDevice>, RuntimeError> {
-        let rows=sqlx::query("SELECT id,label,platform,capabilities,last_seen,(extract(epoch FROM last_seen)*1000)::bigint AS last_ms FROM worker_devices WHERE tenant_id=$1 AND user_id=$2 AND state='active' ORDER BY created_at DESC LIMIT 100").bind(&owner.tenant).bind(&owner.user).fetch_all(&self.pool).await?;
+        let rows=sqlx::query("SELECT id,label,note,platform,capabilities,last_seen,(extract(epoch FROM last_seen)*1000)::bigint AS last_ms FROM worker_devices WHERE tenant_id=$1 AND user_id=$2 AND state='active' ORDER BY created_at DESC LIMIT 100").bind(&owner.tenant).bind(&owner.user).fetch_all(&self.pool).await?;
         rows.iter()
             .map(|row| {
                 let capabilities: Vec<String> =
@@ -112,6 +112,7 @@ impl ClipboardService for ClipboardServiceImpl {
                 Ok(ClipboardDevice {
                     id: row.try_get("id")?,
                     label: row.try_get("label")?,
+                    note: row.try_get("note")?,
                     platform: row.try_get("platform")?,
                     enabled: capabilities.iter().any(|c| c == "clipboard.sync"),
                     last_seen: row.try_get("last_ms")?,
