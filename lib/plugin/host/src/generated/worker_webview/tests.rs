@@ -122,6 +122,64 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
             .and_then(|frame| frame.get("kind").cloned()),
         Some(json!("frame"))
     );
+    // 原版 Renderer 初始化会连续发送超过队列容量的消息，必须完整、按序交付。
+    let burst_service = service.clone();
+    let burst_device = device.id.clone();
+    let burst_generation = generation.clone();
+    let burst_id = id.clone();
+    let burst = tokio::spawn(async move {
+        for index in 0..96 {
+            burst_service
+                .receive(
+                    &burst_device,
+                    &burst_generation,
+                    json!({"kind":"frame","sessionId":burst_id,"index":index}),
+                )
+                .await
+                .map_err(|_| anyhow::anyhow!("初始化消息 {index} 未交付"))?;
+        }
+        anyhow::Ok(())
+    });
+    for index in 0..96 {
+        let frame = tokio::time::timeout(Duration::from_secs(2), browser.recv())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("初始化通道提前关闭"))?;
+        assert_eq!(frame["index"], index);
+    }
+    burst.await??;
+
+    // 一个网页关闭后，设备通道仍应服务其他挂载和资源请求。
+    let other_owner = ViewOwner {
+        mount: "mount2".into(),
+        ..owner.clone()
+    };
+    let other_id = service
+        .create(&other_owner, &device.id, "/")
+        .await
+        .map_err(|_| anyhow::anyhow!("第二个视图创建失败"))?;
+    assert_eq!(
+        commands.recv().await,
+        Some(json!({"kind":"open","sessionId":other_id,"route":"/"}))
+    );
+    let other_browser = service
+        .attach(&other_owner, &other_id)
+        .await
+        .map_err(|_| anyhow::anyhow!("第二个视图连接失败"))?;
+    drop(other_browser);
+    service
+        .receive(
+            &device.id,
+            &generation,
+            json!({"kind":"frame","sessionId":other_id,"frame":{"kind":"native-message","payload":[]}}),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("单一网页关闭中断了设备通道"))?;
+    assert!(service.authorize(&other_owner, &other_id).await.is_err());
+    assert!(service.authorize(&owner, &id).await.is_ok());
+    assert_eq!(
+        commands.recv().await,
+        Some(json!({"kind":"close","sessionId":other_id}))
+    );
     let copy = service.clone();
     let request_owner = owner.clone();
     let request_id = id.clone();

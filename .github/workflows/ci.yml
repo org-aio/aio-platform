@@ -8,6 +8,19 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-bookworm
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: channel-test
+          POSTGRES_DB: channel_test
+        ports: [5432:5432]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -25,6 +38,10 @@ jobs:
       - run: node scripts/check-boundaries.mjs
       - run: node --test sdk/web/bridge.test.mjs sdk/web/file-drop.test.mjs sdk/web/device-transport.test.mjs cli/src/tools/release.test.cjs
       - run: cargo test --workspace
+      - name: 验证设备视图消息、资源及撤权
+        run: cargo test -p az-plugin-host --features server webview_channel_roundtrip_isolation_and_revocation -- --ignored
+        env:
+          AIO_TEST_DATABASE_URL: postgresql://postgres:channel-test@127.0.0.1:5432/channel_test
       - run: cargo build --manifest-path lib/plugin/runtime/tests/fixture/Cargo.toml --locked --release --target wasm32-wasip2 --target-dir target/fixture/healthy
       - run: cargo build --manifest-path lib/plugin/runtime/tests/fixture/Cargo.toml --locked --release --target wasm32-wasip2 --features unhealthy --target-dir target/fixture/unhealthy
       - run: cargo test -p az-plugin-runtime --test release -- --ignored

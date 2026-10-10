@@ -297,31 +297,45 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
         let id = frame
             .get("sessionId")
             .and_then(Value::as_str)
-            .ok_or_else(|| RuntimeError::bad_request("视图 ID 缺失"))?;
-        let mut views = self
-            .views
-            .lock()
-            .map_err(|_| RuntimeError::unavailable("视图状态不可用"))?;
-        let Some(view) = views.get_mut(id) else {
-            return Ok(());
-        };
-        if view.worker != device {
-            return Err(RuntimeError::forbidden("视图不属于此设备"));
-        }
-        if frame.get("kind").and_then(Value::as_str) == Some("asset") {
-            let request = frame
-                .get("id")
-                .and_then(Value::as_str)
-                .ok_or_else(|| RuntimeError::bad_request("资源请求 ID 缺失"))?;
-            if let Some(waiter) = view.assets.remove(request) {
-                let _ = waiter.send(frame);
+            .ok_or_else(|| RuntimeError::bad_request("视图 ID 缺失"))?
+            .to_owned();
+        let sender = {
+            let mut views = self
+                .views
+                .lock()
+                .map_err(|_| RuntimeError::unavailable("视图状态不可用"))?;
+            let Some(view) = views.get_mut(&id) else {
+                return Ok(());
+            };
+            if view.worker != device {
+                return Err(RuntimeError::forbidden("视图不属于此设备"));
             }
-        } else {
-            view.sender
-                .try_send(frame)
-                .map_err(|_| RuntimeError::unavailable("网页连接已关闭或消息队列已满"))?;
+            if frame.get("kind").and_then(Value::as_str) == Some("asset") {
+                let request = frame
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| RuntimeError::bad_request("资源请求 ID 缺失"))?;
+                if let Some(waiter) = view.assets.remove(request) {
+                    let _ = waiter.send(frame);
+                }
+                return Ok(());
+            }
+            view.sender.clone()
+        };
+        // 初始化消息可能超过队列容量；在锁外按序等待，保留有界内存与心跳余量。
+        let delivered = tokio::time::timeout(Duration::from_secs(10), sender.send(frame)).await;
+        if delivered.is_ok_and(|result| result.is_ok()) {
+            return Ok(());
         }
-        Ok(())
+        // 网页关闭或持续阻塞只结束该视图，不能连带断开设备及其余资源请求。
+        sqlx::query(
+            "UPDATE worker_webview_sessions SET state='closed' WHERE id=$1 AND worker_id=$2",
+        )
+        .bind(&id)
+        .bind(device)
+        .execute(&self.pool)
+        .await?;
+        self.close_channel(&id)
     }
 
     async fn close(&self, owner: &ViewOwner, id: &str) -> Result<(), RuntimeError> {
