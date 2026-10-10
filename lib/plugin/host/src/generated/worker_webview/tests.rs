@@ -37,6 +37,23 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
     };
     sqlx::query("INSERT INTO worker_devices(id,token_hash,label,platform,tenant_id,user_id,state,capabilities) VALUES($1,$2,'fixture','darwin','tenant','user','active','[\"codex.web\"]')")
         .bind(&device.id).bind(uuid::Uuid::new_v4().to_string()).execute(&pool).await?;
+    for (enabled, headless, expected) in [
+        (true, true, json!(["codex.web", "codex.cli"])),
+        (true, false, json!(["codex.web"])),
+        (false, true, json!([])),
+        (true, true, json!(["codex.web", "codex.cli"])),
+    ] {
+        service
+            .access(&device, enabled, headless)
+            .await
+            .map_err(|_| anyhow::anyhow!("更新无界面模式失败"))?;
+        let capabilities: serde_json::Value =
+            sqlx::query_scalar("SELECT capabilities FROM worker_devices WHERE id=$1")
+                .bind(&device.id)
+                .fetch_one(&pool)
+                .await?;
+        assert_eq!(capabilities, expected);
+    }
     let owner = ViewOwner {
         tenant: device.tenant.clone(),
         user: device.user.clone(),
@@ -326,7 +343,7 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         .map_err(|_| anyhow::anyhow!("资源应答失败"))?;
     assert_eq!(waiting.await??, reply);
     service
-        .access(&device, false)
+        .access(&device, false, false)
         .await
         .map_err(|_| anyhow::anyhow!("撤权失败"))?;
     assert!(service.authorize(&owner, &id).await.is_err());

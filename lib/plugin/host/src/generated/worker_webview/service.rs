@@ -10,7 +10,12 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 /// 设备长连接与网页连接的临时传输由同一服务管理；帧不落库。
 #[async_trait::async_trait]
 pub(crate) trait WorkerWebviewService: Send + Sync {
-    async fn access(&self, device: &DeviceIdentity, enabled: bool) -> Result<(), RuntimeError>;
+    async fn access(
+        &self,
+        device: &DeviceIdentity,
+        enabled: bool,
+        headless: bool,
+    ) -> Result<(), RuntimeError>;
     async fn devices(&self, owner: &ViewOwner) -> Result<Vec<Worker>, RuntimeError>;
     async fn create(
         &self,
