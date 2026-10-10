@@ -278,7 +278,17 @@ fn content_policy(prefix: &str, token: &str, device_views: bool, lan_origins: &[
     // CSP 的目录规则不包含无尾斜杠的 POST 入口，连接须分别允许入口与子路径。
     let view_connections = view_roots
         .iter()
-        .flat_map(|root| [root.clone(), format!("{root}/")])
+        .flat_map(|root| {
+            [
+                root.clone(),
+                format!("{root}/"),
+                format!(
+                    "{}/",
+                    root.replacen("https:", "wss:", 1)
+                        .replacen("http:", "ws:", 1)
+                ),
+            ]
+        })
         .collect::<Vec<_>>()
         .join(" ");
     let probes = lan_origins
@@ -477,6 +487,14 @@ mod tests {
             .split_whitespace()
             .collect::<Vec<_>>();
         let root = "https://lan.example:3443/api/runtime/components/assets/ticket/__device_view";
+        assert!(
+            connections
+                .contains(&"wss://aio.test/api/runtime/components/assets/ticket/__device_view/")
+        );
+        assert!(connections.contains(
+            &"wss://lan.example:3443/api/runtime/components/assets/ticket/__device_view/"
+        ));
+        assert!(!connections.contains(&"wss://lan.example:3443"));
         assert!(connections.contains(&root));
         assert!(connections.contains(&format!("{root}/").as_str()));
         assert!(frames.contains(&format!("{root}/").as_str()));

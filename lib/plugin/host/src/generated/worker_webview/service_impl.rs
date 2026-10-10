@@ -39,10 +39,16 @@ impl WorkerWebviewServiceImpl {
 
 #[async_trait::async_trait]
 impl WorkerWebviewService for WorkerWebviewServiceImpl {
-    async fn access(&self, device: &DeviceIdentity, enabled: bool) -> Result<(), RuntimeError> {
+    async fn access(
+        &self,
+        device: &DeviceIdentity,
+        enabled: bool,
+        headless: bool,
+    ) -> Result<(), RuntimeError> {
         let _guard = self.lifecycle.lock().await;
-        sqlx::query("UPDATE worker_devices SET capabilities=CASE WHEN $2 THEN CASE WHEN capabilities ? 'codex.web' THEN capabilities ELSE capabilities || '[\"codex.web\"]'::jsonb END ELSE capabilities-'codex.web' END WHERE id=$1 AND state='active'")
-            .bind(&device.id).bind(enabled).execute(&self.pool).await?;
+        // 能力是同一个授权的模式标记，原子写入避免展示半更新状态。
+        sqlx::query("UPDATE worker_devices SET capabilities=(capabilities-'codex.web'-'codex.cli') || CASE WHEN $2 AND $3 THEN '[\"codex.web\",\"codex.cli\"]'::jsonb WHEN $2 THEN '[\"codex.web\"]'::jsonb ELSE '[]'::jsonb END WHERE id=$1 AND state='active'")
+            .bind(&device.id).bind(enabled).bind(headless).execute(&self.pool).await?;
         if !enabled {
             self.disconnect(&device.id)?;
             sqlx::query("UPDATE worker_webview_sessions SET state='closed' WHERE worker_id=$1")

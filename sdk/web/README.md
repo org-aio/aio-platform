@@ -33,3 +33,9 @@ Component v2 插件声明 `worker_capabilities=["codex.web"]` 后，可调用 `a
 将 `src` 放入 `sandbox="allow-scripts"` iframe。消息协议 `aio:device-view@1` 提供 ready、error 和 route 通知；接收方必须验证 `event.source` 是该 iframe。视图地址不是可分享链接，不得写入外层 URL；仅将设备 UUID 与应用 pathname 通过现有 `aioPlugin.navigate` 保存。设备凭据、账户、原生运行时和文件路径由设备保管。
 
 设备撤权、登录失效、插件停用/更新、30 分钟视图过期或连接中断要求重新建立视图，旧写请求不重放。其他插件和旧 PageDefinition 入口不能使用此接口。宿主通道与权限说明见 `lib/plugin/host/src/generated/worker_webview/README.md`。
+
+### 无界面 Codex 视图
+
+已配对设备通过 `/api/runtime/workers/webviews/access` 提交 `enabled: true, headless: true`，在同一授权内发布 `codex.web` 和 `codex.cli`。省略 `headless` 代表桌面模式，移除 `codex.cli`；停用同时移除两者并关闭所有视图。模式标记与授权原子更新。
+
+声明 `codex.web` 的插件可以经 `aioPlugin.deviceView` 打开视图，并连接返回 `src` 下的 `__channel`。CSP 仅对当前挂载票据目录放行对应 HTTPS/WSS 或 HTTP/WS，保持沙箱、用户/租户/会话隔离和 LAN 优先选路。CLI 的 ready snapshot 标记 `runtime: codex-cli`，后续使用 `{kind: 'rpc', message: 原生请求}` 帧；Desktop 继续使用原有 renderer 桥。宿主只传输帧，不实现 Codex 协议、任务或审批语义。

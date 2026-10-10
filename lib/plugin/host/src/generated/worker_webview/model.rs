@@ -28,6 +28,8 @@ pub(crate) enum ViewRequest {
 #[serde(deny_unknown_fields)]
 pub(crate) struct Access {
     pub enabled: bool,
+    #[serde(default)]
+    pub headless: bool,
 }
 
 /// 网页只接收短期视图地址，不接收设备凭据或本机 CDP 地址。

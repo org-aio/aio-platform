@@ -91,7 +91,7 @@ async fn access(
     let identity = device(&state, &headers).await?;
     state
         .worker_webviews
-        .access(&identity, request.enabled)
+        .access(&identity, request.enabled, request.headless)
         .await?;
     Ok(response(Value::Null))
 }
