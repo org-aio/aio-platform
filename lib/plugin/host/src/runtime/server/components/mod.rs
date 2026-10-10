@@ -12,6 +12,8 @@ mod model;
 mod permissions;
 pub(in crate::runtime::server) mod process;
 mod process_lifecycle;
+#[cfg(test)]
+mod process_publication_tests;
 mod services;
 mod store;
 #[cfg(test)]
@@ -204,13 +206,14 @@ impl Components {
     }
 
     async fn validate(&self, source: Uuid, bundle: &Bundle) -> Result<model::Description> {
-        // 发布校验沿用真实租户的数据路径，避免验证请求依赖另一套数据库代理生命周期。
-        let tenant = "default";
         if bundle.verify()?.manifest().plugin.runtime.process.is_some() {
+            // 候选进程使用独立数据空间，避免争用在线实例的独占锁或停止相同版本。
+            let tenant = "publication-validation";
             let (instance, description) = self.processes.prepare(source, tenant, bundle).await?;
             self.processes.stop_id(&instance.start.id()).await?;
             return Ok(description);
         }
+        let tenant = "default";
         let resources = self.resources(source, tenant, bundle).await?;
         let slot = ComponentSlot::new(
             source,
