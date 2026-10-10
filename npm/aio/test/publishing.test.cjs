@@ -23,7 +23,7 @@ test("仅将 registry E404 识别为未发布", () => {
 test("设备组件尚未发布时阻止主 CLI 发布", () => {
   assert.throws(
     () => verifyRequiredDependencies(manifest, () => false),
-    /必须先发布依赖 @zjarlin\/aio-device@0\.12\.5/
+    /必须先发布依赖 @zjarlin\/aio-device@0\.12\.6/
   );
 });
 
@@ -33,7 +33,7 @@ test("所需的精确依赖版本已发布时允许继续", () => {
     checked.push([name, version]);
     return true;
   });
-  assert.deepEqual(checked, [["@zjarlin/aio-device", "0.12.5"]]);
+  assert.deepEqual(checked, [["@zjarlin/aio-device", "0.12.6"]]);
 });
 
 test("依赖检查的授权和网络错误不会被当作未发布", () => {
