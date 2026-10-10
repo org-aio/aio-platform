@@ -9,6 +9,7 @@ pub(super) struct MountRequest {
 #[derive(Serialize)]
 pub(super) struct MountResponse {
     pub development: bool,
+    pub device_views: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub abi: Option<u32>,
     pub token: String,

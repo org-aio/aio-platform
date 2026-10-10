@@ -1,6 +1,6 @@
 use super::{
     model::ViewOwner,
-    service::{Peer, ViewChannel, WorkerWebviewService},
+    service::{Peer, ViewChannel, ViewFrame, WorkerWebviewService},
     util,
 };
 use crate::{
@@ -9,8 +9,12 @@ use crate::{
 };
 use serde_json::{Value, json};
 use sqlx::{PgPool, Row};
-use std::{collections::HashMap, sync::Mutex, time::Duration};
-use tokio::sync::{mpsc, oneshot};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+use tokio::sync::{Semaphore, mpsc, oneshot};
 
 pub(crate) struct WorkerWebviewServiceImpl {
     pool: PgPool,
@@ -117,7 +121,8 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
         for id in old {
             self.close_channel(&id)?;
         }
-        let (sender, receiver) = mpsc::channel(32);
+        // 原生初始化可早于网页加载完成；有界缓冲独立于设备共享 reader。
+        let (sender, receiver) = mpsc::channel(256);
         self.views
             .lock()
             .map_err(|_| RuntimeError::unavailable("视图状态不可用"))?
@@ -127,6 +132,7 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
                     worker: device.into(),
                     sender,
                     receiver: Some(receiver),
+                    budget: Arc::new(Semaphore::new(32 * 1024 * 1024)),
                     assets: HashMap::new(),
                 },
             );
@@ -221,7 +227,7 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
         &self,
         owner: &ViewOwner,
         id: &str,
-    ) -> Result<mpsc::Receiver<Value>, RuntimeError> {
+    ) -> Result<mpsc::Receiver<ViewFrame>, RuntimeError> {
         self.authorize(owner, id).await?;
         let claimed = sqlx::query(
             "UPDATE worker_webview_sessions SET state='active' WHERE id=$1 AND state='waiting'",
@@ -311,7 +317,7 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
             .and_then(Value::as_str)
             .ok_or_else(|| RuntimeError::bad_request("视图 ID 缺失"))?
             .to_owned();
-        let sender = {
+        let delivered = {
             let mut views = self
                 .views
                 .lock()
@@ -332,14 +338,26 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
                 }
                 return Ok(());
             }
-            view.sender.clone()
+            // 不能在设备 reader 等待某一个网页腾出空间，否则其他视图及资源回包也会阻塞。
+            let size = serde_json::to_vec(&frame)?.len();
+            match u32::try_from(size)
+                .ok()
+                .and_then(|size| view.budget.clone().try_acquire_many_owned(size).ok())
+            {
+                Some(permit) => view
+                    .sender
+                    .try_send(ViewFrame {
+                        value: frame,
+                        _permit: permit,
+                    })
+                    .is_ok(),
+                None => false,
+            }
         };
-        // 初始化消息可能超过队列容量；在锁外按序等待，保留有界内存与心跳余量。
-        let delivered = tokio::time::timeout(Duration::from_secs(10), sender.send(frame)).await;
-        if delivered.is_ok_and(|result| result.is_ok()) {
+        if delivered {
             return Ok(());
         }
-        // 网页关闭或持续阻塞只结束该视图，不能连带断开设备及其余资源请求。
+        // 网页关闭或超出独立缓冲上限只结束该视图，其他连接继续接收。
         sqlx::query(
             "UPDATE worker_webview_sessions SET state='closed' WHERE id=$1 AND worker_id=$2",
         )
@@ -381,9 +399,6 @@ impl WorkerWebviewServiceImpl {
             .map_err(|_| RuntimeError::unavailable("视图状态不可用"))?
             .remove(id)
         {
-            let _ = view
-                .sender
-                .try_send(json!({"kind":"closed","sessionId":id}));
             let _ = self.send(&view.worker, json!({"kind":"close","sessionId":id}));
         }
         Ok(())

@@ -36,7 +36,7 @@ jobs:
           node-version: 24
       - run: cargo fmt --all --check
       - run: node scripts/check-boundaries.mjs
-      - run: node --test sdk/web/bridge.test.mjs sdk/web/file-drop.test.mjs sdk/web/device-transport.test.mjs cli/src/tools/release.test.cjs
+      - run: node --test sdk/web/bridge.test.mjs sdk/web/file-drop.test.mjs sdk/web/device-transport.test.mjs sdk/web/static-transport.test.mjs cli/src/tools/release.test.cjs
       - run: cargo test --workspace
       - name: 验证设备视图消息、资源及撤权
         run: cargo test -p az-plugin-host --features server webview_channel_roundtrip_isolation_and_revocation -- --ignored
