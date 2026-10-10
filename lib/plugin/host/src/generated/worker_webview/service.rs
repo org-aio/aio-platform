@@ -18,6 +18,8 @@ pub(crate) trait WorkerWebviewService: Send + Sync {
         route: &str,
     ) -> Result<String, RuntimeError>;
     async fn authorize(&self, owner: &ViewOwner, id: &str) -> Result<String, RuntimeError>;
+    /// 网页心跳在重新验证登录和挂载后调用，只延长仍有效的已连接视图。
+    async fn renew(&self, owner: &ViewOwner, id: &str) -> Result<(), RuntimeError>;
     async fn register(
         &self,
         device: &DeviceIdentity,
