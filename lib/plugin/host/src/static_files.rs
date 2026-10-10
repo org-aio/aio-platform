@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use axum::{
     Router,
     extract::Request,
-    http::{HeaderValue, header},
+    http::{HeaderValue, Method, StatusCode, header},
     middleware::{self, Next},
-    response::Response,
+    response::{IntoResponse, Response},
 };
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -18,6 +18,23 @@ pub fn application(root: PathBuf) -> Router {
 
 async fn cache_headers(request: Request, next: Next) -> Response {
     let immutable = fingerprinted_asset(request.uri().path());
+    if immutable && request.method() == Method::OPTIONS {
+        let mut response = StatusCode::NO_CONTENT.into_response();
+        let headers = response.headers_mut();
+        headers.insert(
+            header::ACCESS_CONTROL_ALLOW_ORIGIN,
+            HeaderValue::from_static("*"),
+        );
+        headers.insert(
+            header::ACCESS_CONTROL_ALLOW_METHODS,
+            HeaderValue::from_static("GET, HEAD, OPTIONS"),
+        );
+        headers.insert(
+            "access-control-allow-private-network",
+            HeaderValue::from_static("true"),
+        );
+        return response;
+    }
     let mut response = next.run(request).await;
     let html = response
         .headers()
@@ -30,6 +47,11 @@ async fn cache_headers(request: Request, next: Next) -> Response {
         );
     }
     let cache = if immutable && !html && response.status().is_success() {
+        // 指纹资产公开且不含账户数据，允许公共入口无 Cookie 读取可信局域网副本。
+        response.headers_mut().insert(
+            header::ACCESS_CONTROL_ALLOW_ORIGIN,
+            HeaderValue::from_static("*"),
+        );
         "public, max-age=31536000, immutable"
     } else {
         "no-cache"
@@ -43,7 +65,7 @@ async fn cache_headers(request: Request, next: Next) -> Response {
     response
 }
 
-fn fingerprinted_asset(path: &str) -> bool {
+pub(crate) fn fingerprinted_asset(path: &str) -> bool {
     path.starts_with("/assets/")
         && path.rsplit('/').next().is_some_and(|file| {
             file.split_once("-dxh")
@@ -98,13 +120,41 @@ mod tests {
                 .await?;
             assert_eq!(response.headers()["content-encoding"], "gzip");
             assert_eq!(response.headers()["vary"], "Accept-Encoding");
+            assert_eq!(response.headers()["access-control-allow-origin"], "*");
+            assert!(
+                response
+                    .headers()
+                    .get("access-control-allow-credentials")
+                    .is_none()
+            );
             assert_eq!(
                 response.headers()["cache-control"],
                 "public, max-age=31536000, immutable"
             );
             assert_eq!(response.bytes().await?.as_ref(), compressed);
+            let preflight = client
+                .request(reqwest::Method::OPTIONS, format!("{base}/{name}"))
+                .header("origin", "https://public.example")
+                .header("access-control-request-private-network", "true")
+                .send()
+                .await?;
+            assert_eq!(preflight.status(), 204);
+            assert_eq!(
+                preflight.headers()["access-control-allow-private-network"],
+                "true"
+            );
+            assert_eq!(
+                preflight.headers()["access-control-allow-methods"],
+                "GET, HEAD, OPTIONS"
+            );
             for path in ["/", "/assets/missing-dxh12345678.js"] {
                 let response = client.get(format!("{base}{path}")).send().await?;
+                assert!(
+                    response
+                        .headers()
+                        .get("access-control-allow-origin")
+                        .is_none()
+                );
                 assert_eq!(response.headers()["cache-control"], "no-cache");
                 assert_eq!(
                     response.headers()["content-type"],

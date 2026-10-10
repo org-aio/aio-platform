@@ -50,20 +50,28 @@ pub async fn document(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     // 首页快照失败时仍交付壳，由有界的客户端请求提供重试入口。
-    if let Ok(Ok((snapshot, timing))) = tokio::time::timeout(
+    let snapshot = if let Ok(Ok((snapshot, timing))) = tokio::time::timeout(
         std::time::Duration::from_secs(8),
         super::bootstrap::load(&state, &headers),
     )
     .await
-        && let Ok(html) = render(&bytes, &snapshot)
     {
         parts.headers.insert("server-timing", timing);
+        Some(snapshot)
+    } else {
+        None
+    };
+    if let Ok(html) = render(&bytes, snapshot.as_ref(), &state.transport.lan_origins) {
         return Response::from_parts(parts, Body::from(html));
     }
     Response::from_parts(parts, Body::from(bytes))
 }
 
-fn render(html: &[u8], snapshot: &LoadedApplication) -> Result<Vec<u8>> {
+fn render(
+    html: &[u8],
+    snapshot: Option<&LoadedApplication>,
+    lan_origins: &[String],
+) -> Result<Vec<u8>> {
     let document = kuchikiki::parse_html()
         .one(std::str::from_utf8(html)?)
         .document_node;
@@ -73,15 +81,52 @@ fn render(html: &[u8], snapshot: &LoadedApplication) -> Result<Vec<u8>> {
     let fragment = kuchikiki::parse_html()
         .one("<meta charset='utf-8'><script id='aio-startup-snapshot' type='application/json'></script>")
         .document_node;
-    let script = fragment
-        .select_first("script")
-        .map_err(|_| anyhow::anyhow!("创建首页快照失败"))?;
-    // JSON 脚本节点也不能包含可结束 script 的原始左尖括号。
-    let text = serde_json::to_string(snapshot)?.replace('<', "\\u003c");
-    script.as_node().append(kuchikiki::NodeRef::new_text(text));
-    let node = script.as_node().clone();
-    node.detach();
-    head.as_node().prepend(node);
+    if let Some(snapshot) = snapshot {
+        let script = fragment
+            .select_first("script")
+            .map_err(|_| anyhow::anyhow!("创建首页快照失败"))?;
+        // JSON 脚本节点也不能包含可结束 script 的原始左尖括号。
+        let text = serde_json::to_string(snapshot)?.replace('<', "\\u003c");
+        script.as_node().append(kuchikiki::NodeRef::new_text(text));
+        let node = script.as_node().clone();
+        node.detach();
+        head.as_node().prepend(node);
+    }
+    if !lan_origins.is_empty() {
+        // 选路脚本先于壳模块执行；快照获取失败也不能阻止静态资源加载。
+        let script = kuchikiki::parse_html()
+            .one("<script></script>")
+            .document_node;
+        let script = script
+            .select_first("script")
+            .map_err(|_| anyhow::anyhow!("创建静态资源选路失败"))?;
+        script
+            .attributes
+            .borrow_mut()
+            .insert("data-lan-origins", serde_json::to_string(lan_origins)?);
+        script
+            .as_node()
+            .append(kuchikiki::NodeRef::new_text(include_str!(
+                "static_transport.js"
+            )));
+        let script = script.as_node().clone();
+        script.detach();
+        head.as_node().prepend(script);
+        // WASM 将由 fetch 选路，避免同时预加载一份缓慢的公网副本。
+        for link in document
+            .select("link[rel='preload'][as='fetch']")
+            .expect("有效的预加载选择器")
+        {
+            if link
+                .attributes
+                .borrow()
+                .get("href")
+                .is_some_and(crate::static_files::fingerprinted_asset)
+            {
+                link.as_node().detach();
+            }
+        }
+    }
     // 快照可能超过浏览器的字符集预扫描范围，编码声明必须在快照之前。
     for meta in document
         .select("meta[charset]")
@@ -105,6 +150,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn static_routing_precedes_shell_and_survives_missing_snapshot() -> Result<()> {
+        let source = b"<head><link rel='preload' as='fetch' href='/assets/app-dxh12345678.wasm'><link rel='preload' as='style' href='/assets/app-dxh12345678.css'><script type='module' src='/assets/app-dxh12345678.js'></script></head>";
+        let html = render(source, None, &["https://lan.example:3443".into()])?;
+        let document = kuchikiki::parse_html()
+            .one(String::from_utf8(html)?)
+            .document_node;
+        assert_eq!(document.select("script").unwrap().count(), 2);
+        assert!(
+            document
+                .select_first("script")
+                .unwrap()
+                .attributes
+                .borrow()
+                .get("data-lan-origins")
+                .is_some()
+        );
+        assert_eq!(document.select("link[as='fetch']").unwrap().count(), 0);
+        assert_eq!(document.select("link[as='style']").unwrap().count(), 1);
+        assert_eq!(document.select("meta[charset]").unwrap().count(), 1);
+        Ok(())
+    }
+
+    #[test]
     fn large_chinese_snapshot_keeps_utf8_declaration_within_prescan() -> Result<()> {
         let snapshot = LoadedApplication {
             snapshot: None,
@@ -115,7 +183,7 @@ mod tests {
             "<title>AIO</title>",
         ] {
             let source = format!("<!doctype html><head>{head}</head><body></body>");
-            let bytes = render(source.as_bytes(), &snapshot)?;
+            let bytes = render(source.as_bytes(), Some(&snapshot), &[])?;
             let prefix = std::str::from_utf8(&bytes[..100])?;
             assert!(prefix.contains("<meta charset=\"utf-8\">"));
             let document = kuchikiki::parse_html()
@@ -145,7 +213,8 @@ mod tests {
         };
         let html = render(
             b"<!doctype html><head><title>AIO</title></head><body></body>",
-            &snapshot,
+            Some(&snapshot),
+            &[],
         )?;
         let document = kuchikiki::parse_html()
             .one(String::from_utf8(html)?)

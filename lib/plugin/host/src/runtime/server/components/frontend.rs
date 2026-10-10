@@ -99,6 +99,7 @@ pub(in crate::runtime::server) async fn mount(
     })?;
     Ok(MountResponse {
         development: state.config.development.is_some(),
+        device_views: permits_device_views(bundle.manifest()),
         src: format!("/api/runtime/components/assets/{token}/{entry}"),
         token,
         revision,
@@ -147,8 +148,14 @@ pub(in crate::runtime::server) async fn device_view_grant(
         .components()?
         .bundle(Uuid::parse_str(&grant.source_id)?, &grant.tenant_id)
         .await?;
-    let allowed = bundle
-        .manifest()
+    if !permits_device_views(bundle.manifest()) {
+        return Err(RuntimeError::forbidden("插件未获 Codex 设备视图授权"));
+    }
+    Ok(grant)
+}
+
+fn permits_device_views(manifest: &az_plugin_bundle::BundleManifest) -> bool {
+    manifest
         .plugin
         .runtime
         .process
@@ -158,11 +165,7 @@ pub(in crate::runtime::server) async fn device_view_grant(
                 .worker_capabilities
                 .iter()
                 .any(|capability| capability == "codex.web")
-        });
-    if !allowed {
-        return Err(RuntimeError::forbidden("插件未获 Codex 设备视图授权"));
-    }
-    Ok(grant)
+        })
 }
 
 pub(super) async fn asset(
@@ -201,6 +204,7 @@ pub(super) async fn asset(
         "{}/api/runtime/components/assets/{token}/",
         state.transport.request_origin(&request_headers)
     );
+    let device_views = permits_device_views(bundle.manifest());
     let bytes = if path == grant.entry {
         render(
             bytes,
@@ -209,6 +213,7 @@ pub(super) async fn asset(
             &token,
             state.config.development.is_some(),
             &state.transport.lan_origins,
+            device_views,
         )?
     } else {
         bytes.to_vec()
@@ -239,18 +244,6 @@ pub(super) async fn asset(
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
     );
-    let device_views = bundle
-        .manifest()
-        .plugin
-        .runtime
-        .process
-        .as_ref()
-        .is_some_and(|process| {
-            process
-                .worker_capabilities
-                .iter()
-                .any(|capability| capability == "codex.web")
-        });
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
         HeaderValue::from_str(&content_policy(
@@ -305,10 +298,37 @@ fn render(
     token: &str,
     development: bool,
     lan_origins: &[String],
+    device_views: bool,
 ) -> Result<Vec<u8>> {
     let document = kuchikiki::parse_html()
         .one(std::str::from_utf8(bytes)?)
         .document_node;
+    if device_views {
+        // 嵌套 iframe 逐层委派本地网络访问，CSP 仍将目标限制在本挂载的设备视图路径。
+        for frame in document
+            .select("iframe")
+            .map_err(|_| anyhow::anyhow!("解析设备视图失败"))?
+        {
+            let mut attributes = frame.attributes.borrow_mut();
+            let existing = attributes.get("allow").unwrap_or_default();
+            let mut policies = existing
+                .split(';')
+                .map(str::trim)
+                .filter(|policy| !policy.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            // 插件显式声明的限制仍然有效，只补齐未声明的委派。
+            for feature in ["local-network-access", "local-network"] {
+                if !policies
+                    .iter()
+                    .any(|policy| policy.split_whitespace().next() == Some(feature))
+                {
+                    policies.push(format!("{feature} *"));
+                }
+            }
+            attributes.insert("allow", policies.join("; "));
+        }
+    }
     for script in document
         .select("script[type='module'], script[type='importmap']")
         .map_err(|_| anyhow::anyhow!("解析模块入口失败"))?
@@ -487,6 +507,7 @@ mod tests {
             "ticket",
             false,
             &["https://lan.example:3443".into()],
+            false,
         )?;
         let document = kuchikiki::parse_html()
             .one(String::from_utf8(output)?)
@@ -531,6 +552,36 @@ mod tests {
             scripts[2].attributes.borrow().get("type"),
             Some("module-shim")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn local_network_delegation_is_limited_to_device_views_and_preserves_sandbox() -> Result<()> {
+        for enabled in [false, true] {
+            let output = render(
+                b"<html><head></head><body><iframe sandbox='allow-scripts' allow=\"fullscreen; local-network 'none'\"></iframe></body></html>",
+                "https://aio.test/assets/ticket/",
+                "index.html",
+                "ticket",
+                false,
+                &["https://lan.example:3443".into()],
+                enabled,
+            )?;
+            let document = kuchikiki::parse_html()
+                .one(String::from_utf8(output)?)
+                .document_node;
+            let frame = document
+                .select_first("iframe")
+                .map_err(|_| anyhow::anyhow!("未找到设备视图"))?;
+            let attributes = frame.attributes.borrow();
+            assert_eq!(attributes.get("sandbox"), Some("allow-scripts"));
+            let policy = attributes.get("allow").unwrap_or_default();
+            assert!(policy.contains("fullscreen"));
+            assert_eq!(policy.contains("local-network-access *"), enabled);
+            assert!(!policy.contains("local-network *"));
+            assert!(policy.contains("local-network 'none'"));
+            assert!(!policy.contains("loopback-network"));
+        }
         Ok(())
     }
 }

@@ -180,7 +180,7 @@ async fn browser_socket(
     initial_owner: super::model::ViewOwner,
     token: String,
     id: String,
-    mut incoming: tokio::sync::mpsc::Receiver<Value>,
+    mut incoming: tokio::sync::mpsc::Receiver<super::service::ViewFrame>,
     mut socket: WebSocket,
 ) {
     let mut heartbeat = tokio::time::interval(Duration::from_secs(10));
@@ -195,7 +195,7 @@ async fn browser_socket(
                 let Some(frame) = frame else { break; };
                 let Ok(owner) = state.device_view_owner(&token).await else { break; };
                 if state.worker_webviews.authorize(&owner, &id).await.is_err() { break; }
-                if socket.send(Message::Text(frame.to_string().into())).await.is_err() { break; }
+                if socket.send(Message::Text(frame.value.to_string().into())).await.is_err() { break; }
             }
             frame = socket.recv() => {
                 let Some(Ok(frame)) = frame else { break; };

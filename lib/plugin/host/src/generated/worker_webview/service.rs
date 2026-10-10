@@ -4,7 +4,8 @@ use crate::{
     runtime::server::http_error::RuntimeError,
 };
 use serde_json::Value;
-use tokio::sync::{mpsc, oneshot};
+use std::sync::Arc;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
 /// 设备长连接与网页连接的临时传输由同一服务管理；帧不落库。
 #[async_trait::async_trait]
@@ -30,7 +31,7 @@ pub(crate) trait WorkerWebviewService: Send + Sync {
         &self,
         owner: &ViewOwner,
         id: &str,
-    ) -> Result<mpsc::Receiver<Value>, RuntimeError>;
+    ) -> Result<mpsc::Receiver<ViewFrame>, RuntimeError>;
     async fn frame(&self, owner: &ViewOwner, id: &str, frame: Value) -> Result<(), RuntimeError>;
     async fn asset(&self, owner: &ViewOwner, id: &str, path: &str) -> Result<Value, RuntimeError>;
     async fn receive(
@@ -49,7 +50,14 @@ pub(super) struct Peer {
 
 pub(super) struct ViewChannel {
     pub worker: String,
-    pub sender: mpsc::Sender<Value>,
-    pub receiver: Option<mpsc::Receiver<Value>>,
+    pub sender: mpsc::Sender<ViewFrame>,
+    pub receiver: Option<mpsc::Receiver<ViewFrame>>,
+    pub budget: Arc<Semaphore>,
     pub assets: std::collections::HashMap<String, oneshot::Sender<Value>>,
+}
+
+// 每个视图单独限制待发送帧的内存；帧处理结束或关闭队列时自动释放预算。
+pub(crate) struct ViewFrame {
+    pub value: Value,
+    pub(super) _permit: OwnedSemaphorePermit,
 }

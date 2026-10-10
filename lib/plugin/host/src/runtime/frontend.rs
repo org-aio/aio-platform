@@ -11,6 +11,7 @@ const FRONTEND_SPINNER_STYLE: &str = "width:18px;height:18px;border:2px solid va
 struct FrontendMount {
     #[serde(default)]
     development: bool,
+    device_views: bool,
     #[serde(default)]
     abi: Option<u32>,
     token: String,
@@ -102,7 +103,8 @@ fn MountedFrontend(
                 title: label,
                 class: "application-frontend",
                 "sandbox": "allow-scripts allow-forms",
-                allow: "fullscreen; clipboard-write",
+                // 不透明插件与内层设备视图都需要委派；浏览器仍保留用户的本地网络授权决定。
+                allow: if mount.device_views { "fullscreen; clipboard-write; local-network-access *; local-network *" } else { "fullscreen; clipboard-write" },
                 referrerpolicy: "no-referrer",
                 onmounted: move |_| {
                     if bridge().is_none() {

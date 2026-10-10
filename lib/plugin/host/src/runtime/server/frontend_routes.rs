@@ -70,6 +70,7 @@ pub(super) async fn mount(
     Ok(Json(RuntimeResponse {
         data: MountResponse {
             development: state.config.development.is_some(),
+            device_views: false,
             abi: None,
             src: format!("/api/runtime/frontend/assets/{token}/{entry}"),
             token,

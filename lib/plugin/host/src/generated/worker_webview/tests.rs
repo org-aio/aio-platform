@@ -157,7 +157,7 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         browser
             .recv()
             .await
-            .and_then(|frame| frame.get("kind").cloned()),
+            .and_then(|frame| frame.value.get("kind").cloned()),
         Some(json!("frame"))
     );
     // 原版 Renderer 初始化会连续发送超过队列容量的消息，必须完整、按序交付。
@@ -182,7 +182,7 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         let frame = tokio::time::timeout(Duration::from_secs(2), browser.recv())
             .await?
             .ok_or_else(|| anyhow::anyhow!("初始化通道提前关闭"))?;
-        assert_eq!(frame["index"], index);
+        assert_eq!(frame.value["index"], index);
     }
     burst.await??;
 
@@ -199,10 +199,48 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         commands.recv().await,
         Some(json!({"kind":"open","sessionId":other_id,"route":"/"}))
     );
-    let other_browser = service
+    // 第二个网页尚未加载完成时，初始化突发不能挡住原网页及同一设备的资源回包。
+    for index in 0..96 {
+        tokio::time::timeout(
+            Duration::from_millis(250),
+            service.receive(
+                &device.id,
+                &generation,
+                json!({"kind":"frame","sessionId":other_id,"index":index}),
+            ),
+        )
+        .await?
+        .map_err(|_| anyhow::anyhow!("等待中的视图阻塞共享通道"))?;
+    }
+    service
+        .receive(
+            &device.id,
+            &generation,
+            json!({"kind":"frame","sessionId":id,"index":"still-active"}),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("原网页被第二个网页阻塞"))?;
+    assert_eq!(browser.recv().await.unwrap().value["index"], "still-active");
+    let mut other_browser = service
         .attach(&other_owner, &other_id)
         .await
         .map_err(|_| anyhow::anyhow!("第二个视图连接失败"))?;
+    for index in 0..96 {
+        assert_eq!(other_browser.recv().await.unwrap().value["index"], index);
+    }
+    // 超出独立帧数上限只关闭慢网页，原网页保持在线。
+    for index in 0..257 {
+        tokio::time::timeout(
+            Duration::from_millis(250),
+            service.receive(
+                &device.id,
+                &generation,
+                json!({"kind":"frame","sessionId":other_id,"index":index}),
+            ),
+        )
+        .await?
+        .map_err(|_| anyhow::anyhow!("慢网页拖住了设备 reader"))?;
+    }
     drop(other_browser);
     service
         .receive(
@@ -218,6 +256,28 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
     assert_eq!(
         commands.recv().await,
         Some(json!({"kind":"close","sessionId":other_id}))
+    );
+    // 少量大帧也受总字节预算约束，不能只依赖帧数上限。
+    let large_id = service
+        .create(&other_owner, &device.id, "/")
+        .await
+        .map_err(|_| anyhow::anyhow!("大帧测试视图创建失败"))?;
+    assert_eq!(commands.recv().await.unwrap()["kind"], "open");
+    for _ in 0..3 {
+        service
+            .receive(
+                &device.id,
+                &generation,
+                json!({"kind":"frame","sessionId":large_id,"data":"x".repeat(12 * 1024 * 1024)}),
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("大帧预算未隔离"))?;
+    }
+    assert!(service.authorize(&other_owner, &large_id).await.is_err());
+    assert!(service.authorize(&owner, &id).await.is_ok());
+    assert_eq!(
+        commands.recv().await,
+        Some(json!({"kind":"close","sessionId":large_id}))
     );
     // 即使原网页仍持有接收端，已经过期的视图也不能被心跳复活。
     let expired_id = service
@@ -278,13 +338,7 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
             .is_err()
     );
     assert!(service.register(&device).await.is_err());
-    assert_eq!(
-        browser
-            .recv()
-            .await
-            .and_then(|frame| frame.get("kind").cloned()),
-        Some(json!("closed"))
-    );
+    assert!(browser.recv().await.is_none());
     pool.close().await;
     sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
         .execute(&admin)
