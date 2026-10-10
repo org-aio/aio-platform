@@ -144,6 +144,18 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
             .fetch_optional(&self.pool).await?.ok_or_else(|| RuntimeError::forbidden("网页连接已过期或设备授权已撤销"))
     }
 
+    async fn renew(&self, owner: &ViewOwner, id: &str) -> Result<(), RuntimeError> {
+        uuid::Uuid::parse_str(id)?;
+        // 在同一次更新中检查有效期、归属和设备授权，禁止复活已失效的视图。
+        let renewed = sqlx::query("UPDATE worker_webview_sessions v SET expires_at=now()+interval '30 minutes' FROM worker_devices w WHERE w.id=v.worker_id AND v.id=$1 AND v.tenant_id=$2 AND v.user_id=$3 AND v.session_id=$4 AND v.source_id=$5 AND v.revision=$6 AND v.mount_digest=$7 AND v.state='active' AND v.expires_at>now() AND w.state='active' AND w.tenant_id=v.tenant_id AND w.user_id=v.user_id AND w.capabilities ? 'codex.web'")
+            .bind(id).bind(&owner.tenant).bind(&owner.user).bind(&owner.session).bind(&owner.source).bind(&owner.revision).bind(util::digest(&owner.mount))
+            .execute(&self.pool).await?.rows_affected();
+        if renewed != 1 {
+            return Err(RuntimeError::forbidden("网页连接已过期或设备授权已撤销"));
+        }
+        Ok(())
+    }
+
     async fn register(
         &self,
         device: &DeviceIdentity,

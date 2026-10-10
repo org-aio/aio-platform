@@ -188,8 +188,7 @@ async fn browser_socket(
     loop {
         tokio::select! {
             _ = heartbeat.tick() => {
-                let Ok(owner) = state.device_view_owner(&token).await else { break; };
-                if last_seen.elapsed() > Duration::from_secs(45) || state.worker_webviews.authorize(&owner, &id).await.is_err() { break; }
+                if last_seen.elapsed() > Duration::from_secs(45) || state.renew_device_view(&token, &id).await.is_err() { break; }
                 if socket.send(Message::Ping(Bytes::new())).await.is_err() { break; }
             }
             frame = incoming.recv() => {

@@ -57,6 +57,18 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         commands.recv().await,
         Some(json!({"kind":"open","sessionId":id,"route":"/"}))
     );
+    assert!(service.renew(&owner, &id).await.is_err());
+    let mut browser = service
+        .attach(&owner, &id)
+        .await
+        .map_err(|_| anyhow::anyhow!("连接失败"))?;
+    assert!(service.attach(&owner, &id).await.is_err());
+    sqlx::query(
+        "UPDATE worker_webview_sessions SET expires_at=now()+interval '1 minute' WHERE id=$1",
+    )
+    .bind(&id)
+    .execute(&pool)
+    .await?;
     for different in [
         ViewOwner {
             tenant: "other".into(),
@@ -84,14 +96,40 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         },
     ] {
         assert!(service.authorize(&different, &id).await.is_err());
+        assert!(service.renew(&different, &id).await.is_err());
         assert!(service.close(&different, &id).await.is_err());
         assert!(service.authorize(&owner, &id).await.is_ok());
     }
-    let mut browser = service
-        .attach(&owner, &id)
+    // 普通授权和错误归属都不能续期；合法存活心跳才能延长即将过期的连接。
+    let unchanged: bool = sqlx::query_scalar(
+        "SELECT expires_at<=now()+interval '1 minute' FROM worker_webview_sessions WHERE id=$1",
+    )
+    .bind(&id)
+    .fetch_one(&pool)
+    .await?;
+    assert!(unchanged);
+    service
+        .renew(&owner, &id)
         .await
-        .map_err(|_| anyhow::anyhow!("连接失败"))?;
-    assert!(service.attach(&owner, &id).await.is_err());
+        .map_err(|_| anyhow::anyhow!("续期失败"))?;
+    let renewed: bool = sqlx::query_scalar(
+        "SELECT expires_at>now()+interval '29 minutes' FROM worker_webview_sessions WHERE id=$1",
+    )
+    .bind(&id)
+    .fetch_one(&pool)
+    .await?;
+    assert!(renewed);
+    for update in [
+        "UPDATE worker_devices SET state='revoked' WHERE id=$1",
+        "UPDATE worker_devices SET state='active',capabilities='[]' WHERE id=$1",
+    ] {
+        sqlx::query(update).bind(&device.id).execute(&pool).await?;
+        assert!(service.renew(&owner, &id).await.is_err());
+    }
+    sqlx::query("UPDATE worker_devices SET capabilities='[\"codex.web\"]' WHERE id=$1")
+        .bind(&device.id)
+        .execute(&pool)
+        .await?;
     for index in 0..3 {
         service
             .frame(&owner, &id, json!({"kind":"call","index":index}))
@@ -175,10 +213,40 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         .await
         .map_err(|_| anyhow::anyhow!("单一网页关闭中断了设备通道"))?;
     assert!(service.authorize(&other_owner, &other_id).await.is_err());
+    assert!(service.renew(&other_owner, &other_id).await.is_err());
     assert!(service.authorize(&owner, &id).await.is_ok());
     assert_eq!(
         commands.recv().await,
         Some(json!({"kind":"close","sessionId":other_id}))
+    );
+    // 即使原网页仍持有接收端，已经过期的视图也不能被心跳复活。
+    let expired_id = service
+        .create(&other_owner, &device.id, "/")
+        .await
+        .map_err(|_| anyhow::anyhow!("过期视图创建失败"))?;
+    assert_eq!(
+        commands.recv().await,
+        Some(json!({"kind":"open","sessionId":expired_id,"route":"/"}))
+    );
+    let _expired_browser = service
+        .attach(&other_owner, &expired_id)
+        .await
+        .map_err(|_| anyhow::anyhow!("过期视图连接失败"))?;
+    sqlx::query(
+        "UPDATE worker_webview_sessions SET expires_at=now()-interval '1 second' WHERE id=$1",
+    )
+    .bind(&expired_id)
+    .execute(&pool)
+    .await?;
+    assert!(service.renew(&other_owner, &expired_id).await.is_err());
+    assert!(service.authorize(&other_owner, &expired_id).await.is_err());
+    service
+        .expire(&device.id)
+        .await
+        .map_err(|_| anyhow::anyhow!("过期清理失败"))?;
+    assert_eq!(
+        commands.recv().await,
+        Some(json!({"kind":"close","sessionId":expired_id}))
     );
     let copy = service.clone();
     let request_owner = owner.clone();
@@ -202,6 +270,7 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         .await
         .map_err(|_| anyhow::anyhow!("撤权失败"))?;
     assert!(service.authorize(&owner, &id).await.is_err());
+    assert!(service.renew(&owner, &id).await.is_err());
     assert!(
         service
             .frame(&owner, &id, json!({"kind":"connect"}))
