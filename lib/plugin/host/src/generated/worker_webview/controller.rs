@@ -1,4 +1,4 @@
-use super::model::{Access, OpenView, ViewRequest};
+use super::model::{Access, OpenView, ViewRequest, WebviewRuntime};
 use crate::{
     generated::worker::controller::device,
     runtime::{
@@ -91,7 +91,12 @@ async fn access(
     let identity = device(&state, &headers).await?;
     state
         .worker_webviews
-        .access(&identity, request.enabled, request.headless)
+        .access(
+            &identity,
+            request.enabled,
+            request.headless,
+            request.runtime,
+        )
         .await?;
     Ok(response(Value::Null))
 }
@@ -124,7 +129,7 @@ async fn worker_socket(
     loop {
         tokio::select! {
             _ = heartbeat.tick() => {
-                let authorized = device(&state, &headers).await.is_ok_and(|identity| identity.capabilities.iter().any(|capability| capability == "codex.web"));
+                let authorized = device(&state, &headers).await.is_ok_and(|identity| identity.capabilities.iter().any(|capability| matches!(capability.as_str(), "codex.web" | "dsh.web")));
                 if !authorized || last_seen.elapsed() > Duration::from_secs(45) { break; }
                 if state.worker_webviews.expire(&id).await.is_err() { break; }
                 if socket.send(Message::Ping(Bytes::new())).await.is_err() { break; }
@@ -139,7 +144,7 @@ async fn worker_socket(
                 match frame {
                     Message::Pong(_) | Message::Ping(_) => {}
                     Message::Text(text) => {
-                        let authorized = device(&state, &headers).await.is_ok_and(|identity| identity.capabilities.iter().any(|capability| capability == "codex.web"));
+                        let authorized = device(&state, &headers).await.is_ok_and(|identity| identity.capabilities.iter().any(|capability| matches!(capability.as_str(), "codex.web" | "dsh.web")));
                         if !authorized { break; }
                         let Ok(frame) = serde_json::from_str(&text) else { break; };
                         if state.worker_webviews.receive(&id, &generation, frame).await.is_err() { break; }
@@ -271,6 +276,11 @@ async fn asset(
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
     );
-    headers.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_str(&format!("default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval' {prefix} blob:; connect-src {prefix} {websocket_prefix} blob:; style-src 'unsafe-inline' {prefix}; img-src data: blob: {prefix}; font-src data: {prefix}; worker-src data: {prefix}; object-src 'none'; frame-src 'none'; form-action 'none'; base-uri {prefix}"))?);
+    let evaluation = if owner.runtime == WebviewRuntime::Dsh {
+        " 'unsafe-eval'"
+    } else {
+        ""
+    };
+    headers.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_str(&format!("default-src 'none'; script-src 'unsafe-inline'{evaluation} 'wasm-unsafe-eval' {prefix} blob:; connect-src {prefix} {websocket_prefix} blob:; style-src 'unsafe-inline' {prefix}; img-src data: blob: {prefix}; font-src data: {prefix}; worker-src data: {prefix}; object-src 'none'; frame-src 'none'; form-action 'none'; base-uri {prefix}"))?);
     Ok(response)
 }

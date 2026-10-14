@@ -142,16 +142,36 @@ pub(in crate::runtime::server) async fn device_view_grant(
     state: &RuntimeState,
     session: &SessionContext,
     token: &str,
-) -> Result<FrontendGrant, RuntimeError> {
+) -> Result<
+    (
+        FrontendGrant,
+        crate::generated::worker_webview::model::WebviewRuntime,
+    ),
+    RuntimeError,
+> {
     let grant = validate(state, session, token).await?;
     let bundle = state
         .components()?
         .bundle(Uuid::parse_str(&grant.source_id)?, &grant.tenant_id)
         .await?;
-    if !permits_device_views(bundle.manifest()) {
-        return Err(RuntimeError::forbidden("插件未获 Codex 设备视图授权"));
-    }
-    Ok(grant)
+    use crate::generated::worker_webview::model::WebviewRuntime;
+    let capabilities = &bundle
+        .manifest()
+        .plugin
+        .runtime
+        .process
+        .as_ref()
+        .ok_or_else(|| RuntimeError::forbidden("插件未声明网页运行时"))?
+        .worker_capabilities;
+    let runtime = match (
+        capabilities.iter().any(|value| value == "codex.web"),
+        capabilities.iter().any(|value| value == "dsh.web"),
+    ) {
+        (true, false) => WebviewRuntime::Codex,
+        (false, true) => WebviewRuntime::Dsh,
+        _ => return Err(RuntimeError::forbidden("插件必须声明唯一的网页运行时")),
+    };
+    Ok((grant, runtime))
 }
 
 fn permits_device_views(manifest: &az_plugin_bundle::BundleManifest) -> bool {
@@ -164,7 +184,7 @@ fn permits_device_views(manifest: &az_plugin_bundle::BundleManifest) -> bool {
             process
                 .worker_capabilities
                 .iter()
-                .any(|capability| capability == "codex.web")
+                .any(|capability| matches!(capability.as_str(), "codex.web" | "dsh.web"))
         })
 }
 

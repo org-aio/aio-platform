@@ -1,4 +1,4 @@
-use super::model::ViewOwner;
+use super::model::{ViewOwner, WebviewRuntime};
 use crate::{
     generated::worker::model::{DeviceIdentity, Worker},
     runtime::server::http_error::RuntimeError,
@@ -15,6 +15,7 @@ pub(crate) trait WorkerWebviewService: Send + Sync {
         device: &DeviceIdentity,
         enabled: bool,
         headless: bool,
+        runtime: WebviewRuntime,
     ) -> Result<(), RuntimeError>;
     async fn devices(&self, owner: &ViewOwner) -> Result<Vec<Worker>, RuntimeError>;
     async fn create(
@@ -55,6 +56,7 @@ pub(super) struct Peer {
 
 pub(super) struct ViewChannel {
     pub worker: String,
+    pub runtime: WebviewRuntime,
     pub sender: mpsc::Sender<ViewFrame>,
     pub receiver: Option<mpsc::Receiver<ViewFrame>>,
     pub budget: Arc<Semaphore>,
