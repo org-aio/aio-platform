@@ -11,8 +11,15 @@ use tower_http::services::{ServeDir, ServeFile};
 
 pub fn application(root: PathBuf) -> Router {
     let index = ServeFile::new(root.join("index.html"));
+    // Brotli 优先：同一份 Wasm 在构建期预压缩为 .br 后比 gzip 小约三成，
+    // 直接减少公网首屏的传输体积。缺少 .br 的文件自动回退 gzip/原始字节。
     Router::new()
-        .fallback_service(ServeDir::new(root).precompressed_gzip().fallback(index))
+        .fallback_service(
+            ServeDir::new(root)
+                .precompressed_br()
+                .precompressed_gzip()
+                .fallback(index),
+        )
         .layer(middleware::from_fn(cache_headers))
 }
 
@@ -161,6 +168,73 @@ mod tests {
                     "text/html; charset=utf-8"
                 );
             }
+            anyhow::Ok(())
+        }
+        .await;
+        server.abort();
+        let _ = server.await;
+        result
+    }
+
+    #[tokio::test]
+    async fn brotli_precompressed_assets_win_over_gzip() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        std::fs::create_dir(root.path().join("assets"))?;
+        std::fs::write(
+            root.path().join("index.html"),
+            "<!doctype html><title>AIO IDEA</title>",
+        )?;
+        let name = "assets/app-dxh12345678.wasm";
+        // 构建期预压缩的 .br 与 .gz 副本；.br 更小，必须优先交付。
+        let bytes = "static wasm fixture ".repeat(64).into_bytes();
+        // 与构建期 node zlib brotli 质量 11 的产物一致，避免为测试引入编码器依赖。
+        let brotli: Vec<u8> = [
+            0x1b, 0xff, 0x04, 0xf8, 0x05, 0xea, 0x64, 0xa9, 0x5e, 0xae, 0x1f, 0xd8, 0x04, 0x05,
+            0x46, 0x11, 0xe2, 0x60, 0x8d, 0x70, 0x88, 0x31, 0x85, 0x53, 0x27, 0x1e, 0x3f, 0x5b,
+            0x06,
+        ]
+        .to_vec();
+        let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+        gzip.write_all(&bytes)?;
+        let gzip = gzip.finish()?;
+        assert!(brotli.len() < gzip.len());
+        std::fs::write(root.path().join(name), &bytes)?;
+        std::fs::write(root.path().join(format!("{name}.br")), &brotli)?;
+        std::fs::write(root.path().join(format!("{name}.gz")), &gzip)?;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let base = format!("http://{}", listener.local_addr()?);
+        let router = super::application(root.path().to_owned());
+        let server = tokio::spawn(async move { axum::serve(listener, router).await });
+        let client = reqwest::Client::new();
+        let result = async {
+            let response = client
+                .get(format!("{base}/{name}"))
+                .header("accept-encoding", "br, gzip")
+                .send()
+                .await?;
+            assert_eq!(response.headers()["content-encoding"], "br");
+            assert_eq!(response.headers()["vary"], "Accept-Encoding");
+            assert_eq!(response.bytes().await?.as_ref(), brotli);
+            // 只声明 gzip 的客户端仍拿到 gzip 副本。
+            let response = client
+                .get(format!("{base}/{name}"))
+                .header("accept-encoding", "gzip")
+                .send()
+                .await?;
+            assert_eq!(response.headers()["content-encoding"], "gzip");
+            assert_eq!(response.bytes().await?.as_ref(), gzip);
+            // 缺少 .br 的资产回退 gzip，不影响其它指纹资产。
+            let other = "assets/other-dxh87654321.js";
+            std::fs::write(root.path().join(other), b"console.log(1)")?;
+            let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+            gzip.write_all(b"console.log(1)")?;
+            std::fs::write(root.path().join(format!("{other}.gz")), gzip.finish()?)?;
+            let response = client
+                .get(format!("{base}/{other}"))
+                .header("accept-encoding", "br, gzip")
+                .send()
+                .await?;
+            assert_eq!(response.headers()["content-encoding"], "gzip");
             anyhow::Ok(())
         }
         .await;
