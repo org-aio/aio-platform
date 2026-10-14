@@ -148,7 +148,7 @@ impl BundleManifest {
         validate_relative_path(&plugin.runtime.artifact)?;
         if let Some(process) = &plugin.runtime.process {
             ensure!(
-                process.worker_capabilities.len() <= 7
+                process.worker_capabilities.len() <= 8
                     && process
                         .worker_capabilities
                         .iter()
@@ -161,6 +161,7 @@ impl BundleManifest {
                                 | "workspace.execute"
                                 | "workspace.manage"
                                 | "codex.web"
+                                | "dsh.web"
                         )),
                 "process 设备能力未开放"
             );

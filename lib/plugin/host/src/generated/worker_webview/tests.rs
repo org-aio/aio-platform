@@ -1,4 +1,7 @@
-use super::{WorkerWebviewService, WorkerWebviewServiceImpl, model::ViewOwner};
+use super::{
+    WorkerWebviewService, WorkerWebviewServiceImpl,
+    model::{ViewOwner, WebviewRuntime},
+};
 use crate::generated::worker::model::DeviceIdentity;
 use anyhow::Result;
 use serde_json::json;
@@ -44,7 +47,7 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         (true, true, json!(["codex.web", "codex.cli"])),
     ] {
         service
-            .access(&device, enabled, headless)
+            .access(&device, enabled, headless, WebviewRuntime::Codex)
             .await
             .map_err(|_| anyhow::anyhow!("更新无界面模式失败"))?;
         let capabilities: serde_json::Value =
@@ -55,6 +58,7 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         assert_eq!(capabilities, expected);
     }
     let owner = ViewOwner {
+        runtime: WebviewRuntime::Codex,
         tenant: device.tenant.clone(),
         user: device.user.clone(),
         session: "login-session".into(),
@@ -62,6 +66,43 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         revision: "revision1".into(),
         mount: "mount1".into(),
     };
+    // dsh 授权不能污染 Codex 模式，两个插件按自己的能力筛选设备。
+    service
+        .access(&device, true, false, WebviewRuntime::Dsh)
+        .await
+        .map_err(|_| anyhow::anyhow!("dsh 授权失败"))?;
+    let dsh_owner = ViewOwner {
+        runtime: WebviewRuntime::Dsh,
+        mount: "dsh-mount".into(),
+        ..owner.clone()
+    };
+    assert_eq!(
+        service
+            .devices(&dsh_owner)
+            .await
+            .map_err(|_| anyhow::anyhow!("dsh 设备读取失败"))?
+            .len(),
+        1
+    );
+    service
+        .access(&device, false, false, WebviewRuntime::Dsh)
+        .await
+        .map_err(|_| anyhow::anyhow!("dsh 撤权失败"))?;
+    assert!(
+        service
+            .devices(&dsh_owner)
+            .await
+            .map_err(|_| anyhow::anyhow!("dsh 设备读取失败"))?
+            .is_empty()
+    );
+    assert_eq!(
+        service
+            .devices(&owner)
+            .await
+            .map_err(|_| anyhow::anyhow!("Codex 设备读取失败"))?
+            .len(),
+        1
+    );
     let (generation, mut commands) = service
         .register(&device)
         .await
@@ -72,7 +113,7 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         .map_err(|_| anyhow::anyhow!("创建失败"))?;
     assert_eq!(
         commands.recv().await,
-        Some(json!({"kind":"open","sessionId":id,"route":"/"}))
+        Some(json!({"kind":"open","sessionId":id,"route":"/","runtime":"codex"}))
     );
     assert!(service.renew(&owner, &id).await.is_err());
     let mut browser = service
@@ -214,7 +255,7 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         .map_err(|_| anyhow::anyhow!("第二个视图创建失败"))?;
     assert_eq!(
         commands.recv().await,
-        Some(json!({"kind":"open","sessionId":other_id,"route":"/"}))
+        Some(json!({"kind":"open","sessionId":other_id,"route":"/","runtime":"codex"}))
     );
     // 第二个网页尚未加载完成时，初始化突发不能挡住原网页及同一设备的资源回包。
     for index in 0..96 {
@@ -303,7 +344,7 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         .map_err(|_| anyhow::anyhow!("过期视图创建失败"))?;
     assert_eq!(
         commands.recv().await,
-        Some(json!({"kind":"open","sessionId":expired_id,"route":"/"}))
+        Some(json!({"kind":"open","sessionId":expired_id,"route":"/","runtime":"codex"}))
     );
     let _expired_browser = service
         .attach(&other_owner, &expired_id)
@@ -343,7 +384,7 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         .map_err(|_| anyhow::anyhow!("资源应答失败"))?;
     assert_eq!(waiting.await??, reply);
     service
-        .access(&device, false, false)
+        .access(&device, false, false, WebviewRuntime::Codex)
         .await
         .map_err(|_| anyhow::anyhow!("撤权失败"))?;
     assert!(service.authorize(&owner, &id).await.is_err());

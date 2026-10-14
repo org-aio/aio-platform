@@ -27,8 +27,9 @@ impl RuntimeState {
         if !grant.page_id.starts_with("component:") {
             return Err(RuntimeError::forbidden("当前插件未声明设备视图授权"));
         }
-        let grant = super::components::device_view_grant(self, &session, token).await?;
+        let (grant, runtime) = super::components::device_view_grant(self, &session, token).await?;
         Ok(ViewOwner {
+            runtime,
             tenant: grant.tenant_id,
             user: grant.user_id,
             session: grant.session_id,

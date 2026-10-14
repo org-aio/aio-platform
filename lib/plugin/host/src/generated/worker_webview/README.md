@@ -13,3 +13,9 @@
 每设备最多 4 个视图，最多 64 个设备 peer，设备命令队列容量 32。网页各有独立的 256 帧、32 MiB 缓冲；入队不等待网页消费，慢网页超限只关闭自身，其他浏览器的消息及资源回包继续通过同一设备通道。帧消费完成或视图关闭时释放对应内存预算。资源请求最多 32 个，30 秒超时。等待视图 90 秒超时，视图初始有效期 30 分钟。已连接网页每 10 秒在校验登录、插件版本、挂载和设备授权后，将视图与挂载续期 30 分钟；连续 45 秒没有收到网页消息或 Pong 即关闭。等待、已关闭、已过期或已撤权的视图不会续期，资源读取和普通授权检查也不会延长有效期。断线不保留/重放写请求，设备控制器关闭对应 Native 窗口。反向代理须允许 WebSocket Upgrade。
 
 聚焦测试：`AIO_TEST_DATABASE_URL=... cargo test -p az-plugin-host --features server worker_webview -- --include-ignored`。使用独立测试数据库；用例创建随机 schema 并清理，验证授权、来源和资源边界、帧顺序、资源应答、六种 owner 字段隔离、重复 attach、存活续期及失效后禁止续期。浏览器 fixture 测试位于配套 `aio-plugin-agent-codex/test/browser`；真实 Codex 发送、停止、审批及文件交互需另外验收。
+
+## 多运行时设备视图
+
+Codex 插件声明 `codex.web`，DeepSeek Harness 插件声明 `dsh.web`。宿主从已经验证的插件清单推导唯一运行时，`list/open/authorize/renew` 均检查对应能力；设备 `access` 请求可指定 `runtime`，省略时沿用 Codex。两种运行时在设备端复用一条通道，通过打开视图时的 `runtime` 和后续 `sessionId` 分发。撤销 dsh 授权只关闭 dsh 视图，不修改 Codex 的授权和无界面模式。
+
+建议阅读顺序：`model.rs` 的运行时和身份、`service_impl.rs` 的权限与生命周期、`controller.rs` 的资源 CSP、`tests.rs` 的数据库回归。
