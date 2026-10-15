@@ -97,6 +97,7 @@ pub fn router(state: RuntimeState) -> Router {
             post(uninstall),
         )
         .merge(super::delivery::router())
+        .merge(super::enhancements::router())
         .merge(super::components::router(state.clone()))
         .merge(super::bootstrap::router())
         .merge(super::navigation::router())

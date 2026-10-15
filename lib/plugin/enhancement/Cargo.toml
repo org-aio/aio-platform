@@ -1,0 +1,26 @@
+[package]
+name = "az-plugin-enhancement"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Bounded Rhai and TypeScript host enhancements for AIO."
+
+[dependencies]
+anyhow.workspace = true
+az-plugin-contract = { path = "../contract" }
+rhai = { version = "1.26.1", features = ["sync", "serde", "no_module"] }
+rquickjs = "0.14.0"
+oxc_allocator = "=0.146.0"
+oxc_ast = "=0.146.0"
+oxc_codegen = "=0.146.0"
+oxc_parser = "=0.146.0"
+oxc_semantic = "=0.146.0"
+oxc_span = "=0.146.0"
+oxc_transformer = "=0.146.0"
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[lints]
+workspace = true

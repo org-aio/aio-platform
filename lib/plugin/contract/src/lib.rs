@@ -1,8 +1,10 @@
 #![forbid(unsafe_code)]
 
+mod enhancement;
 mod model;
 pub mod process;
 
+pub use enhancement::*;
 pub use model::*;
 
 pub const WIT: &str = include_str!("../wit/plugin.wit");

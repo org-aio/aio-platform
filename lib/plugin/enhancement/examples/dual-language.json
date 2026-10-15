@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "enhancements": [
+    {
+      "path": "/v1/math/add",
+      "language": "rhai",
+      "source": "fn invoke(input, context) { input.left + input.right }",
+      "examples": [
+        {
+          "input": {
+            "left": 2,
+            "right": 3
+          },
+          "output": 5
+        }
+      ]
+    },
+    {
+      "path": "/v1/text/slug",
+      "language": "typescript",
+      "source": "export function invoke(input: string): string { return input.trim().toLowerCase().replace(/\\s+/g, '-'); }",
+      "examples": [
+        {
+          "input": " AI Bootstrap ",
+          "output": "ai-bootstrap"
+        }
+      ]
+    }
+  ]
+}

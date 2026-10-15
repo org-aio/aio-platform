@@ -24,4 +24,5 @@ pub(super) struct Processes {
     pub(super) pending: Mutex<HashMap<Uuid, Arc<model::Instance>>>,
 }
 
+mod enhancements;
 mod http_egress;

@@ -539,6 +539,7 @@ async fn verify_bridge(state: &RuntimeState, worker: &str) -> Result<()> {
     sqlx::query("INSERT INTO component_installations(tenant_id,source_id,digest,generation) VALUES('test',$1,'workspace-test',$2)").bind(source).bind(Uuid::new_v4()).execute(pool).await?;
     sqlx::query("INSERT INTO component_process_actors(source_id,tenant_id,user_id) VALUES($1,'test','owner'),($1,'test','disabled')").bind(source).execute(pool).await?;
     let mut gateway = Gateway {
+        enhancements: vec![],
         components: Arc::downgrade(components),
         start: super::super::model::Start {
             source,

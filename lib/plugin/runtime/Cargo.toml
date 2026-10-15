@@ -25,6 +25,7 @@ futures-util = "0.3.32"
 aes-gcm = "0.10.3"
 
 [dev-dependencies]
+az-plugin-enhancement = { path = "../enhancement" }
 tempfile = "3.23.0"
 axum.workspace = true
 serde.workspace = true

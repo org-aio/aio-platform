@@ -6,6 +6,7 @@ mod bootstrap_document;
 mod components;
 mod delivery;
 pub mod development;
+mod enhancements;
 mod frontend_access;
 mod frontend_delivery;
 mod frontend_devices;

@@ -61,12 +61,17 @@ interface management {
     invoke: func(request: request) -> result<response, string>;
 }
 
+interface enhancements {
+    invoke: func(path: string, input: string) -> result<string, string>;
+}
+
 world plugin {
     import host;
     import database;
     import storage;
     import cryptography;
     import management;
+    import enhancements;
     use transport.{request, response, phase};
     use metadata.{description};
     export describe: func() -> description;

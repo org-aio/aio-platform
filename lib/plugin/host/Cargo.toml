@@ -16,6 +16,7 @@ futures-util = { version = "0.3", optional = true }
 az-plugin-bundle = { path = "../bundle", optional = true }
 az-plugin-contract = { path = "../contract", optional = true }
 az-plugin-runtime = { path = "../runtime", optional = true }
+az-plugin-enhancement = { path = "../enhancement", optional = true }
 semver = { version = "1", optional = true }
 getrandom = { version = "0.4.2", optional = true }
 axum = { version = "0.8.6", features = ["ws"], optional = true }
@@ -45,7 +46,7 @@ web-sys = { version = "0.3.77", features = ["AbortSignal", "Document", "Element"
 
 [features]
 test-support = ["server"]
-components = ["dep:az-plugin-bundle", "dep:az-plugin-contract", "dep:az-plugin-runtime", "dep:async-trait", "dep:semver", "dep:getrandom", "dep:futures-util"]
+components = ["dep:az-plugin-bundle", "dep:az-plugin-contract", "dep:az-plugin-runtime", "dep:az-plugin-enhancement", "dep:async-trait", "dep:semver", "dep:getrandom", "dep:futures-util"]
 default = []
 ui = ["dep:dioxus", "dep:dioxus-icons", "dep:az-dioxus-admin-shell", "dep:az-ui-components"]
 web = ["ui", "dioxus/web", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]

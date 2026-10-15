@@ -47,6 +47,16 @@ impl Guest for Fixture {
     }
 
     fn handle(request: Request) -> Response {
+        #[cfg(feature = "enhancements")]
+        if request.path == "/enhancement" {
+            let result = String::from_utf8(request.body)
+                .map_err(|error| error.to_string())
+                .and_then(|input| aio::plugin::enhancements::invoke("/v1/math/double", &input));
+            return match result {
+                Ok(output) => Response { status: 200, headers: vec![], body: output.into_bytes() },
+                Err(error) => Response { status: 403, headers: vec![], body: error.into_bytes() },
+            };
+        }
         if request.path == "/environment" {
             return Response {
                 status: 200,

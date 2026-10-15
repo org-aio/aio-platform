@@ -12,6 +12,8 @@ pub struct RequestContext {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CapabilityGrants {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub enhancements: Vec<String>,
     pub cryptography: bool,
     pub database: bool,
     pub storage: bool,

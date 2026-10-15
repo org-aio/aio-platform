@@ -8,6 +8,7 @@ AIO's reusable runtime, protocols, SDKs and development tools. The public produc
 
 - `lib/plugin/contract`：`aio:plugin@2.0.0` WIT 和宿主调用上下文。
 - `lib/plugin/runtime`：Wasmtime、能力授权、事务与对象存储代理；不依赖业务插件实现。
+- `lib/plugin/enhancement`：共享的 Rhai/TypeScript 纯计算增强执行器，由现有宿主统一授权、持久化和切换版本；见[微内核演进](docs/plugin/microkernel-evolution.md)。
 - `lib/plugin/core`：Rust 进程内的 Dill/TypeId 扩展基础库，不是在线业务插件。
 - `lib/plugin/manifest`、`package`、`bundle`：现役两种包的清单、编码与验证。
 - `lib/plugin/host`：通用服务端宿主与浏览器壳；产品通过中立身份接口和显式配置装配。

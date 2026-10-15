@@ -40,6 +40,7 @@ pub(super) use frontend::device_view_grant;
 pub(super) use frontend::mount;
 
 pub(super) struct Components {
+    pub(super) enhancements: Arc<super::enhancements::Enhancements>,
     pub pool: PgPool,
     development: tokio::sync::RwLock<std::collections::BTreeMap<Uuid, development::Instance>>,
     provisioner: DatabaseProvisioner,
@@ -85,14 +86,17 @@ impl Components {
             .add::<crate::generated::worker::WorkerServiceImpl>()
             .build()
             .get_one::<dyn crate::generated::worker::WorkerService>()?;
+        let enhancements = Arc::new(super::enhancements::Enhancements::open(pool.clone()).await?);
+        let services = Arc::new(services::Services::with_enhancements(enhancements.clone()));
         Ok(Arc::new_cyclic(|weak| Self {
+            enhancements,
             pool,
             development: Default::default(),
             provisioner,
             engine,
             keyring,
             objects,
-            services: Arc::default(),
+            services,
             identity,
             workers,
             slots: Mutex::default(),

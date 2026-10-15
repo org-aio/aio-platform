@@ -87,6 +87,10 @@ impl ComponentSlot {
                 && (!requested.database || grants.database)
                 && (!requested.storage || grants.storage)
                 && (!requested.management || grants.management)
+                && requested
+                    .enhancements
+                    .iter()
+                    .all(|path| grants.enhancements.contains(path))
                 && (!requested.identity_provider || grants.identity_provider),
             "宿主未授予插件申请的全部能力"
         );
@@ -109,6 +113,10 @@ impl ComponentSlot {
         ensure!(
             !requested.management || resources.services.is_some(),
             "插件管理能力未绑定"
+        );
+        ensure!(
+            requested.enhancements.is_empty() || resources.services.is_some(),
+            "脚本增强服务未绑定"
         );
         ensure!(
             semver::VersionReq::parse(&bundle.manifest().plugin.runtime.host_version)?

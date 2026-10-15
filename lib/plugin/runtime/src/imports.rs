@@ -9,6 +9,7 @@ pub(crate) fn permitted(name: &str) -> bool {
                 | "aio:plugin/database"
                 | "aio:plugin/storage"
                 | "aio:plugin/management"
+                | "aio:plugin/enhancements"
                 | "aio:plugin/cryptography"
                 | "aio:plugin/transport"
                 | "aio:plugin/metadata"

@@ -237,6 +237,7 @@ impl Processes {
             http_endpoints: configuration.http_endpoints.clone(),
             worker_capabilities: configuration.worker_capabilities.clone(),
             services: configuration.services.clone(),
+            enhancements: manifest.capabilities.enhancements.clone(),
             client: reqwest::Client::builder()
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())

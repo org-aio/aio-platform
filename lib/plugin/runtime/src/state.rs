@@ -369,6 +369,29 @@ impl management::Host for InvocationState {
     }
 }
 
+impl crate::bindings::aio::plugin::enhancements::Host for InvocationState {
+    async fn invoke(
+        &mut self,
+        path: String,
+        input: String,
+    ) -> wasmtime::Result<Result<String, String>> {
+        let result = async move {
+            self.permit(self.scope.grants.enhancements.contains(&path))?;
+            ensure!(input.len() <= 64 * 1024, "增强输入超过配额");
+            az_plugin_contract::validate_enhancement_path(&path)?;
+            let request = az_plugin_contract::EnhancementRequest {
+                path,
+                input: serde_json::from_str(&input).context("增强输入必须是 JSON")?,
+            };
+            let services = self.resources.services.as_ref().context("增强服务未绑定")?;
+            let response = services.enhance(&self.scope, request).await?;
+            Ok(serde_json::to_string(&response)?)
+        }
+        .await;
+        Ok(wire(result))
+    }
+}
+
 fn wire<T>(result: Result<T>) -> Result<T, String> {
     result.map_err(|error| error.to_string())
 }

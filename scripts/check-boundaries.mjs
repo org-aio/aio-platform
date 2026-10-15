@@ -14,6 +14,10 @@ function check(root, label) {
     if (business.test(pkg.name)) failures.push(`${label}: business package ${pkg.name}`);
     for (const dependency of pkg.dependencies) {
       if (business.test(dependency.name)) failures.push(`${label}: ${pkg.name} depends on ${dependency.name}`);
+      if (pkg.name === 'az-plugin-enhancement' && dependency.kind !== 'dev'
+        && /^(az-plugin-(host|runtime|core)|sqlx|axum|reqwest|dioxus|tokio)$/.test(dependency.name)) {
+        failures.push(`${label}: script evaluator must not own host infrastructure: ${dependency.name}`);
+      }
     }
   }
 }

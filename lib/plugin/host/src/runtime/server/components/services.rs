@@ -17,6 +17,7 @@ pub(super) fn permission(source: impl std::fmt::Display, name: &str) -> String {
 
 #[derive(Default)]
 pub(super) struct Services {
+    enhancements: Option<Arc<super::super::enhancements::Enhancements>>,
     requests: Mutex<HashMap<String, (RequestContext, Vec<String>)>>,
 }
 pub(super) struct Authorization {
@@ -24,6 +25,14 @@ pub(super) struct Authorization {
     services: Arc<Services>,
 }
 impl Services {
+    pub(super) fn with_enhancements(
+        enhancements: Arc<super::super::enhancements::Enhancements>,
+    ) -> Self {
+        Self {
+            enhancements: Some(enhancements),
+            ..Default::default()
+        }
+    }
     pub(super) fn interactive(&self, id: &str, tenant: &str, user: &str) -> Result<RequestContext> {
         let requests = self
             .requests
@@ -109,6 +118,19 @@ impl HostServices for Services {
     }
     async fn manage(&self, _: &InvocationScope, _: Request) -> Result<Response> {
         bail!("当前执行器未授予管理接口")
+    }
+
+    async fn enhance(
+        &self,
+        scope: &InvocationScope,
+        request: az_plugin_contract::EnhancementRequest,
+    ) -> Result<az_plugin_contract::EnhancementResponse> {
+        use anyhow::Context as _;
+        self.enhancements
+            .as_ref()
+            .context("增强服务未绑定")?
+            .invoke(scope, request)
+            .await
     }
 }
 
