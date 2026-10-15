@@ -16,8 +16,17 @@ use axum::{
 };
 
 pub(in crate::runtime::server) fn router(state: RuntimeState) -> Router<RuntimeState> {
+    // 桥响应按 JSON 压缩；单独成 Router 让多层叠加的类型能正确推导。
+    let request = Router::new()
+        .route(
+            "/api/runtime/components/{token}/request",
+            post(super::frontend::request),
+        )
+        .layer(super::super::frontend_delivery::json_compression())
+        .layer(DefaultBodyLimit::max(32 * 1024 * 1024));
     Router::new()
         .merge(super::worker_services::router())
+        .merge(request)
         .route(
             "/api/runtime/components/publish",
             post(publish)
@@ -42,10 +51,6 @@ pub(in crate::runtime::server) fn router(state: RuntimeState) -> Router<RuntimeS
         .route(
             "/api/runtime/components/assets/{token}/{*path}",
             get(super::frontend::asset).layer(super::super::frontend_delivery::compression()),
-        )
-        .route(
-            "/api/runtime/components/{token}/request",
-            post(super::frontend::request).layer(DefaultBodyLimit::max(32 * 1024 * 1024)),
         )
         .route(
             "/api/runtime/components/{token}/renew",

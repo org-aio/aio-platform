@@ -198,8 +198,9 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
 #[test]
 fn binary_requests_reject_forged_identity_and_escaping_paths() {
     let request = |path: &str, headers: serde_json::Value| {
+        // 正文是 base64 字符串；空正文就是空字符串。
         serde_json::from_value::<model::Request>(
-            serde_json::json!({"method":"GET","path":path,"body":[],"headers":headers}),
+            serde_json::json!({"method":"GET","path":path,"body":"","headers":headers}),
         )
         .unwrap()
     };
