@@ -70,7 +70,7 @@ impl Description {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Request {
     pub method: String,
@@ -78,11 +78,12 @@ pub(super) struct Request {
     pub query: Option<String>,
     #[serde(default)]
     pub headers: Vec<Header>,
-    #[serde(default)]
+    /// 正文按 base64 传输：JSON 里的字节数组会放大到约 3.4 倍，浏览器还要解析一座数字山。
+    #[serde(default, with = "base64_body")]
     pub body: Vec<u8>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Header {
     pub name: String,
@@ -143,6 +144,8 @@ impl TryFrom<Request> for transport::Request {
 pub(super) struct Response {
     pub status: u16,
     pub headers: Vec<Header>,
+    /// 插件原始响应按 base64 回传，避免把字节摊成数字数组后再交给浏览器解析。
+    #[serde(with = "base64_body")]
     pub body: Vec<u8>,
 }
 impl From<transport::Response> for Response {
@@ -159,5 +162,104 @@ impl From<transport::Response> for Response {
                 .collect(),
             body: r.body,
         }
+    }
+}
+
+/// 插件正文在 JSON 信封里按 base64 传输。`Vec<u8>` 的默认表示是"一个字节一个数字"的数组，
+/// 体积放大约 3.4 倍，宿主与浏览器都要为这座数字山付出序列化和解析成本。
+mod base64_body {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use serde::{Deserialize as _, Deserializer, Serializer, de::Error as _};
+
+    pub(super) fn serialize<S>(body: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&STANDARD.encode(body))
+    }
+
+    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let encoded = String::deserialize(deserializer)?;
+        STANDARD
+            .decode(encoded.as_bytes())
+            .map_err(D::Error::custom)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_body_decodes_from_base64() {
+        let request: Request = serde_json::from_value(serde_json::json!({
+            "method": "POST",
+            "path": "/tasks",
+            "body": "AP+A",
+        }))
+        .expect("base64 正文必须能解析");
+        assert_eq!(request.body, vec![0, 255, 128]);
+    }
+
+    #[test]
+    fn missing_request_body_stays_empty() {
+        let request: Request = serde_json::from_value(serde_json::json!({
+            "method": "GET",
+            "path": "/tasks",
+        }))
+        .expect("缺少正文必须按空正文处理");
+        assert!(request.body.is_empty());
+    }
+
+    #[test]
+    fn invalid_base64_body_is_rejected() {
+        let error = serde_json::from_value::<Request>(serde_json::json!({
+            "method": "POST",
+            "path": "/tasks",
+            "body": "not base64!",
+        }))
+        .expect_err("非法 base64 必须失败");
+        assert!(!error.to_string().is_empty());
+    }
+
+    #[test]
+    fn legacy_number_array_body_fails_loudly() {
+        // 旧宿主脚本发数字数组时必须显式失败，不能静默变成空正文。
+        let error = serde_json::from_value::<Request>(serde_json::json!({
+            "method": "POST",
+            "path": "/tasks",
+            "body": [0, 255, 128],
+        }))
+        .expect_err("旧数字数组协议必须被拒绝");
+        assert!(error.to_string().contains("string"), "{error}");
+    }
+
+    #[test]
+    fn response_body_serializes_as_base64() {
+        let response = Response {
+            status: 200,
+            headers: Vec::new(),
+            body: vec![0, 255, 128],
+        };
+        let value = serde_json::to_value(&response).expect("序列化桥响应");
+        assert_eq!(value["body"], serde_json::json!("AP+A"));
+        assert!(value["body"].is_string());
+    }
+
+    #[test]
+    fn decoded_body_still_obeys_the_transport_limit() {
+        use base64::Engine as _;
+        let oversized =
+            base64::engine::general_purpose::STANDARD.encode(vec![b'x'; 8 * 1024 * 1024 + 1]);
+        let request: Request = serde_json::from_value(serde_json::json!({
+            "method": "POST",
+            "path": "/tasks",
+            "body": oversized,
+        }))
+        .expect("base64 正文必须能解析");
+        assert!(transport::Request::try_from(request).is_err());
     }
 }

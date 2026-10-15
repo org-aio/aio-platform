@@ -76,7 +76,8 @@ const server = createServer(async (req, res) => {
       if (action === 'renew') { counts.renew++; return res.writeHead(204).end(); }
       counts.business++;
       const body = JSON.stringify({ items: [], total: 0, completed: 0, tenantId: 'test', userId: 'tester', serverTime: '2026-09-11', storage: 'protocol-fixture' });
-      return send(200, { data: abi === 2 ? { status: 200, headers: [], body: Array.from(Buffer.from(body)) } : { status: 200, content_type: 'application/json', body } });
+      // v2 桥正文按 base64 传输，v1 仍是字符串信封。
+      return send(200, { data: abi === 2 ? { status: 200, headers: [], body: Buffer.from(body).toString('base64') } : { status: 200, content_type: 'application/json', body } });
     }
     const asset = path.match(/^\/api\/runtime\/(?:frontend|components)\/assets\/([^/]+)\/(.+)$/);
     let bytes;
