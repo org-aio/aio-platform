@@ -7,6 +7,8 @@ pub mod configuration;
 pub mod identity;
 #[cfg(feature = "server")]
 pub mod metering;
+#[cfg(feature = "server")]
+pub mod recovery;
 pub mod runtime;
 mod startup;
 
