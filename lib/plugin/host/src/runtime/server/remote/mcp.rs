@@ -8,8 +8,8 @@ use anyhow::{Context, Result, ensure};
 use rmcp::{
     RoleClient, ServiceExt,
     model::{
-        CallToolRequest, CallToolRequestParams, ClientRequest, PaginatedRequestParams,
-        ServerResult, Tool,
+        CallToolRequest, CallToolRequestParams, ClientRequest, ListToolsRequest,
+        PaginatedRequestParams, ServerResult, Tool,
     },
     service::{PeerRequestOptions, RunningService},
     transport::{
@@ -25,6 +25,7 @@ use super::{
     mcp_http::BoundedClient,
 };
 
+#[derive(Clone)]
 pub(super) struct Mcp {
     client: BoundedClient,
     endpoint: String,
@@ -42,6 +43,7 @@ impl Mcp {
         tool: String,
         output: McpOutput,
         capability: &RuntimeCapability,
+        tasks: &PluginTasks,
     ) -> Result<Self> {
         ensure!(!tool.is_empty() && tool.len() <= 256, "MCP 工具名称无效");
         let binding = Self {
@@ -52,9 +54,9 @@ impl Mcp {
             capability: capability.clone(),
             calls: Arc::new(tokio::sync::Semaphore::new(4)),
         };
-        let connection = binding.connect().await?;
-        let result = binding.validate_tool(&connection).await;
-        finish(connection, result).await?;
+        binding
+            .session(None, tasks, Instant::now() + Duration::from_secs(30), None)
+            .await?;
         Ok(binding)
     }
 
@@ -68,19 +70,40 @@ impl Mcp {
         ().serve(transport).await.context("连接远端 MCP 失败")
     }
 
-    async fn validate_tool(&self, connection: &RunningService<RoleClient, ()>) -> Result<()> {
+    async fn validate_tool(
+        &self,
+        connection: &RunningService<RoleClient, ()>,
+        sender: &mut tokio::sync::oneshot::Sender<Result<SessionOutput>>,
+        cancellation: &tokio_util::sync::CancellationToken,
+        deadline: Instant,
+    ) -> Result<bool> {
         let mut cursor = None;
         let mut visited = HashSet::new();
         let mut selected = None;
         let mut bytes = 0;
         for _ in 0..16 {
-            let page = connection
-                .list_tools(cursor.map(|cursor| {
+            let request = ListToolsRequest {
+                params: cursor.map(|cursor| {
                     let mut params = PaginatedRequestParams::default();
                     params.cursor = Some(cursor);
                     params
-                }))
-                .await?;
+                }),
+                ..Default::default()
+            };
+            let Some(response) = cancellable_request(
+                connection,
+                sender,
+                ClientRequest::ListToolsRequest(request),
+                cancellation,
+                deadline,
+            )
+            .await?
+            else {
+                return Ok(false);
+            };
+            let ServerResult::ListToolsResult(page) = response else {
+                anyhow::bail!("MCP 发现返回了错误的消息类型");
+            };
             bytes += serde_json::to_vec(&page)?.len();
             ensure!(bytes <= MAX_WIRE_BYTES, "MCP 工具目录超过配额");
             for tool in page.tools {
@@ -91,7 +114,8 @@ impl Mcp {
             }
             cursor = page.next_cursor;
             let Some(next) = &cursor else {
-                return self.check_contract(&selected.context("远端 MCP 工具不存在")?);
+                self.check_contract(&selected.context("远端 MCP 工具不存在")?)?;
+                return Ok(true);
             };
             ensure!(visited.insert(next.clone()), "MCP 工具目录分页循环");
         }
@@ -142,14 +166,14 @@ impl Mcp {
             .as_object()
             .context("MCP 工具参数必须为 JSON 对象")?
             .clone();
-        // 每次请求独立会话，并在调用前核对契约；尚未开始工具调用时可以直接关闭连接。
-        let connection = self.connect().await?;
-        if let Err(error) = self.validate_tool(&connection).await {
-            return finish(connection, Err(error)).await;
-        }
         let params = CallToolRequestParams::new(self.tool.clone()).with_arguments(arguments);
-        let response = call_tool(connection, params, tasks, deadline, permit).await?;
-        let ServerResult::CallToolResult(result) = response else {
+        let SessionOutput::Tool(response) = self
+            .session(Some(params), tasks, deadline, Some(permit))
+            .await?
+        else {
+            anyhow::bail!("MCP 会话没有返回工具结果");
+        };
+        let ServerResult::CallToolResult(result) = *response else {
             anyhow::bail!("MCP 工具返回了未声明的交互或后台任务");
         };
         ensure!(result.is_error != Some(true), "远端 MCP 工具执行失败");
@@ -158,60 +182,87 @@ impl Mcp {
             McpOutput::Envelope => Ok(serde_json::to_value(result)?),
         }
     }
+
+    async fn session(
+        &self,
+        params: Option<CallToolRequestParams>,
+        tasks: &PluginTasks,
+        deadline: Instant,
+        permit: Option<tokio::sync::OwnedSemaphorePermit>,
+    ) -> Result<SessionOutput> {
+        let connection = self.connect().await?;
+        let binding = self.clone();
+        let cancellation = tasks.cancellation();
+        let (mut sender, receiver) = tokio::sync::oneshot::channel();
+        tasks.spawn(async move {
+            let _permit = permit;
+            let operation = async {
+                if !binding
+                    .validate_tool(&connection, &mut sender, &cancellation, deadline)
+                    .await?
+                {
+                    return Ok(None);
+                }
+                let Some(params) = params else {
+                    return Ok(Some(SessionOutput::Validated));
+                };
+                let request = ClientRequest::CallToolRequest(CallToolRequest::new(params));
+                let result =
+                    cancellable_request(&connection, &mut sender, request, &cancellation, deadline)
+                        .await?;
+                Ok(result.map(|result| SessionOutput::Tool(Box::new(result))))
+            }
+            .await;
+            let result = finish(connection, operation).await;
+            if let Ok(None) = result {
+                return Ok(());
+            }
+            let result = result.and_then(|value| value.context("MCP 会话已取消"));
+            if let Err(result) = sender.send(result) {
+                // 调用方已退出时，清理错误由插件任务作用域保留并在关闭时报告。
+                result?;
+            }
+            Ok(())
+        })?;
+        receiver.await.context("MCP 会话已取消或超过截止时间")?
+    }
 }
 
-// 请求取消后必须先发送 MCP 取消通知再关闭会话。任务由插件收容，停止会等待有限清理；
-// 不能只 Drop SDK，因为有状态服务器可以在 HTTP 连接结束后继续执行工具。
-async fn call_tool(
-    connection: RunningService<RoleClient, ()>,
-    params: CallToolRequestParams,
-    tasks: &PluginTasks,
+enum SessionOutput {
+    Validated,
+    // 工具消息较大，使用 Box 避免纯发现结果也占用同样的栈空间。
+    Tool(Box<ServerResult>),
+}
+
+// 有状态服务器的发现和工具请求均可能在 HTTP 连接结束后继续执行；先取消，再关闭会话。
+async fn cancellable_request(
+    connection: &RunningService<RoleClient, ()>,
+    sender: &mut tokio::sync::oneshot::Sender<Result<SessionOutput>>,
+    message: ClientRequest,
+    cancellation: &tokio_util::sync::CancellationToken,
     deadline: Instant,
-    permit: tokio::sync::OwnedSemaphorePermit,
-) -> Result<ServerResult> {
-    let cancellation = tasks.cancellation();
-    let (mut sender, receiver) = tokio::sync::oneshot::channel::<Result<ServerResult>>();
-    tasks.spawn(async move {
-        let _permit = permit;
-        let operation = async {
-            if sender.is_closed() || cancellation.is_cancelled() || Instant::now() >= deadline {
-                return Ok(None);
-            }
-            // 只发送一次工具请求，不驱动交互轮次，也不进行任务重提交。
-            let mut request = connection
-                .peer()
-                .send_cancellable_request(
-                    ClientRequest::CallToolRequest(CallToolRequest::new(params)),
-                    PeerRequestOptions::no_options(),
-                )
-                .await?;
-            tokio::select! {
-                response = &mut request.rx => return Ok(Some(response.context("MCP 连接已关闭")??)),
-                _ = sender.closed() => {},
-                _ = cancellation.cancelled() => {},
-                _ = tokio::time::sleep_until(deadline.into()) => {},
-            }
-            tokio::time::timeout(
-                Duration::from_secs(2),
-                request.cancel(Some("宿主调用取消或超过截止时间".into())),
-            )
-            .await
-            .context("发送 MCP 取消通知超时")??;
-            Ok(None)
-        }
-        .await;
-        let result = finish(connection, operation).await;
-        if let Ok(None) = result {
-            return Ok(());
-        }
-        let result = result.and_then(|value| value.context("MCP 调用已取消"));
-        if let Err(result) = sender.send(result) {
-            // 调用方已退出时，清理错误由插件任务作用域保留并在关闭时报告。
-            result?;
-        }
-        Ok(())
-    })?;
-    receiver.await.context("MCP 调用已取消或超过截止时间")?
+) -> Result<Option<ServerResult>> {
+    if sender.is_closed() || cancellation.is_cancelled() || Instant::now() >= deadline {
+        return Ok(None);
+    }
+    // 一条请求只发送一次，不驱动交互轮次，也不进行任务重提交。
+    let mut request = connection
+        .peer()
+        .send_cancellable_request(message, PeerRequestOptions::no_options())
+        .await?;
+    tokio::select! {
+        response = &mut request.rx => return Ok(Some(response.context("MCP 连接已关闭")??)),
+        _ = sender.closed() => {},
+        _ = cancellation.cancelled() => {},
+        _ = tokio::time::sleep_until(deadline.into()) => {},
+    }
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        request.cancel(Some("宿主调用取消或超过截止时间".into())),
+    )
+    .await
+    .context("发送 MCP 取消通知超时")??;
+    Ok(None)
 }
 
 // 关闭失败不能遮盖真正的调用失败；调用已成功时也明确报告清理失败，禁止重试副作用。

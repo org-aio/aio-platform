@@ -86,7 +86,15 @@ impl Bindings {
         for (import, descriptor, auth) in pending {
             let binding = match import.transport {
                 Transport::Mcp { tool, output } => Binding::Mcp(
-                    Mcp::open(&import.endpoint, auth, tool, output, &import.capability).await?,
+                    Mcp::open(
+                        &import.endpoint,
+                        auth,
+                        tool,
+                        output,
+                        &import.capability,
+                        &tasks,
+                    )
+                    .await?,
                 ),
                 Transport::Grpc {
                     service, method, ..

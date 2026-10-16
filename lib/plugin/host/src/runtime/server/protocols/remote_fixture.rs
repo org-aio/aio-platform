@@ -44,6 +44,14 @@ pub struct Counts {
     pub pause_catalog: AtomicBool,
     pub catalog_entered: tokio::sync::Notify,
     pub catalog_release: tokio::sync::Notify,
+    pub catalog_active: AtomicUsize,
+}
+
+struct Discovery(Arc<Counts>);
+impl Drop for Discovery {
+    fn drop(&mut self) {
+        self.0.catalog_active.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 struct Active(Arc<Counts>);
@@ -188,6 +196,8 @@ impl ServerHandler for Tools {
         context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
         if self.0.pause_catalog.load(Ordering::SeqCst) {
+            self.0.catalog_active.fetch_add(1, Ordering::SeqCst);
+            let _discovery = Discovery(self.0.clone());
             self.0.catalog_entered.notify_one();
             tokio::select! {
                 _ = self.0.catalog_release.notified() => {},

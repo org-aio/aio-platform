@@ -379,7 +379,9 @@ async fn exercise_obsolete(fixture: &Fixture, first: &Upstream, second: &Upstrea
     let original = provider.snapshot().context("缺少快照")?;
     let registry = fixture.state.service::<RuntimeCapabilities>()?;
     second.counts.pause_catalog.store(true, Ordering::SeqCst);
-    write_imports(fixture, second.imports()).await?;
+    let mut next = second.imports();
+    next[0]["endpoint"] = json!(format!("{}/stateful", second.base));
+    write_imports(fixture, next.clone()).await?;
     let pending_provider = provider.clone();
     let pending_registry = registry.clone();
     let path = config_path(fixture)?.to_owned();
@@ -406,13 +408,20 @@ async fn exercise_obsolete(fixture: &Fixture, first: &Upstream, second: &Upstrea
 
     // 由真实后台观察器进入阻塞的发现请求，再关闭宿主；无需等待完整的 30 秒导入超时。
     second.counts.pause_catalog.store(true, Ordering::SeqCst);
-    write_imports(fixture, second.imports()).await?;
+    write_imports(fixture, next).await?;
     tokio::time::timeout(
         Duration::from_secs(10),
         second.counts.catalog_entered.notified(),
     )
     .await?;
     tokio::time::timeout(Duration::from_secs(3), fixture.state.shutdown()).await??;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while second.counts.catalog_active.load(Ordering::SeqCst) != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .context("关闭宿主没有取消有状态 MCP 的发现请求")?;
     assert!(registry.catalog(&fixture.identity.tenant)?.is_empty());
     assert!(reload(fixture).await.is_err());
     assert_eq!(second.counts.calls.load(Ordering::SeqCst), 0);
