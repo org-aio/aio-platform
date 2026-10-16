@@ -252,7 +252,7 @@ async fn changes(
             }
         }
         if !state
-            .identity
+            .service::<dyn crate::identity::IdentityProvider>()?
             .member_active(&owner.tenant, &owner.user)
             .await?
         {

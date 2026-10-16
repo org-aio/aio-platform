@@ -32,7 +32,7 @@ PY
 
 用当前租户管理会话向 `POST /api/runtime/enhancements/revisions` 提交该包，再将返回摘要和当前 `expected_generation` 提交到 `PUT /api/runtime/enhancements/active`。已有活动包时，应把这两项加入现有包，保留旧路径和样例，不能直接覆盖成只有策略的包。
 
-角色需要 `plugin:manage` 和每项策略声明的 `runtime:<path>` 权限。`plugin:manage` 本身不授予宿主能力。身份插件还须实现 `IdentityProvider::session_has_permissions`，从当前会话和角色关系查询权限；未实现时演进能力默认拒绝。Wasm/Sidecar 还需在自身清单声明对应 runtime 路径，并携带真实交互上下文。后台进程和脚本输入不能伪造用户授权。
+角色需要 `plugin:manage` 和每项策略声明的 `runtime:<path>` 权限。`plugin:manage` 本身不授予宿主能力。授权插件还须实现 `AuthorizationProvider::session_has_permissions`，从当前会话和角色关系查询权限；未实现时演进能力默认拒绝。Wasm/Sidecar 还需在自身清单声明对应 runtime 路径，并携带真实交互上下文。后台进程和脚本输入不能伪造用户授权。
 
 ## 请求与模型契约
 

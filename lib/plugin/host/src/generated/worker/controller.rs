@@ -116,7 +116,7 @@ pub(crate) async fn device(
             }
         })?;
     if !state
-        .identity
+        .service::<dyn crate::identity::IdentityProvider>()?
         .member_active(&identity.tenant, &identity.user)
         .await?
     {

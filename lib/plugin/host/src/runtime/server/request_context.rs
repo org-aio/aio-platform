@@ -24,11 +24,11 @@ pub(super) async fn authenticate_optional(
     state: &RuntimeState,
     headers: &HeaderMap,
 ) -> Result<Option<SessionContext>, RuntimeError> {
-    let Some(mut session) = state.identity.authenticate(headers).await? else {
+    let identity = state.service::<dyn crate::identity::IdentityProvider>()?;
+    let Some(mut session) = identity.authenticate(headers).await? else {
         return Ok(None);
     };
-    if !state
-        .identity
+    if !identity
         .member_active(&session.tenant_id, &session.user_id)
         .await?
     {
@@ -68,7 +68,11 @@ pub(super) async fn authenticate_publish_manager(
     headers: &HeaderMap,
 ) -> Result<SessionContext, RuntimeError> {
     let session = authenticate_manager(state, headers).await?;
-    if !state.identity.can_publish(&session).await? {
+    if !state
+        .service::<dyn crate::authorization::AuthorizationProvider>()?
+        .can_publish(&session)
+        .await?
+    {
         return Err(RuntimeError::forbidden("当前账号没有平台插件发布权限"));
     }
     Ok(session)

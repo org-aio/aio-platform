@@ -409,10 +409,12 @@ async fn tenant_bindings_restore_from_configuration_and_stateful_mcp_cancels() -
     assert!(pending.await?.is_err());
     assert_eq!(second.counts.active.load(Ordering::SeqCst), 0);
     fixture.server.abort();
-    let restored = RuntimeState::initialize_with_plugins(
+    let restored = RuntimeState::initialize(
         fixture.state.config.as_ref().clone(),
-        fixture.identity.clone(),
-        crate::runtime::server::plugins::default_plugins()?,
+        crate::runtime::server::admin_test_support::with_identity(
+            fixture.identity.clone(),
+            crate::runtime::server::plugins::default_plugins()?,
+        ),
     )
     .await?;
     let result = restored

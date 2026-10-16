@@ -28,14 +28,19 @@ impl IdentityProvider for Identity {
             .unwrap_or("test");
         Ok(Some(session(tenant, user)))
     }
-    async fn can_publish(&self, _: &SessionContext) -> Result<bool> {
-        Ok(false)
-    }
+
     async fn member_active(&self, _: &str, user: &str) -> Result<bool> {
         Ok(user != "disabled")
     }
     async fn session_active(&self, _: &str, _: &str, _: &str) -> Result<bool> {
         Ok(true)
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::authorization::AuthorizationProvider for Identity {
+    async fn can_publish(&self, _: &SessionContext) -> Result<bool> {
+        Ok(false)
     }
 }
 

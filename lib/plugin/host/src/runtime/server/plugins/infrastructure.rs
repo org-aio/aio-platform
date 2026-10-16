@@ -307,7 +307,7 @@ impl Plugin<RuntimeAssembly> for ComponentResourcesPlugin {
                         storage,
                         state.service::<Keyring>()?,
                         #[cfg(feature = "sidecar")]
-                        state.identity.clone(),
+                        state.service::<dyn crate::identity::IdentityProvider>()?,
                         state.extensions.services.weak_ref(),
                         state.service::<super::super::enhancements::Enhancements>()?,
                         state.service::<ComponentExecutors>()?,

@@ -24,6 +24,7 @@ macro_rules! route_plugin {
 
             fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
                 Box::pin(async move {
+                    assembly.require_service::<dyn crate::identity::IdentityProvider>();
                     $(assembly.require_service::<$required>();)*
                     assembly.add_routes($routes);
                     Ok(())
@@ -54,7 +55,7 @@ route_plugin!(NavigationPlugin, [StorePlugin], [], |_| {
 route_plugin!(
     ToolsPlugin,
     [StorePlugin, RepositoryPlugin],
-    [dyn worker::WorkerService],
+    [dyn worker::WorkerService, dyn crate::authorization::AuthorizationProvider],
     |_| { super::super::tools::router() }
 );
 route_plugin!(WorkersPlugin, [], [dyn worker::WorkerService], |_| {
@@ -78,6 +79,8 @@ impl Plugin<RuntimeAssembly> for ManagementPlugin {
     }
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
+            assembly.require_service::<dyn crate::identity::IdentityProvider>();
+            assembly.require_service::<dyn crate::authorization::AuthorizationProvider>();
             assembly.add_routes(|state| super::super::routes::management(state.clone()));
             assembly.on_start::<Self>(|state, _tasks| {
                 Box::pin(async move {
@@ -105,6 +108,8 @@ impl Plugin<RuntimeAssembly> for ComponentsPlugin {
     }
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
+            assembly.require_service::<dyn crate::identity::IdentityProvider>();
+            assembly.require_service::<dyn crate::authorization::AuthorizationProvider>();
             assembly.add_routes(|state| super::super::components::router(state.clone()));
             assembly.on_start::<Self>(|state, _tasks| {
                 Box::pin(async move {

@@ -1,5 +1,8 @@
 #![cfg(feature = "server")]
 
+#[path = "support/identity.rs"]
+mod identity_support;
+
 use std::sync::Arc;
 
 use anyhow::{Result, ensure};
@@ -87,14 +90,19 @@ impl IdentityProvider for Identity {
             permissions: vec![],
         }))
     }
-    async fn can_publish(&self, _: &SessionContext) -> Result<bool> {
-        Ok(false)
-    }
+
     async fn member_active(&self, tenant: &str, user: &str) -> Result<bool> {
         Ok(tenant == "plugin-test" && user == "reader")
     }
     async fn session_active(&self, session: &str, tenant: &str, user: &str) -> Result<bool> {
         Ok(session == "test-session" && self.member_active(tenant, user).await?)
+    }
+}
+
+#[async_trait::async_trait]
+impl az_plugin_host::authorization::AuthorizationProvider for Identity {
+    async fn can_publish(&self, _: &SessionContext) -> Result<bool> {
+        Ok(false)
     }
 }
 
@@ -116,7 +124,7 @@ async fn external_plugin_replaces_builtin_service_without_replacing_authenticati
         Arc::new(PostgresPlugin),
         Arc::new(ReplacementPlugin),
     ];
-    let state = RuntimeState::initialize_with_plugins(
+    let state = RuntimeState::initialize(
         HostConfig {
             remote_capabilities: None,
             database_url: database,
@@ -127,8 +135,7 @@ async fn external_plugin_replaces_builtin_service_without_replacing_authenticati
             delivery: None,
             development: None,
         },
-        Arc::new(Identity),
-        plugins,
+        identity_support::with_identity(Arc::new(Identity), plugins),
     )
     .await?;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;

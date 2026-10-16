@@ -11,12 +11,6 @@ struct DevelopmentIdentity;
 
 #[async_trait::async_trait]
 impl IdentityProvider for DevelopmentIdentity {
-    async fn can_publish(
-        &self,
-        _: &az_plugin_host::identity::SessionContext,
-    ) -> anyhow::Result<bool> {
-        Ok(false)
-    }
     async fn member_active(&self, tenant: &str, user: &str) -> Result<bool> {
         Ok(tenant == "development" && user == "developer")
     }
@@ -34,6 +28,32 @@ impl IdentityProvider for DevelopmentIdentity {
             tenant_label: "Sandbox".into(),
             permissions: vec!["*".into()],
         }))
+    }
+}
+
+#[async_trait::async_trait]
+impl az_plugin_host::authorization::AuthorizationProvider for DevelopmentIdentity {
+    async fn can_publish(
+        &self,
+        _: &az_plugin_host::identity::SessionContext,
+    ) -> anyhow::Result<bool> {
+        Ok(false)
+    }
+}
+
+impl az_plugin_core::Plugin<az_plugin_host::runtime::server::plugins::RuntimeAssembly>
+    for DevelopmentIdentity
+{
+    fn build<'a>(
+        &'a self,
+        assembly: &'a mut az_plugin_host::runtime::server::plugins::RuntimeAssembly,
+    ) -> az_plugin_core::PluginFuture<'a> {
+        Box::pin(async move {
+            assembly.services.add_value(DevelopmentIdentity)
+                .bind::<dyn IdentityProvider, DevelopmentIdentity>()
+                .bind::<dyn az_plugin_host::authorization::AuthorizationProvider, DevelopmentIdentity>();
+            Ok(())
+        })
     }
 }
 
@@ -66,6 +86,8 @@ pub async fn run() -> Result<()> {
         .context("开发宿主端口被占用")?;
     let origin = format!("http://{}", listener.local_addr()?);
     az_plugin_host::runtime::server::development::claim_database(&session).await?;
+    let mut plugins = az_plugin_host::runtime::server::plugins::default_plugins()?;
+    plugins.push(Arc::new(DevelopmentIdentity));
     let state = RuntimeState::initialize(
         HostConfig {
             remote_capabilities: std::env::var_os("AIO_REMOTE_CAPABILITIES").map(PathBuf::from),
@@ -80,7 +102,7 @@ pub async fn run() -> Result<()> {
             delivery: None,
             development: Some(session.clone()),
         },
-        Arc::new(DevelopmentIdentity),
+        plugins,
     )
     .await?;
     let application = az_plugin_host::static_files::application(web).layer(

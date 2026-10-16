@@ -12,7 +12,7 @@ v1 页面分发使用 `WasmExecutor` / `ProcessExecutor` 的 Dill 绑定。内�
 
 先看 `RuntimeAssembly`，再看 `builtins.rs` 中的默认平台组合。插件可以注册服务、贡献 HTTP 路由，以及注册恢复、就绪和停止动作。所有恢复动作成功后才执行就绪动作；省略交付插件也会省略它的后台启动动作。`require_service::<dyn Trait>()` 检查接口的唯一绑定，允许应用提供其他实现。`Plugin::dependencies()` 只声明必须先构建的具体插件类型，不能用它强制绑定某个默认服务实现。
 
-默认宿主使用 `RuntimeState::initialize(config, identity)`。定制宿主从自己的 Dill 容器解析插件组合，交给 `initialize_with_plugins`：
+宿主统一使用 `RuntimeState::initialize(config, plugins)`。应用显式选择 `default_plugins()` 或自己的 Dill 插件组合，再加入产品提供者；运行时不再接收独立身份参数。纯自定义路由可以完全省略身份、授权和计费服务。
 
 内置接口位于 `generated::{worker, worker_webview, clipboard, personal_config}`。例如保留 `ClipboardPlugin` 的认证和路由，省略 `ClipboardServicePlugin`，再绑定自定义 `dyn ClipboardService`，即可更换实现。服务返回的 HTTP 错误使用公开的 `runtime::server::http_error::RuntimeError`。同一接口出现多个实现会使装配失败，不采用覆盖或隐式回退。
 
@@ -25,8 +25,21 @@ let plugins = az_plugin_core::PluginGroupBuilder::default()
     .add::<MyRoutesPlugin>()
     .add::<MyServicePlugin>()
     .resolve(&catalog)?;
-let state = RuntimeState::initialize_with_plugins(config, identity, plugins).await?;
+let state = RuntimeState::initialize(config, plugins).await?;
 ```
+
+身份与业务策略分为 `identity::IdentityProvider`、`authorization::AuthorizationProvider` 和 `metering::MeteringProvider`。前者负责认证、成员与会话存活；授权服务负责平台发布策略和提交前实时权限查询；计费服务可省略，此时通过认证与归属校验的 Sidecar 用量上报返回 204。计费提供者执行失败会返回错误，不等同于未接入计费。
+
+产品插件直接绑定现有具体实例，不增加转发实现：
+
+```rust,ignore
+assembly.services.add_builder(provider.clone())
+    .bind::<dyn IdentityProvider, ProductProvider>()
+    .bind::<dyn AuthorizationProvider, ProductProvider>()
+    .bind::<dyn MeteringProvider, ProductProvider>();
+```
+
+三个接口可以分别由不同类型提供。它们必须使用 Dill `Singleton` 或预构造的 `Arc`，不能按请求生成新实例；这项约束在初始化前校验。认证相关路由、增强环境和演进控制声明各自必需的服务；缺失服务或同一接口多次绑定会在初始化前失败。HTTP、MCP、gRPC、增强调用和 Sidecar 从同一容器消费身份；发布与演进提交从同一容器消费授权。显式 `runtime:` 能力授予、租户绑定和清单权限衰减仍是统一执行链的约束，不因替换提供者而取消。这里实现的是原生插件装配替换，在线替换身份、迁移会话和故障恢复入口尚未实现。
 
 插件的 `build` 负责声明装配，不应启动后台任务或执行迁移。将资源初始化与迁移交给 `on_initialize::<Self>`，将异步恢复交给 `on_start::<Self>`，将后台工作交给 `on_ready::<Self>`，将资源清理交给 `on_stop::<Self>`。路由通过 `state.service::<dyn MyService>()?` 获取服务。长连接在升级前解析服务，并把同一个 `Arc` 传入会话；身份与撤权检查仍在会话期间持续执行。
 

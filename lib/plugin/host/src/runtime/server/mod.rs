@@ -72,7 +72,6 @@ pub struct RuntimeState {
     pub config: Arc<crate::configuration::HostConfig>,
     pub(crate) transport: transport::TransportOrigins,
     development: Arc<development::DevelopmentState>,
-    pub identity: Arc<dyn crate::identity::IdentityProvider>,
     extensions: Arc<plugins::RuntimeExtensions>,
     activation_locks: Arc<Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>>,
     publication_slots: Arc<tokio::sync::Semaphore>,
@@ -121,37 +120,27 @@ impl RuntimeState {
         self.service().map(Some)
     }
 
+    /// 由应用选择宿主能力组合，使用同一套依赖校验、服务绑定与启动流程。
     pub async fn initialize(
         config: crate::configuration::HostConfig,
-        identity: Arc<dyn crate::identity::IdentityProvider>,
-    ) -> Result<Self> {
-        Self::initialize_with_plugins(config, identity, plugins::default_plugins()?).await
-    }
-
-    /// 由应用选择宿主能力组合，使用同一套依赖校验、服务绑定与启动流程。
-    pub async fn initialize_with_plugins(
-        config: crate::configuration::HostConfig,
-        identity: Arc<dyn crate::identity::IdentityProvider>,
         plugins: Vec<az_plugin_core::DynPlugin<plugins::RuntimeAssembly>>,
     ) -> Result<Self> {
         let run_hooks = config.development.is_none();
-        Self::initialize_selected(config, identity, plugins, run_hooks).await
+        Self::initialize_selected(config, plugins, run_hooks).await
     }
 
     async fn initialize_selected(
         config: crate::configuration::HostConfig,
-        identity: Arc<dyn crate::identity::IdentityProvider>,
         plugins: Vec<az_plugin_core::DynPlugin<plugins::RuntimeAssembly>>,
         run_hooks: bool,
     ) -> Result<Self> {
-        let state = Self::assemble(config, identity, plugins).await?;
+        let state = Self::assemble(config, plugins).await?;
         state.extensions.start(&state, run_hooks).await?;
         Ok(state)
     }
 
     async fn assemble(
         config: crate::configuration::HostConfig,
-        identity: Arc<dyn crate::identity::IdentityProvider>,
         plugins: Vec<az_plugin_core::DynPlugin<plugins::RuntimeAssembly>>,
     ) -> Result<Self> {
         if config.development.is_some() {
@@ -167,7 +156,6 @@ impl RuntimeState {
             transport,
             extensions,
             development: Arc::default(),
-            identity,
             activation_locks: Arc::new(Mutex::new(HashMap::new())),
             publication_slots: Arc::new(tokio::sync::Semaphore::new(2)),
             frontend: Arc::new(frontend_access::FrontendAccess::new(&config.public_origin)?),

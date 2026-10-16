@@ -31,7 +31,10 @@ pub(super) async fn access(
 ) -> Result<Json<RuntimeResponse<bool>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
     let allowed = session.permissions.iter().any(|p| p == "plugin:manage")
-        && state.identity.can_publish(&session).await?;
+        && state
+            .service::<dyn crate::authorization::AuthorizationProvider>()?
+            .can_publish(&session)
+            .await?;
     Ok(Json(RuntimeResponse { data: allowed }))
 }
 

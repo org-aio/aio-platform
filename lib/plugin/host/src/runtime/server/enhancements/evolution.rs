@@ -15,6 +15,7 @@ use crate::identity::IdentityProvider;
 pub(in crate::runtime::server) struct EvolutionCapabilities {
     pub enhancements: Arc<Enhancements>,
     pub identity: Arc<dyn IdentityProvider>,
+    pub authorization: Arc<dyn crate::authorization::AuthorizationProvider>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -67,7 +68,7 @@ impl EvolutionCapabilities {
             format!("runtime:{}", request.path),
         ];
         ensure!(
-            self.identity
+            self.authorization
                 .session_has_permissions(
                     &session.session_id,
                     &session.tenant_id,

@@ -30,14 +30,19 @@ impl IdentityProvider for Identity {
             },
         }))
     }
-    async fn can_publish(&self, session: &SessionContext) -> Result<bool> {
-        Ok(session.account == "publisher")
-    }
+
     async fn member_active(&self, _: &str, _: &str) -> Result<bool> {
         Ok(true)
     }
     async fn session_active(&self, _: &str, _: &str, _: &str) -> Result<bool> {
         Ok(true)
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::authorization::AuthorizationProvider for Identity {
+    async fn can_publish(&self, session: &SessionContext) -> Result<bool> {
+        Ok(session.account == "publisher")
     }
 }
 

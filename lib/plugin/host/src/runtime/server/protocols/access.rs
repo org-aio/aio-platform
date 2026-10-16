@@ -17,7 +17,7 @@ pub(super) async fn session(
 ) -> Result<SessionContext, RuntimeError> {
     let session = authenticate(state, headers).await?;
     if !state
-        .identity
+        .service::<dyn crate::identity::IdentityProvider>()?
         .session_active(&session.session_id, &session.tenant_id, &session.user_id)
         .await?
     {

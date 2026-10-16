@@ -194,7 +194,6 @@ async fn runtime(mode: Mode) -> Result<(tempfile::TempDir, RuntimeState, Trace)>
     // 故意按反序提交插件，验证停止顺序来自内核已排序的构建过程。
     let state = RuntimeState::assemble(
         tests::config(root.path()),
-        Arc::new(tests::NoIdentity),
         vec![Arc::new(Dependent), Arc::new(Foundation(trace.clone()))],
     )
     .await?;

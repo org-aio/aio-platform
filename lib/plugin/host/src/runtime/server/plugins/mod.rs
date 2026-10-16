@@ -6,6 +6,8 @@ mod component_execution;
 mod component_resources;
 mod enhancement_execution;
 mod evolution;
+#[cfg(test)]
+mod identity_tests;
 mod infrastructure;
 #[cfg(test)]
 mod infrastructure_tests;
@@ -197,6 +199,9 @@ pub(super) async fn assemble(
         .validate()
         .context("校验宿主能力依赖失败")?;
     let services = assembly.services.build();
+    validate_security_provider::<dyn crate::identity::IdentityProvider>(&services)?;
+    validate_security_provider::<dyn crate::authorization::AuthorizationProvider>(&services)?;
+    validate_security_provider::<dyn crate::metering::MeteringProvider>(&services)?;
     for validate in &assembly.requirements {
         validate(&services, false)?;
     }
@@ -206,4 +211,24 @@ pub(super) async fn assemble(
         lifecycle: Lifecycle::new(assembly.lifecycle),
         requirements: assembly.requirements,
     }))
+}
+
+// 身份相关服务必须在所有入口共享同一实例，不能每次解析生成新对象。
+fn validate_security_provider<I: ?Sized + 'static>(services: &Catalog) -> Result<()> {
+    use dill::Builder;
+    let mut bindings = services.builders_for::<I>();
+    let Some(binding) = bindings.next() else {
+        return Ok(());
+    };
+    anyhow::ensure!(
+        bindings.next().is_none(),
+        "身份、授权或计费接口存在重复提供者: {:?}",
+        TypeId::of::<I>()
+    );
+    anyhow::ensure!(
+        binding.scope_type().id == TypeId::of::<dill::Singleton>(),
+        "身份、授权或计费提供者必须声明 Dill 单例: {:?}",
+        TypeId::of::<I>()
+    );
+    Ok(())
 }

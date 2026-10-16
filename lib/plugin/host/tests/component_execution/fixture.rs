@@ -188,14 +188,19 @@ impl IdentityProvider for Identity {
             permissions: vec!["plugin:manage".into()],
         }))
     }
-    async fn can_publish(&self, _: &SessionContext) -> Result<bool> {
-        Ok(true)
-    }
+
     async fn member_active(&self, tenant: &str, user: &str) -> Result<bool> {
         Ok(tenant == self.0 && user == "reader")
     }
     async fn session_active(&self, session: &str, tenant: &str, user: &str) -> Result<bool> {
         Ok(session == "component-test" && self.member_active(tenant, user).await?)
+    }
+}
+
+#[async_trait::async_trait]
+impl az_plugin_host::authorization::AuthorizationProvider for Identity {
+    async fn can_publish(&self, _: &SessionContext) -> Result<bool> {
+        Ok(true)
     }
 }
 
@@ -296,10 +301,12 @@ impl Host {
     ) -> Result<Self> {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let base = format!("http://{}", listener.local_addr()?);
-        let state = RuntimeState::initialize_with_plugins(
+        let state = RuntimeState::initialize(
             config(root, database, &base),
-            Arc::new(Identity(tenant.into())),
-            plugins(probes, true),
+            super::identity_support::with_identity(
+                Arc::new(Identity(tenant.into())),
+                plugins(probes, true),
+            ),
         )
         .await?;
         let router = az_plugin_host::runtime::server::router(state.clone());

@@ -39,7 +39,7 @@ async fn capabilities(
     // 只读目录向发布者描述可组合的能力；列出能力不等于授予执行权限。
     let session = authenticate_manager(&state, &headers).await?;
     if !state
-        .identity
+        .service::<dyn crate::identity::IdentityProvider>()?
         .session_active(&session.session_id, &session.tenant_id, &session.user_id)
         .await?
     {
@@ -160,7 +160,7 @@ async fn authorize(
             && current.tenant_id == original.tenant_id
             && current.user_id == original.user_id
             && state
-                .identity
+                .service::<dyn crate::identity::IdentityProvider>()?
                 .session_active(&current.session_id, &current.tenant_id, &current.user_id)
                 .await?,
         "增强管理会话已变化或撤销"

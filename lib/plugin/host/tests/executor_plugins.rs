@@ -1,5 +1,8 @@
 #![cfg(feature = "server")]
 
+#[path = "support/identity.rs"]
+mod identity_support;
+
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -74,9 +77,7 @@ impl IdentityProvider for Identity {
             permissions: vec!["plugin:manage".into()],
         }))
     }
-    async fn can_publish(&self, _: &SessionContext) -> Result<bool> {
-        Ok(false)
-    }
+
     async fn member_active(&self, tenant: &str, user: &str) -> Result<bool> {
         Ok(tenant == self.0 && user == "executor")
     }
@@ -85,12 +86,19 @@ impl IdentityProvider for Identity {
     }
 }
 
+#[async_trait::async_trait]
+impl az_plugin_host::authorization::AuthorizationProvider for Identity {
+    async fn can_publish(&self, _: &SessionContext) -> Result<bool> {
+        Ok(false)
+    }
+}
+
 #[tokio::test]
 async fn external_executor_uses_public_plugin_contract_without_database_or_component_storage()
 -> Result<()> {
     let root = tempfile::tempdir()?;
     let calls = Arc::new(AtomicUsize::new(0));
-    let state = RuntimeState::initialize_with_plugins(
+    let state = RuntimeState::initialize(
         HostConfig {
             remote_capabilities: None,
             database_url: "deliberately invalid: no database".into(),
@@ -101,7 +109,6 @@ async fn external_executor_uses_public_plugin_contract_without_database_or_compo
             delivery: None,
             development: None,
         },
-        Arc::new(Identity("unused".into())),
         vec![
             Arc::new(ScriptRuntimePlugin),
             Arc::new(ReplacementPlugin(calls.clone())),
@@ -158,7 +165,7 @@ async fn external_executor_handles_publication_protocol_calls_and_persisted_rest
     for generation in 0..2 {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let base = format!("http://{}", listener.local_addr()?);
-        let state = RuntimeState::initialize_with_plugins(
+        let state = RuntimeState::initialize(
             HostConfig {
                 remote_capabilities: None,
                 database_url: database.clone(),
@@ -169,16 +176,18 @@ async fn external_executor_handles_publication_protocol_calls_and_persisted_rest
                 delivery: None,
                 development: None,
             },
-            identity.clone(),
-            vec![
-                Arc::new(GrpcPlugin),
-                Arc::new(EnhancementsPlugin),
-                Arc::new(EnhancementServicePlugin),
-                Arc::new(ScriptRuntimePlugin),
-                Arc::new(ReplacementPlugin(calls.clone())),
-                Arc::new(DatabasePlugin),
-                Arc::new(PostgresPlugin),
-            ],
+            identity_support::with_identity(
+                identity.clone(),
+                vec![
+                    Arc::new(GrpcPlugin),
+                    Arc::new(EnhancementsPlugin),
+                    Arc::new(EnhancementServicePlugin),
+                    Arc::new(ScriptRuntimePlugin),
+                    Arc::new(ReplacementPlugin(calls.clone())),
+                    Arc::new(DatabasePlugin),
+                    Arc::new(PostgresPlugin),
+                ],
+            ),
         )
         .await?;
         let router = az_plugin_host::runtime::server::router(state.clone());

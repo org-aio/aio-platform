@@ -119,6 +119,10 @@ impl IdentityProvider for Identity {
             "limited" | "composed" | "capable" | "remote" | "evolution"
         ) || !self.revoked.load(Ordering::SeqCst))
     }
+}
+
+#[async_trait::async_trait]
+impl crate::authorization::AuthorizationProvider for Identity {
     async fn can_publish(&self, _: &SessionContext) -> Result<bool> {
         Ok(false)
     }
@@ -234,7 +238,7 @@ impl Fixture {
         ];
         plugins.extend(extra);
         // 协议宿主只装配增强依赖；无组件存储、密钥、Wasm 引擎和 Sidecar 资源。
-        let state = RuntimeState::initialize_with_plugins(
+        let state = RuntimeState::initialize(
             crate::configuration::HostConfig {
                 remote_capabilities,
                 database_url: database,
@@ -245,8 +249,7 @@ impl Fixture {
                 delivery: None,
                 development: None,
             },
-            identity.clone(),
-            plugins,
+            crate::runtime::server::admin_test_support::with_identity(identity.clone(), plugins),
         )
         .await?;
         assert!(state.optional_components()?.is_none());

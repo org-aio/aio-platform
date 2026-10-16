@@ -205,6 +205,6 @@ CREATE UNIQUE INDEX billing_usage_events_idempotency_idx
 
 ### 进程插件计量
 
-网络隔离的进程插件不能直连身份插件，只能通过宿主 broker 的 `/meter` 上报。宿主通过 `IdentityProvider::meter` 结算，`aio-idea` 直接把用量交给身份插件的 `meter_resource`，价格取自 `billing_prices` 表。未接入计费的宿主返回 204，调用方不应视为失败。
+网络隔离的进程插件不能直连身份插件，只能通过宿主 broker 的 `/meter` 上报。宿主通过 `MeteringProvider::meter` 结算，`aio-idea` 直接把用量交给身份插件的 `meter_resource`，价格取自 `billing_prices` 表。未接入计费的宿主返回 204，调用方不应视为失败。
 
 每一步都以真实数据库和浏览器流程验收，不以编译通过或单测代替充值、扣费、退款的端到端验证。

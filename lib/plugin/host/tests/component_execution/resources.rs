@@ -237,10 +237,12 @@ async fn missing_and_ambiguous_resource_providers_fail_before_opening_databases(
                 plugin.as_ref().type_id() != TypeId::of::<FileObjectStoragePlugin>()
             });
         }
-        let result = RuntimeState::initialize_with_plugins(
+        let result = RuntimeState::initialize(
             config(root.path(), "invalid database"),
-            Arc::new(fixture::Identity("test".into())),
-            selected,
+            super::identity_support::with_identity(
+                Arc::new(fixture::Identity("test".into())),
+                selected,
+            ),
         )
         .await;
         let error = result.err().context("资源装配应失败")?;
@@ -265,10 +267,12 @@ async fn replacement_resources_share_scope_with_external_executors() -> Result<(
     binding(&providers, &provisioner, source, "foreign").await?;
     provisioner.shutdown().await?;
     let probes: [Arc<fixture::Probe>; 2] = Default::default();
-    let state = RuntimeState::initialize_with_plugins(
+    let state = RuntimeState::initialize(
         config(root.path(), &url),
-        Arc::new(fixture::Identity(tenant.clone())),
-        plugins(providers.clone(), probes.clone()),
+        super::identity_support::with_identity(
+            Arc::new(fixture::Identity(tenant.clone())),
+            plugins(providers.clone(), probes.clone()),
+        ),
     )
     .await?;
     let bundle = package(root.path(), "https://github.com/example/resource.git", true)?.verify()?;
@@ -375,10 +379,12 @@ async fn partial_resource_and_executor_failures_close_every_acquired_backend() -
                 probes[1].initialization.store(1, Ordering::SeqCst);
             }
         }
-        let result = RuntimeState::initialize_with_plugins(
+        let result = RuntimeState::initialize(
             config(root.path(), &url),
-            Arc::new(fixture::Identity("test".into())),
-            plugins(providers.clone(), probes.clone()),
+            super::identity_support::with_identity(
+                Arc::new(fixture::Identity("test".into())),
+                plugins(providers.clone(), probes.clone()),
+            ),
         )
         .await;
         if failure == 3 {
@@ -416,10 +422,12 @@ async fn sidecar_receives_the_same_checked_database_as_external_executor() -> Re
     binding(&providers, &provisioner, source, "development").await?;
     provisioner.shutdown().await?;
     let probes: [Arc<fixture::Probe>; 2] = Default::default();
-    let state = RuntimeState::initialize_with_plugins(
+    let state = RuntimeState::initialize(
         config(root.path(), &url),
-        Arc::new(fixture::Identity("development".into())),
-        plugins(providers.clone(), probes.clone()),
+        super::identity_support::with_identity(
+            Arc::new(fixture::Identity("development".into())),
+            plugins(providers.clone(), probes.clone()),
+        ),
     )
     .await?;
     let bundle = Arc::new(
@@ -513,10 +521,12 @@ async fn wasm_uses_replacement_storage_database_and_persistent_release_pool() ->
     binding(&providers, &provisioner, source, &tenant).await?;
     provisioner.shutdown().await?;
     let probes: [Arc<fixture::Probe>; 2] = Default::default();
-    let state = RuntimeState::initialize_with_plugins(
+    let state = RuntimeState::initialize(
         config(root.path(), &url),
-        Arc::new(fixture::Identity(tenant.clone())),
-        plugins(providers.clone(), probes.clone()),
+        super::identity_support::with_identity(
+            Arc::new(fixture::Identity(tenant.clone())),
+            plugins(providers.clone(), probes.clone()),
+        ),
     )
     .await?;
     package(root.path(), &git, true)?;

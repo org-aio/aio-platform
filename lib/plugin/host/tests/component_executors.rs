@@ -1,5 +1,8 @@
 #![cfg(feature = "server")]
 
+#[path = "support/identity.rs"]
+mod identity_support;
+
 #[path = "component_execution/fixture.rs"]
 mod fixture;
 
@@ -32,13 +35,15 @@ async fn component_registry_rejects_missing_and_duplicate_types_without_resource
         .get::<dill::OneOf<ComponentExecutors>>()?;
     assert!(duplicate.validate().is_err());
     let root = tempfile::tempdir()?;
-    let state = RuntimeState::initialize_with_plugins(
+    let state = RuntimeState::initialize(
         config(root.path(), "invalid database", "http://127.0.0.1"),
-        Arc::new(Identity("test".into())),
-        vec![
-            Arc::new(ComponentExecutionPlugin),
-            Arc::new(Replacements(Default::default())),
-        ],
+        identity_support::with_identity(
+            Arc::new(Identity("test".into())),
+            vec![
+                Arc::new(ComponentExecutionPlugin),
+                Arc::new(Replacements(Default::default())),
+            ],
+        ),
     )
     .await?;
     state.service::<ComponentExecutors>()?.validate()?;
@@ -186,10 +191,12 @@ async fn executor_initialization_failure_panic_and_shutdown_panic_release_all_re
         let probes: [Arc<Probe>; 2] = Default::default();
         probes[1].initialization.store(failure, Ordering::SeqCst);
         probes[1].panic_stop.store(true, Ordering::SeqCst);
-        let result = RuntimeState::initialize_with_plugins(
+        let result = RuntimeState::initialize(
             config(root.path(), &database, "http://127.0.0.1"),
-            Arc::new(Identity("test".into())),
-            plugins(probes.clone(), false),
+            identity_support::with_identity(
+                Arc::new(Identity("test".into())),
+                plugins(probes.clone(), false),
+            ),
         )
         .await;
         if failure == 0 {
@@ -227,10 +234,9 @@ async fn cancelled_startup_finishes_executor_cleanup_at_the_lifecycle_boundary()
     tokio::task::LocalSet::new()
         .run_until(async move {
             let task = tokio::task::spawn_local(async move {
-                RuntimeState::initialize_with_plugins(
+                RuntimeState::initialize(
                     configuration,
-                    Arc::new(Identity("test".into())),
-                    selected,
+                    identity_support::with_identity(Arc::new(Identity("test".into())), selected),
                 )
                 .await
             });

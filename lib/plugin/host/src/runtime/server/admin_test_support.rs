@@ -1,11 +1,15 @@
 //! 隔离夹具复用正式插件装配与资源初始化，仅跳过业务恢复和后台任务。
 use super::RuntimeState;
+use crate as az_plugin_host;
+include!("../../../tests/support/identity.rs");
 use anyhow::Result;
 use std::{path::Path, sync::Arc};
 
 impl RuntimeState {
-    pub async fn isolated_admin_test(
-        identity: Arc<dyn crate::identity::IdentityProvider>,
+    pub async fn isolated_admin_test<
+        P: crate::identity::IdentityProvider + crate::authorization::AuthorizationProvider,
+    >(
+        identity: Arc<P>,
         database: &str,
         origin: &str,
         cache: &Path,
@@ -14,8 +18,10 @@ impl RuntimeState {
     }
 
     #[cfg(test)]
-    pub(super) async fn isolated_component_test(
-        identity: Arc<dyn crate::identity::IdentityProvider>,
+    pub(super) async fn isolated_component_test<
+        P: crate::identity::IdentityProvider + crate::authorization::AuthorizationProvider,
+    >(
+        identity: Arc<P>,
         database: &str,
         origin: &str,
         cache: &Path,
@@ -23,8 +29,10 @@ impl RuntimeState {
         Self::isolated_test(identity, database, origin, cache, true).await
     }
 
-    async fn isolated_test(
-        identity: Arc<dyn crate::identity::IdentityProvider>,
+    async fn isolated_test<
+        P: crate::identity::IdentityProvider + crate::authorization::AuthorizationProvider,
+    >(
+        identity: Arc<P>,
         database: &str,
         origin: &str,
         cache: &Path,
@@ -43,6 +51,11 @@ impl RuntimeState {
             delivery: None,
             development: None,
         };
-        Self::initialize_selected(config, identity, super::plugins::default_plugins()?, false).await
+        Self::initialize_selected(
+            config,
+            with_identity(identity, super::plugins::default_plugins()?),
+            false,
+        )
+        .await
     }
 }

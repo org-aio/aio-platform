@@ -168,7 +168,6 @@ async fn injected_resources_are_shared_and_initialize_without_business_restorati
         let events = Arc::new(Mutex::new(Vec::new()));
         let state = RuntimeState::initialize_selected(
             tests::config(root.path()),
-            Arc::new(tests::NoIdentity),
             plugins(providers.clone(), events.clone(), Failure::None),
             restore,
         )
@@ -208,9 +207,8 @@ async fn initialization_and_resolution_failures_close_owned_resources_before_ret
         let providers = Providers::lazy()?;
         let root = tempfile::tempdir()?;
         let events = Arc::new(Mutex::new(Vec::new()));
-        let result = RuntimeState::initialize_with_plugins(
+        let result = RuntimeState::initialize(
             tests::config(root.path()),
-            Arc::new(tests::NoIdentity),
             plugins(providers.clone(), events.clone(), failure),
         )
         .await;
@@ -276,9 +274,8 @@ async fn custom_database_provider_runs_real_storage_and_closes_on_shutdown() -> 
     providers.pool = PgPool::connect(&database).await?;
     let root = tempfile::tempdir()?;
     // 配置里的连接地址无效；必须真正使用应用注入的 Provider 才能完成迁移与查询。
-    let state = RuntimeState::initialize_with_plugins(
+    let state = RuntimeState::initialize(
         tests::config(root.path()),
-        Arc::new(tests::NoIdentity),
         vec![
             Arc::new(StorePlugin),
             Arc::new(DatabasePlugin),

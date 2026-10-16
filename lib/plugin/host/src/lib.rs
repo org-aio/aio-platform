@@ -1,7 +1,11 @@
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "server")]
+pub mod authorization;
 pub mod configuration;
 pub mod identity;
+#[cfg(feature = "server")]
+pub mod metering;
 pub mod runtime;
 mod startup;
 

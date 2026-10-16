@@ -164,14 +164,19 @@ mod tests {
         async fn authenticate(&self, _: &HeaderMap) -> anyhow::Result<Option<SessionContext>> {
             Ok(None)
         }
-        async fn can_publish(&self, _: &SessionContext) -> anyhow::Result<bool> {
-            Ok(false)
-        }
+
         async fn member_active(&self, _: &str, _: &str) -> anyhow::Result<bool> {
             Ok(true)
         }
         async fn session_active(&self, _: &str, _: &str, _: &str) -> anyhow::Result<bool> {
             Ok(true)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::authorization::AuthorizationProvider for Identity {
+        async fn can_publish(&self, _: &SessionContext) -> anyhow::Result<bool> {
+            Ok(false)
         }
     }
     #[tokio::test]

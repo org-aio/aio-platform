@@ -34,9 +34,6 @@ pub(super) fn default_executors() -> Result<Arc<ComponentExecutors>> {
 pub(super) struct TestIdentity;
 #[async_trait::async_trait]
 impl crate::identity::IdentityProvider for TestIdentity {
-    async fn can_publish(&self, _: &crate::identity::SessionContext) -> anyhow::Result<bool> {
-        Ok(false)
-    }
     async fn authenticate(
         &self,
         _: &axum::http::HeaderMap,
@@ -47,6 +44,13 @@ impl crate::identity::IdentityProvider for TestIdentity {
         Ok(false)
     }
     async fn session_active(&self, _: &str, _: &str, _: &str) -> Result<bool> {
+        Ok(false)
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::authorization::AuthorizationProvider for TestIdentity {
+    async fn can_publish(&self, _: &crate::identity::SessionContext) -> anyhow::Result<bool> {
         Ok(false)
     }
 }

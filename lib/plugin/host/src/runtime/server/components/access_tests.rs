@@ -35,14 +35,19 @@ impl IdentityProvider for Identity {
             },
         }))
     }
-    async fn can_publish(&self, _: &SessionContext) -> Result<bool> {
-        Ok(false)
-    }
+
     async fn member_active(&self, _: &str, user: &str) -> Result<bool> {
         Ok(user != "removed")
     }
     async fn session_active(&self, _: &str, _: &str, user: &str) -> Result<bool> {
         Ok(user != "removed")
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::authorization::AuthorizationProvider for Identity {
+    async fn can_publish(&self, _: &SessionContext) -> Result<bool> {
+        Ok(false)
     }
 }
 

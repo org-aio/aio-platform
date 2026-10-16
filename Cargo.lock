@@ -83,6 +83,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "az-plugin-core",
  "az-plugin-development",
  "az-plugin-host",
  "az-ui-components",

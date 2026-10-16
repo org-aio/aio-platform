@@ -1,3 +1,5 @@
+#[path = "metering_tests.rs"]
+mod metering;
 use super::*;
 use crate::identity::{IdentityProvider, SessionContext};
 use crate::runtime::server::plugins::{
@@ -21,14 +23,19 @@ impl IdentityProvider for Identity {
     async fn authenticate(&self, _: &HeaderMap) -> Result<Option<SessionContext>> {
         Ok(None)
     }
-    async fn can_publish(&self, _: &SessionContext) -> Result<bool> {
-        Ok(false)
-    }
+
     async fn member_active(&self, _: &str, user: &str) -> Result<bool> {
-        Ok(user == "user")
+        Ok(user == "user" && !self.revoked.load(Ordering::SeqCst))
     }
     async fn session_active(&self, session: &str, _: &str, user: &str) -> Result<bool> {
         Ok(session == "session" && user == "user" && !self.revoked.load(Ordering::SeqCst))
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::authorization::AuthorizationProvider for Identity {
+    async fn can_publish(&self, _: &SessionContext) -> Result<bool> {
+        Ok(false)
     }
 }
 
@@ -92,6 +99,11 @@ impl az_plugin_core::Plugin<RuntimeAssembly> for ScopePlugin {
 #[tokio::test]
 #[ignore = "需要独立本机 PostgreSQL"]
 async fn sidecar_enhancements_bind_identity_grants_and_active_revision() -> Result<()> {
+    verify_sidecar(false).await?;
+    verify_sidecar(true).await
+}
+
+async fn verify_sidecar(metering: bool) -> Result<()> {
     let database = std::env::var("AIO_ENHANCEMENT_TEST_DATABASE_URL")?;
     ensure!(
         database.contains("127.0.0.1") && database.contains("_test"),
@@ -128,10 +140,17 @@ async fn sidecar_enhancements_bind_identity_grants_and_active_revision() -> Resu
         )
         .await?,
     );
-    let resource_catalog = dill::Catalog::builder()
+    let meter = Arc::new(metering::Meter::default());
+    let mut resource_services = dill::Catalog::builder();
+    resource_services
         .add::<crate::runtime::server::plugins::PostgresComponentPlugin>()
-        .add::<crate::runtime::server::plugins::FileObjectStoragePlugin>()
-        .build();
+        .add::<crate::runtime::server::plugins::FileObjectStoragePlugin>();
+    if metering {
+        resource_services
+            .add_builder(meter.clone())
+            .bind::<dyn crate::metering::MeteringProvider, metering::Meter>();
+    }
+    let resource_catalog = resource_services.build();
     let components = Components::open(
         pool.clone(),
         &crate::configuration::ComponentStorage {
@@ -245,6 +264,7 @@ async fn sidecar_enhancements_bind_identity_grants_and_active_revision() -> Resu
     let endpoint = "http://localhost/enhancements/invoke";
     let request = json!({"path":path,"input":{}});
     let outcome = async {
+        metering::verify(&client, &pool, &tenant, source, &meter, metering, &identity.revoked).await?;
         assert_eq!(client.post(endpoint).json(&request).send().await?.status(), 403);
         let output: EnhancementResponse = client.post(endpoint).header("x-aio-token", "fixture-token").json(&request).send().await?.error_for_status()?.json().await?;
         assert_eq!(output.output, json!({"tenant":tenant,"source":source.to_string()}));

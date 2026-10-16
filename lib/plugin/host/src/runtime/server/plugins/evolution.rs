@@ -17,6 +17,7 @@ impl Plugin<RuntimeAssembly> for EvolutionPlugin {
 
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
+            assembly.require_service::<dyn crate::authorization::AuthorizationProvider>();
             assembly.declare_resource::<EvolutionCapabilities>()?;
             assembly
                 .services
@@ -25,7 +26,9 @@ impl Plugin<RuntimeAssembly> for EvolutionPlugin {
                 Box::pin(async move {
                     let capabilities = EvolutionCapabilities {
                         enhancements: state.service::<Enhancements>()?,
-                        identity: state.identity.clone(),
+                        identity: state.service::<dyn crate::identity::IdentityProvider>()?,
+                        authorization: state
+                            .service::<dyn crate::authorization::AuthorizationProvider>()?,
                     };
                     state
                         .service::<Resource<EvolutionCapabilities>>()?

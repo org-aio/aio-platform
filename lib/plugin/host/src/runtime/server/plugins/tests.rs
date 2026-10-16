@@ -20,13 +20,18 @@ impl crate::identity::IdentityProvider for NoIdentity {
     ) -> Result<Option<crate::identity::SessionContext>> {
         Ok(None)
     }
-    async fn can_publish(&self, _: &crate::identity::SessionContext) -> Result<bool> {
-        Ok(false)
-    }
+
     async fn member_active(&self, _: &str, _: &str) -> Result<bool> {
         Ok(false)
     }
     async fn session_active(&self, _: &str, _: &str, _: &str) -> Result<bool> {
+        Ok(false)
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::authorization::AuthorizationProvider for NoIdentity {
+    async fn can_publish(&self, _: &crate::identity::SessionContext) -> Result<bool> {
         Ok(false)
     }
 }
@@ -131,7 +136,11 @@ async fn remote_configuration_requires_its_feature_and_plugin() -> Result<()> {
 
 #[tokio::test]
 async fn default_profile_declares_services_and_rejects_missing_requirements() -> Result<()> {
-    let extensions = extensions(default_plugins()?).await?;
+    let extensions = extensions(crate::runtime::server::admin_test_support::with_identity(
+        Arc::new(NoIdentity),
+        default_plugins()?,
+    ))
+    .await?;
     // 声明阶段只校验绑定，不会提前创建尚未初始化的数据库服务。
     assert_eq!(
         extensions
@@ -168,12 +177,17 @@ async fn application_can_install_its_own_service_and_route_provider() -> Result<
 #[tokio::test]
 async fn selected_plugins_control_real_http_routes() -> Result<()> {
     let root = tempfile::tempdir()?;
-    let state = RuntimeState::initialize_with_plugins(
-        config(root.path()),
-        Arc::new(NoIdentity),
-        vec![Arc::new(ProbePlugin)],
-    )
-    .await?;
+    let state = RuntimeState::initialize(config(root.path()), vec![Arc::new(ProbePlugin)]).await?;
+    assert!(
+        state
+            .service::<dyn crate::identity::IdentityProvider>()
+            .is_err()
+    );
+    assert!(
+        state
+            .service::<dyn crate::authorization::AuthorizationProvider>()
+            .is_err()
+    );
     assert!(state.service::<sqlx::PgPool>().is_err());
     assert!(state.service::<az_plugin_runtime::Keyring>().is_err());
     assert!(state.service::<dyn super::WasmExecutor>().is_err());

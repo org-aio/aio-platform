@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+az-plugin-core = { path = "../lib/plugin/core", default-features = false, optional = true }
 az-plugin-host = { path = "../lib/plugin/host", default-features = false }
 az-plugin-development = { path = "../lib/plugin/development" }
 anyhow.workspace = true
@@ -17,7 +18,7 @@ az-ui-components = { workspace = true, optional = true }
 
 [features]
 default = ["server"]
-server = ["az-plugin-host/server", "az-plugin-host/wasm", "az-plugin-host/sidecar", "az-plugin-host/remote", "dep:axum", "dep:tokio"]
+server = ["dep:az-plugin-core", "az-plugin-host/server", "az-plugin-host/wasm", "az-plugin-host/sidecar", "az-plugin-host/remote", "dep:axum", "dep:tokio"]
 web = ["az-plugin-host/web", "dep:dioxus", "dioxus/web", "dioxus/launch", "dep:az-ui-components"]
 
 [lints]

@@ -283,7 +283,7 @@ async fn meter_inner(
     gateway: &Gateway,
     headers: &HeaderMap,
     request: MeterRequest,
-) -> Result<Option<crate::identity::MeterOutcome>> {
+) -> Result<Option<crate::metering::MeterOutcome>> {
     let components = active(gateway, headers).await?;
     ensure!(
         request.tenant_id == gateway.start.tenant,
@@ -305,8 +305,16 @@ async fn meter_inner(
                 .await?,
         "process 用户已撤权"
     );
-    components
-        .identity
+    let services = components.runtime_services.upgrade();
+    if services
+        .builders_for::<dyn crate::metering::MeteringProvider>()
+        .count()
+        == 0
+    {
+        return Ok(None);
+    }
+    let provider = services.get_one::<dyn crate::metering::MeteringProvider>()?;
+    provider
         .meter(
             &request.tenant_id,
             &request.user_id,
@@ -316,6 +324,7 @@ async fn meter_inner(
             &request.idempotency_key,
         )
         .await
+        .map(Some)
 }
 
 async fn egress(State(gateway): State<Arc<Gateway>>, headers: HeaderMap, body: Bytes) -> Response {

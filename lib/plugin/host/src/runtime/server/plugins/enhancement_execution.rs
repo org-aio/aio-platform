@@ -84,6 +84,7 @@ impl Plugin<RuntimeAssembly> for EnhancementServicePlugin {
 
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
+            assembly.require_service::<dyn crate::identity::IdentityProvider>();
             assembly.declare_resource::<Enhancements>()?;
             assembly.on_initialize::<Self>(|state, _| {
                 Box::pin(async move {
@@ -92,7 +93,7 @@ impl Plugin<RuntimeAssembly> for EnhancementServicePlugin {
                         state.service::<ScriptRuntime>()?,
                         Some(CapabilityEnvironment {
                             services: Arc::downgrade(&state.extensions),
-                            identity: state.identity.clone(),
+                            identity: state.service::<dyn crate::identity::IdentityProvider>()?,
                         }),
                     )
                     .await?;
