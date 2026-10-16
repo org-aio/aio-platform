@@ -81,7 +81,18 @@ pub(super) fn invoke(code: &str, input: &Value, invocation: &ScriptInvocation) -
     let realm = Context::full(&runtime)?;
     realm.with(|ctx| {
         // 不安装模块加载器、文件系统、网络或 Node 全局对象。
-        install_call(&ctx, invocation.clone())?;
+        install_call(
+            &ctx,
+            invocation.clone(),
+            "call_enhancement",
+            ScriptInvocation::invoke,
+        )?;
+        install_call(
+            &ctx,
+            invocation.clone(),
+            "call_capability",
+            ScriptInvocation::call_capability,
+        )?;
         let module = Module::declare(ctx.clone(), "enhancement", code)?;
         let (module, evaluated) = module.eval()?;
         evaluated
@@ -109,7 +120,12 @@ pub(super) fn invoke(code: &str, input: &Value, invocation: &ScriptInvocation) -
     })
 }
 
-fn install_call<'js>(ctx: &Ctx<'js>, invocation: ScriptInvocation) -> rquickjs::Result<()> {
+fn install_call<'js>(
+    ctx: &Ctx<'js>,
+    invocation: ScriptInvocation,
+    name: &str,
+    invoke: fn(&ScriptInvocation, &str, &Value) -> Result<Value>,
+) -> rquickjs::Result<()> {
     let call = Function::new(
         ctx.clone(),
         move |ctx: Ctx<'js>, path: String, input: rquickjs::Value<'js>| {
@@ -121,7 +137,7 @@ fn install_call<'js>(ctx: &Ctx<'js>, invocation: ScriptInvocation) -> rquickjs::
                     .to_string()?;
                 ensure!(input.len() <= crate::MAX_VALUE_BYTES, "增强输入超过配额");
                 let input = serde_json::from_str(&input)?;
-                let output = invocation.invoke(&path, &input)?;
+                let output = invoke(&invocation, &path, &input)?;
                 Ok(serde_json::to_vec(&output)?)
             };
             let output = operation()
@@ -129,5 +145,5 @@ fn install_call<'js>(ctx: &Ctx<'js>, invocation: ScriptInvocation) -> rquickjs::
             ctx.json_parse(output)
         },
     )?;
-    ctx.globals().set("call_enhancement", call)
+    ctx.globals().set(name, call)
 }

@@ -457,7 +457,7 @@ pub(super) async fn request(
     let _permit = state.frontend.request_slot()?;
     let grant = validate(&state, &session, &token).await?;
     let components = state.components()?;
-    let authorization = components.services.enter(&session)?;
+    let authorization = components.services.enter(&session, &grant.source_id)?;
     let response = components
         .handle(
             Uuid::parse_str(&grant.source_id).context("来源无效")?,

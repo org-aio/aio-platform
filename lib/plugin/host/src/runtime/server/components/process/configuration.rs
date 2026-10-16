@@ -222,6 +222,7 @@ impl Processes {
             worker_capabilities: configuration.worker_capabilities.clone(),
             services: configuration.services.clone(),
             enhancements: manifest.capabilities.enhancements.clone(),
+            runtime_capabilities: manifest.capabilities.runtime.clone(),
             client: reqwest::Client::builder()
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())

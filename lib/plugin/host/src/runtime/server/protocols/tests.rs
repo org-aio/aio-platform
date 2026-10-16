@@ -13,6 +13,8 @@ use tonic::Code;
 mod support;
 use support::*;
 
+#[path = "capability_tests.rs"]
+mod capabilities;
 #[path = "composition_tests.rs"]
 mod composition;
 
@@ -115,11 +117,13 @@ async fn exercise(fixture: &Fixture) -> Result<()> {
     upgraded
         .enhancements
         .push(az_plugin_enhancement::Enhancement {
+            capabilities: vec![],
             calls: vec![],
             path: "/v1/math/triple".into(),
             language: Language::TypeScript,
             source: "export function invoke(input: number): number { return input * 3; }".into(),
             examples: vec![az_plugin_enhancement::Example {
+                capabilities: vec![],
                 input: json!(3),
                 output: json!(9),
             }],

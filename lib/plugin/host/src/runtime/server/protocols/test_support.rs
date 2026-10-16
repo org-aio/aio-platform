@@ -24,6 +24,7 @@ pub(super) const PATH: &str = "/v1/math/double";
 pub(super) struct Identity {
     pub tenant: String,
     pub revoked: AtomicBool,
+    pub runtime_allowed: AtomicBool,
 }
 
 #[async_trait::async_trait]
@@ -39,7 +40,7 @@ impl IdentityProvider for Identity {
         else {
             return Ok(None);
         };
-        let permissions = match actor {
+        let mut permissions = match actor {
             "manager" | "other" => vec!["plugin:manage".into()],
             "slow" => {
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -51,8 +52,22 @@ impl IdentityProvider for Identity {
                 .map(|path| format!("enhancement:{path}"))
                 .collect(),
             "denied" => vec![],
+            "capable" => [
+                "enhancement:/v1/workflow/root",
+                "enhancement:/v1/workflow/worker",
+                "runtime:/v1/workers/list",
+                "runtime:/v1/workers/tasks/get",
+                "runtime:/v1/workers/tasks/submit",
+                "runtime:/v1/workers/tasks/cancel",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
             _ => return Ok(None),
         };
+        if !self.runtime_allowed.load(Ordering::SeqCst) {
+            permissions.retain(|permission| !permission.starts_with("runtime:"));
+        }
         Ok(Some(SessionContext {
             session_id: actor.into(),
             user_id: actor.into(),
@@ -71,7 +86,8 @@ impl IdentityProvider for Identity {
         Ok(true)
     }
     async fn session_active(&self, session: &str, _: &str, _: &str) -> Result<bool> {
-        Ok(!matches!(session, "limited" | "composed") || !self.revoked.load(Ordering::SeqCst))
+        Ok(!matches!(session, "limited" | "composed" | "capable")
+            || !self.revoked.load(Ordering::SeqCst))
     }
     async fn can_publish(&self, _: &SessionContext) -> Result<bool> {
         Ok(false)
@@ -114,6 +130,12 @@ impl Fixture {
     }
 
     pub async fn open() -> Result<Self> {
+        Self::with_plugins(vec![]).await
+    }
+
+    pub async fn with_plugins(
+        extra: Vec<az_plugin_core::DynPlugin<crate::runtime::server::plugins::RuntimeAssembly>>,
+    ) -> Result<Self> {
         let database = std::env::var("AIO_ENHANCEMENT_TEST_DATABASE_URL")?;
         ensure!(
             database.contains("127.0.0.1") && database.contains("_test"),
@@ -123,10 +145,24 @@ impl Fixture {
         let identity = Arc::new(Identity {
             tenant: uuid::Uuid::new_v4().to_string(),
             revoked: AtomicBool::new(false),
+            runtime_allowed: AtomicBool::new(true),
         });
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let base = format!("http://{}", listener.local_addr()?);
         use crate::runtime::server::plugins::*;
+        let minimal = extra.is_empty();
+        let mut plugins: Vec<az_plugin_core::DynPlugin<RuntimeAssembly>> = vec![
+            Arc::new(McpPlugin),
+            Arc::new(GrpcPlugin),
+            Arc::new(EnhancementsPlugin),
+            Arc::new(EnhancementServicePlugin),
+            Arc::new(ScriptRuntimePlugin),
+            Arc::new(RhaiPlugin),
+            Arc::new(TypeScriptPlugin),
+            Arc::new(DatabasePlugin),
+            Arc::new(PostgresPlugin),
+        ];
+        plugins.extend(extra);
         // 协议宿主只装配增强依赖；无组件存储、密钥、Wasm 引擎和 Sidecar 资源。
         let state = RuntimeState::initialize_with_plugins(
             crate::configuration::HostConfig {
@@ -139,24 +175,16 @@ impl Fixture {
                 development: None,
             },
             identity.clone(),
-            vec![
-                Arc::new(McpPlugin),
-                Arc::new(GrpcPlugin),
-                Arc::new(EnhancementsPlugin),
-                Arc::new(EnhancementServicePlugin),
-                Arc::new(ScriptRuntimePlugin),
-                Arc::new(RhaiPlugin),
-                Arc::new(TypeScriptPlugin),
-                Arc::new(DatabasePlugin),
-                Arc::new(PostgresPlugin),
-            ],
+            plugins,
         )
         .await?;
         assert!(state.optional_components()?.is_none());
         assert!(state.service::<az_plugin_runtime::Keyring>().is_err());
         assert!(state.wasm().is_err());
         assert!(state.process().is_err());
-        assert!(state.store().is_err());
+        if minimal {
+            assert!(state.store().is_err());
+        }
         assert!(!root.path().join("cache").exists());
         let router = crate::runtime::server::router(state.clone());
         let server = tokio::spawn(async move { axum::serve(listener, router).await });
@@ -203,8 +231,8 @@ pub(super) fn package(language: Language) -> Package {
         }
     };
     Package { schema_version: 1, enhancements: vec![
-        Enhancement { calls: vec![], path: PATH.into(), language, source: source.into(), examples: vec![Example { input: json!(3), output: json!(6) }] },
-        Enhancement { calls: vec![], path: "/v1/caller/scope".into(), language: Language::Rhai, source: "fn invoke(input, context) { #{tenant:context.tenant_id,source:context.source_id} }".into(), examples: vec![Example { input: json!({}), output: json!({"tenant":"validation","source":"validation"}) }] }
+        Enhancement { capabilities: vec![], calls: vec![], path: PATH.into(), language, source: source.into(), examples: vec![Example { capabilities: vec![], input: json!(3), output: json!(6) }] },
+        Enhancement { capabilities: vec![], calls: vec![], path: "/v1/caller/scope".into(), language: Language::Rhai, source: "fn invoke(input, context) { #{tenant:context.tenant_id,source:context.source_id} }".into(), examples: vec![Example { capabilities: vec![], input: json!({}), output: json!({"tenant":"validation","source":"validation"}) }] }
     ] }
 }
 

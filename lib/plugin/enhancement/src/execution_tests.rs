@@ -47,11 +47,13 @@ fn candidate() -> Package {
     Package {
         schema_version: 1,
         enhancements: vec![Enhancement {
+            capabilities: vec![],
             calls: vec![],
             path: "/v1/math/scale".into(),
             language: Language::Rhai,
             source: "3".into(),
             examples: vec![Example {
+                capabilities: vec![],
                 input: json!(2),
                 output: json!(6),
             }],
@@ -76,7 +78,11 @@ fn replacement_compiles_validates_and_executes_without_builtin_engines() -> Resu
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(
         prepared
-            .invocation(ScriptContext::default(), vec!["/v1/math/scale".into()])
+            .invocation(
+                ScriptContext::default(),
+                vec!["/v1/math/scale".into()],
+                Default::default()
+            )
             .invoke("/v1/math/scale", &json!(7))?,
         json!(21)
     );
@@ -89,7 +95,11 @@ fn replacement_compiles_validates_and_executes_without_builtin_engines() -> Resu
     );
     let oversized = json!("x".repeat(crate::MAX_VALUE_BYTES));
     let error = prepared
-        .invocation(ScriptContext::default(), vec!["/v1/math/scale".into()])
+        .invocation(
+            ScriptContext::default(),
+            vec!["/v1/math/scale".into()],
+            Default::default(),
+        )
         .invoke("/v1/math/scale", &oversized)
         .err()
         .context("超额输入未被拒绝")?;

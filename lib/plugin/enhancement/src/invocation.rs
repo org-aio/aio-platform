@@ -1,19 +1,11 @@
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-    },
-    time::Instant,
-};
+use std::sync::Arc;
 
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 
-use crate::{PreparedPackage, ScriptContext};
+use crate::{InvocationCapabilities, InvocationControl, PreparedPackage, ScriptContext};
 
 pub(crate) const MAX_DEPTH: usize = 8;
-const MAX_CALLS: usize = 64;
-const MAX_TRANSFER_BYTES: usize = 1024 * 1024;
 
 /// 宿主创建的调用链；克隆只复制调用栈，版本、身份、权限与预算始终共享。
 /// 原生执行器必须定期调用 check，子调用只允许经过 invoke。
@@ -27,11 +19,8 @@ struct Execution {
     package: PreparedPackage,
     context: ScriptContext,
     grants: Vec<String>,
-    deadline: Instant,
-    remaining_calls: AtomicUsize,
-    remaining_bytes: AtomicUsize,
-    cancelled: AtomicBool,
-    exhausted: AtomicBool,
+    capabilities: InvocationCapabilities,
+    control: InvocationControl,
 }
 
 impl ScriptInvocation {
@@ -39,17 +28,15 @@ impl ScriptInvocation {
         package: PreparedPackage,
         context: ScriptContext,
         grants: Vec<String>,
+        capabilities: InvocationCapabilities,
     ) -> Self {
         Self {
             execution: Arc::new(Execution {
                 package,
                 context,
                 grants,
-                deadline: Instant::now() + crate::EXECUTION_TIMEOUT,
-                remaining_calls: AtomicUsize::new(MAX_CALLS),
-                remaining_bytes: AtomicUsize::new(MAX_TRANSFER_BYTES),
-                cancelled: AtomicBool::new(false),
-                exhausted: AtomicBool::new(false),
+                capabilities,
+                control: InvocationControl::new(),
             }),
             stack: Vec::new(),
         }
@@ -62,30 +49,18 @@ impl ScriptInvocation {
 
     /// 取消整条调用链，包括尚未开始的工作线程与正在执行的嵌套脚本。
     pub fn cancel(&self) {
-        self.execution.cancelled.store(true, Ordering::Relaxed);
+        self.execution.control.cancel();
     }
 
     /// 执行器的中断检查；预算耗尽后即使脚本捕获异常也不能恢复执行资格。
     pub fn check(&self) -> Result<()> {
-        ensure!(
-            !self.execution.cancelled.load(Ordering::Relaxed),
-            "增强调用已取消"
-        );
-        ensure!(
-            !self.execution.exhausted.load(Ordering::Relaxed),
-            "增强调用链预算已耗尽"
-        );
-        ensure!(
-            Instant::now() < self.execution.deadline,
-            "增强调用链执行超时"
-        );
-        Ok(())
+        self.execution.control.check()
     }
 
     /// 执行同一版本中的能力；调用前验证完整依赖权限，执行中逐条约束声明与预算。
     pub fn invoke(&self, path: &str, input: &Value) -> Result<Value> {
         self.check()?;
-        self.consume(&self.execution.remaining_calls, 1)?;
+        self.execution.control.call()?;
         ensure!(self.stack.len() < MAX_DEPTH, "增强调用超过深度配额");
         ensure!(
             !self.stack.iter().any(|entry| entry == path),
@@ -110,6 +85,20 @@ impl ScriptInvocation {
                 "调用者未获增强能力: {required}"
             );
         }
+        for required in package.required_capabilities(path)? {
+            ensure!(
+                self.execution.capabilities.grants.contains(&required),
+                "调用者未获宿主能力: {required}"
+            );
+            ensure!(
+                self.execution
+                    .capabilities
+                    .caller
+                    .as_ref()
+                    .is_some_and(|caller| caller.available(&required)),
+                "宿主未装配能力: {required}"
+            );
+        }
         self.check_value(input, "输入")?;
         let implementation = package
             .compiled
@@ -125,22 +114,54 @@ impl ScriptInvocation {
         Ok(output)
     }
 
+    /// 调用当前增强声明的宿主能力，共享身份、预算和取消；实现只由宿主提供。
+    pub fn call_capability(&self, path: &str, input: &Value) -> Result<Value> {
+        self.check()?;
+        self.execution.control.call()?;
+        let source = self
+            .stack
+            .last()
+            .context("宿主能力必须由正在执行的增强调用")?;
+        let declaration = self
+            .execution
+            .package
+            .package()
+            .enhancements
+            .iter()
+            .find(|entry| &entry.path == source)
+            .context("调用方增强不存在")?;
+        ensure!(
+            declaration.capabilities.iter().any(|entry| entry == path),
+            "增强未声明宿主能力: {path}"
+        );
+        ensure!(
+            self.execution
+                .capabilities
+                .grants
+                .iter()
+                .any(|entry| entry == path),
+            "调用者未获宿主能力: {path}"
+        );
+        let caller = self
+            .execution
+            .capabilities
+            .caller
+            .as_ref()
+            .context("宿主能力调用入口未绑定")?;
+        ensure!(caller.available(path), "宿主未装配能力: {path}");
+        self.check_value(input, "输入")?;
+        let wait = self.execution.control.wait()?;
+        let result = caller.call(path, input, &self.execution.control);
+        drop(wait);
+        self.check()?;
+        let output = result.with_context(|| format!("调用宿主能力失败: {path}"))?;
+        self.check_value(&output, "输出")?;
+        Ok(output)
+    }
+
     fn check_value(&self, value: &Value, direction: &str) -> Result<()> {
         let bytes = serde_json::to_vec(value)?.len();
         ensure!(bytes <= crate::MAX_VALUE_BYTES, "增强{direction}超过配额");
-        self.consume(&self.execution.remaining_bytes, bytes)
-    }
-
-    fn consume(&self, remaining: &AtomicUsize, amount: usize) -> Result<()> {
-        if remaining
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
-                value.checked_sub(amount)
-            })
-            .is_err()
-        {
-            self.execution.exhausted.store(true, Ordering::Relaxed);
-            anyhow::bail!("增强调用链预算已耗尽");
-        }
-        Ok(())
+        self.execution.control.transfer(bytes)
     }
 }

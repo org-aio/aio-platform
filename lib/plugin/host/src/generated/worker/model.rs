@@ -19,6 +19,7 @@ pub struct Pairing {
     pub expires_at: i64,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "server", derive(schemars::JsonSchema))]
 pub struct Worker {
     pub id: String,
     pub label: String,
@@ -29,6 +30,7 @@ pub struct Worker {
 }
 /// 任务 ID 用于去重，租约只在领取后交给对应设备。
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "server", derive(schemars::JsonSchema))]
 pub struct Task {
     pub id: String,
     pub worker_id: String,

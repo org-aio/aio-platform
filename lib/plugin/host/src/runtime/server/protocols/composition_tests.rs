@@ -98,6 +98,7 @@ async fn exercise(fixture: &Fixture) -> Result<()> {
     let restored = Enhancements::open(
         fixture.state.service::<sqlx::PgPool>()?.as_ref().clone(),
         az_plugin_enhancement::default_runtime()?,
+        None,
     )
     .await?;
     let scope = InvocationScope {

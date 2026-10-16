@@ -117,7 +117,7 @@ async fn tenant_installation_grants_members_and_menu_visibility_preserves_runtim
     let session = request_context::authenticate(&state, &headers)
         .await
         .map_err(|_| anyhow::anyhow!("测试成员鉴权失败"))?;
-    let authorization = components.services.enter(&session)?;
+    let authorization = components.services.enter(&session, &source.to_string())?;
     let scope = InvocationScope {
         source_id: source.to_string(),
         revision: first.digest.clone(),

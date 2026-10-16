@@ -64,7 +64,7 @@ async fn aborted_callers_cancel_workers_and_restore_execution_capacity() -> Resu
         .bind::<dyn ScriptExecutor, Executor>()
         .build()
         .get_one::<ScriptRuntime>()?;
-    let service = Arc::new(Enhancements::open(pool.clone(), runtime).await?);
+    let service = Arc::new(Enhancements::open(pool.clone(), runtime, None).await?);
     let tenant = uuid::Uuid::new_v4().to_string();
     let revision = service
         .propose(&tenant, "test", package(Language::Rhai, "fixture"))

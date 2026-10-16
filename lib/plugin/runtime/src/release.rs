@@ -89,6 +89,10 @@ impl ComponentSlot {
                     .enhancements
                     .iter()
                     .all(|path| grants.enhancements.contains(path))
+                && requested
+                    .runtime
+                    .iter()
+                    .all(|path| grants.runtime.contains(path))
                 && (!requested.identity_provider || grants.identity_provider),
             "宿主未授予插件申请的全部能力"
         );
@@ -113,7 +117,8 @@ impl ComponentSlot {
             "插件管理能力未绑定"
         );
         ensure!(
-            requested.enhancements.is_empty() || resources.services.is_some(),
+            (requested.enhancements.is_empty() && requested.runtime.is_empty())
+                || resources.services.is_some(),
             "脚本增强服务未绑定"
         );
         ensure!(

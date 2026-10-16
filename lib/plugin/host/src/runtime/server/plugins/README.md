@@ -56,7 +56,7 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 
 停止只释放当前宿主拥有的 Sidecar、broker、数据库转发与 Wasm 内存实例，保留 PostgreSQL 中的安装状态、授权与活动版本。旧监督器报告为已存在的进程不会被当成本次创建的资源停止。开发 Sidecar 的进程由 CLI 所有，宿主只关闭自己的 broker 和转发。协作取消要求回调和任务最终返回；无限阻塞或忽略取消的原生插件仍需要外部监督器处理。关闭有错误时仍执行其余清理，下一次启动由现有恢复/孤立实例清理流程继续恢复。
 
-这是原生宿主插件的装配边界，还不包含在线卸载、单插件重启或脚本服务代理。HTTP 路由不能替代能力授权。数据库连接、密钥来源与执行器创建已由所选插件管理；组件执行契约已经接通，数据库 provisioner 和对象存储仍待抽象，完整目标见 [一切皆插件验收清单](../../../../../../../docs/plugin/everything-as-plugin.md)。
+这是原生宿主插件的装配边界，还不包含在线卸载或单插件重启。HTTP 路由不能替代能力授权。数据库连接、密钥来源与执行器创建已由所选插件管理；组件执行契约已经接通，组件数据库与对象后端也已通过独立 Provider 接入，完整目标见 [一切皆插件验收清单](../../../../../../../docs/plugin/everything-as-plugin.md)。
 
 验证：`cargo test -p az-plugin-host --features server plugins::tests`。真实 HTTP 精简组合验收使用无效数据库地址，无需数据库即可运行。
 
@@ -93,7 +93,7 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 }));
 ```
 
-业务服务直接注入 `Connection` 或 `Arc<Connection>`；`Resource<T>` 是 Dill 中的一次初始化槽，负责将异步资源交给正常的同步 DI，不是第二套注册表。重复声明和重复提供都失败。依赖该资源的初始化钩子必须声明对资源所有者插件的 TypeId 依赖。资源中需要保存自身所属容器时只保存 `CatalogWeakRef`，避免容器与单例相互持有。
+业务服务直接注入 `Connection` 或 `Arc<Connection>`；`Resource<T>` 是 Dill 中的一次初始化槽，负责将异步资源交给正常的同步 DI，不是第二套注册表。重复声明和重复提供都失败。依赖该资源的初始化钩子必须声明对资源所有者插件的 TypeId 依赖。资源中需要保存自身所属容器时只保存 `CatalogWeakRef` 或所属运行时的 `Weak`，避免容器与单例相互持有。
 
 ## 默认基础设施与替换方式
 
@@ -151,3 +151,5 @@ assembly.services
 ```
 
 两者的 `open(&ComponentStorage)` 分别返回 `Arc<dyn ComponentDatabase>` 和 `Arc<dyn ObjectStorage>`。Provider 只负责异步创建，返回后的关闭由组件生命周期负责，不要重复登记关闭钩子。实现契约位于 `az-plugin-runtime`；原生实现身份仍使用 TypeId，来源/租户属于独立业务身份。读取顺序是本目录 `component_resources.rs` → `components/resources.rs` → runtime 的 `component_database.rs` / `storage.rs`。
+
+`WorkerCapabilitiesPlugin` 将已装配的设备服务提供给 Rhai/TypeScript，不依赖某个默认 `WorkerService` 实现。其他原生插件将自己的实现绑定到 `CapabilityProvider` 即可贡献版本化路径、schema 和受控异步调用；目录在异步资源初始化完成后校验，开发宿主同样执行。详见 [宿主能力与脚本自举](../enhancements/README.md#宿主能力与脚本自举)。

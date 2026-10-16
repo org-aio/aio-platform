@@ -83,14 +83,16 @@ impl BundleManifest {
             "清单超过配额"
         );
         let manifest: Self = toml::from_str(text)?;
-        ensure!(
-            manifest.plugin.capabilities.enhancements.len() <= 32,
-            "增强能力申请超过配额"
-        );
-        let mut paths = std::collections::HashSet::new();
-        for path in &manifest.plugin.capabilities.enhancements {
-            az_plugin_contract::validate_enhancement_path(path)?;
-            ensure!(paths.insert(path), "增强能力申请重复: {path}");
+        for requested in [
+            &manifest.plugin.capabilities.enhancements,
+            &manifest.plugin.capabilities.runtime,
+        ] {
+            ensure!(requested.len() <= 32, "运行时能力申请超过配额");
+            let mut paths = std::collections::HashSet::new();
+            for path in requested {
+                az_plugin_contract::validate_enhancement_path(path)?;
+                ensure!(paths.insert(path), "运行时能力申请重复: {path}");
+            }
         }
         ensure!(
             manifest.schema_version == az_plugin_contract::ABI_VERSION,

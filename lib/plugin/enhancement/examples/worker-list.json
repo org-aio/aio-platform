@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "enhancements": [
+    {
+      "path": "/v1/devices/names",
+      "language": "rhai",
+      "source": "fn invoke(input, context) { call_enhancement(\"/v1/devices/list\", input).map(|device| device.label) }",
+      "calls": ["/v1/devices/list"],
+      "examples": [
+        {
+          "input": {},
+          "output": ["Example device"],
+          "capabilities": [{"path": "/v1/workers/list", "input": {}, "output": [{"label": "Example device"}]}]
+        }
+      ]
+    },
+    {
+      "path": "/v1/devices/list",
+      "language": "typescript",
+      "source": "export function invoke(input: object) { return call_capability('/v1/workers/list', input); }",
+      "capabilities": ["/v1/workers/list"],
+      "examples": [
+        {
+          "input": {},
+          "output": [{"label": "Example device"}],
+          "capabilities": [{"path": "/v1/workers/list", "input": {}, "output": [{"label": "Example device"}]}]
+        }
+      ]
+    }
+  ]
+}

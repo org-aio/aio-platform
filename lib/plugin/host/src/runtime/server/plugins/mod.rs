@@ -17,6 +17,7 @@ mod tasks;
 #[cfg(test)]
 mod tests;
 mod wasm_execution;
+mod worker_capabilities;
 
 use std::{any::TypeId, future::Future, pin::Pin, sync::Arc};
 
@@ -40,6 +41,7 @@ pub use process_execution::{
 pub use resource::Resource;
 pub use tasks::PluginTasks;
 pub use wasm_execution::{WasmActivation, WasmExecutor};
+pub use worker_capabilities::WorkerCapabilitiesPlugin;
 
 /// 插件贡献的 HTTP 路由；认证仍由各能力的正式入口执行。
 pub type RouteFactory = fn(&RuntimeState) -> Router<RuntimeState>;

@@ -4,7 +4,10 @@ use anyhow::{Context, Result, ensure};
 use az_plugin_contract::validate_enhancement_path;
 use sha2::{Digest, Sha256};
 
-use crate::{Enhancement, Package, ScriptContext, ScriptInvocation, ScriptProgram, ScriptRuntime};
+use crate::{
+    Enhancement, InvocationCapabilities, Package, ScriptContext, ScriptInvocation, ScriptProgram,
+    ScriptRuntime,
+};
 
 /// 已完成语法检查和样例执行的候选版本；发布者负责持久化和原子激活。
 #[derive(Clone)]
@@ -57,8 +60,13 @@ impl PreparedPackage {
     }
 
     /// 固定版本和授权快照；每次外部请求创建一条独立的调用链。
-    pub fn invocation(&self, context: ScriptContext, grants: Vec<String>) -> ScriptInvocation {
-        ScriptInvocation::new(self.clone(), context, grants)
+    pub fn invocation(
+        &self,
+        context: ScriptContext,
+        grants: Vec<String>,
+        capabilities: InvocationCapabilities,
+    ) -> ScriptInvocation {
+        ScriptInvocation::new(self.clone(), context, grants, capabilities)
     }
 
     /// 返回整个依赖闭包，用于候选检查和调用前的权限校验。
@@ -66,6 +74,19 @@ impl PreparedPackage {
         let mut result = Vec::new();
         self.visit_dependencies(path, &mut Vec::new(), &mut result)?;
         Ok(result)
+    }
+
+    /// 在任何脚本执行前校验完整依赖闭包的宿主能力，避免中途失败留下部分副作用。
+    pub fn required_capabilities(&self, path: &str) -> Result<Vec<String>> {
+        let required = self.required_paths(path)?;
+        let paths: std::collections::BTreeSet<_> = self
+            .package
+            .enhancements
+            .iter()
+            .filter(|entry| required.contains(&entry.path))
+            .flat_map(|entry| entry.capabilities.iter().cloned())
+            .collect();
+        Ok(paths.into_iter().collect())
     }
 
     fn validate_dependencies(&self) -> Result<()> {
@@ -129,8 +150,16 @@ impl PreparedPackage {
             );
             for (index, example) in enhancement.examples.iter().enumerate() {
                 let grants = self.required_paths(&enhancement.path)?;
-                let invocation = self.invocation(context.clone(), grants);
+                let caller = Arc::new(crate::capabilities::ExampleCaller::new(
+                    example.capabilities.clone(),
+                ));
+                let capabilities = InvocationCapabilities {
+                    grants: self.required_capabilities(&enhancement.path)?,
+                    caller: Some(caller.clone()),
+                };
+                let invocation = self.invocation(context.clone(), grants, capabilities);
                 let output = invocation.invoke(&enhancement.path, &example.input)?;
+                caller.finish()?;
                 ensure!(
                     output == example.output,
                     "增强契约样例未通过: {} #{}",
@@ -151,6 +180,15 @@ fn validate(enhancement: &Enhancement) -> Result<()> {
         validate_enhancement_path(path)?;
         ensure!(dependencies.insert(path), "增强依赖重复: {path}");
     }
+    let mut capabilities = std::collections::HashSet::new();
+    ensure!(
+        enhancement.capabilities.len() <= 32,
+        "增强宿主能力数量超过配额"
+    );
+    for path in &enhancement.capabilities {
+        validate_enhancement_path(path)?;
+        ensure!(capabilities.insert(path), "增强宿主能力重复: {path}");
+    }
     ensure!(
         !enhancement.source.trim().is_empty()
             && enhancement.source.len() <= crate::MAX_SOURCE_BYTES,
@@ -161,6 +199,10 @@ fn validate(enhancement: &Enhancement) -> Result<()> {
         "每项增强必须提供 1 到 8 个契约样例"
     );
     for example in &enhancement.examples {
+        ensure!(example.capabilities.len() <= 64, "增强样例宿主调用超过配额");
+        for call in &example.capabilities {
+            validate_enhancement_path(&call.path)?;
+        }
         ensure!(
             serde_json::to_vec(example)?.len() <= crate::MAX_VALUE_BYTES,
             "增强样例超过配额"

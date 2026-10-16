@@ -14,6 +14,9 @@ pub struct RequestContext {
 pub struct CapabilityGrants {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub enhancements: Vec<String>,
+    /// 增强脚本可调用的宿主能力；必须同时在增强源码包中声明。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub runtime: Vec<String>,
     pub cryptography: bool,
     pub database: bool,
     pub storage: bool,

@@ -135,6 +135,7 @@ async fn publication_preserves_running_singleton_process() -> Result<()> {
         crate::runtime::server::enhancements::Enhancements::open(
             pool.clone(),
             az_plugin_enhancement::default_runtime()?,
+            None,
         )
         .await?,
     );

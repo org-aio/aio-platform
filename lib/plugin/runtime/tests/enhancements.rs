@@ -16,6 +16,22 @@ use serde_json::json;
 
 struct Host(RwLock<PreparedPackage>);
 
+struct Math;
+impl az_plugin_enhancement::CapabilityCaller for Math {
+    fn available(&self, path: &str) -> bool {
+        path == "/v1/runtime/double"
+    }
+    fn call(
+        &self,
+        _: &str,
+        input: &serde_json::Value,
+        control: &az_plugin_enhancement::InvocationControl,
+    ) -> Result<serde_json::Value> {
+        control.check()?;
+        Ok(json!(input.as_i64().context("测试能力需要整数")? * 2))
+    }
+}
+
 #[async_trait]
 impl HostServices for Host {
     async fn authorize(&self, _: &InvocationScope, _: &str) -> Result<bool> {
@@ -35,7 +51,14 @@ impl HostServices for Host {
             source_id: scope.source_id.clone(),
         };
         let output = package
-            .invocation(context, scope.grants.enhancements.clone())
+            .invocation(
+                context,
+                scope.grants.enhancements.clone(),
+                az_plugin_enhancement::InvocationCapabilities {
+                    grants: scope.grants.runtime.clone(),
+                    caller: Some(Arc::new(Math)),
+                },
+            )
             .invoke(&request.path, &request.input)?;
         Ok(EnhancementResponse {
             revision: package.revision().into(),
@@ -48,11 +71,13 @@ fn package(language: Language, source: &str) -> Result<PreparedPackage> {
     az_plugin_enhancement::default_runtime()?.prepare(Package {
         schema_version: 1,
         enhancements: vec![Enhancement {
+            capabilities: vec![],
             calls: vec![],
             path: "/v1/math/double".into(),
             language,
             source: source.into(),
             examples: vec![Example {
+                capabilities: vec![],
                 input: json!(3),
                 output: json!(6),
             }],
@@ -90,6 +115,7 @@ async fn same_wasm_instance_receives_runtime_enhancements_without_recompilation(
         context: context.clone(),
         grants: CapabilityGrants {
             enhancements: vec!["/v1/math/double".into(), "/v1/math/base".into()],
+            runtime: vec!["/v1/runtime/double".into()],
             ..Default::default()
         },
     };
@@ -135,6 +161,29 @@ async fn same_wasm_instance_receives_runtime_enhancements_without_recompilation(
         .await?;
     assert_eq!(
         missing_dependency
+            .handle(request(), context.clone())
+            .await?
+            .status,
+        403
+    );
+    let capability_package = az_plugin_enhancement::default_runtime()?.prepare(serde_json::from_value(json!({"schema_version":1,"enhancements":[{
+        "path":"/v1/math/double","language":"typescript","source":"export function invoke(input) { return call_capability('/v1/runtime/double', input); }", "capabilities":["/v1/runtime/double"],
+        "examples":[{"input":3,"output":6,"capabilities":[{"path":"/v1/runtime/double","input":3,"output":6}]}]
+    }]}))?)?;
+    *host.0.write().map_err(|_| anyhow::anyhow!("增强锁损坏"))? = capability_package;
+    let through_host = guest.handle(request(), context.clone()).await?;
+    assert_eq!(through_host.status, 200);
+    assert_eq!(
+        serde_json::from_slice::<EnhancementResponse>(&through_host.body)?.output,
+        json!(14)
+    );
+    let mut denied_runtime = scope.clone();
+    denied_runtime.grants.runtime.clear();
+    let mut denied_runtime = engine
+        .instantiate(&compiled, denied_runtime, resources.clone())
+        .await?;
+    assert_eq!(
+        denied_runtime
             .handle(request(), context.clone())
             .await?
             .status,

@@ -76,6 +76,33 @@ fn validates_marketplace_parent_and_permissions() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn script_capability_grants_require_exact_bounded_versioned_paths() -> Result<()> {
+    for field in ["enhancements", "runtime"] {
+        let manifest = |paths: &str| {
+            MANIFEST.replace(
+                "database = true",
+                &format!("database = true\n{field} = [{paths}]"),
+            )
+        };
+        BundleManifest::parse(&manifest("'/v1/workers/list'"))?;
+        for paths in [
+            "'*'",
+            "'/v1/workers/*'",
+            "'/workers/list'",
+            "'/v1/workers/list','/v1/workers/list'",
+        ] {
+            assert!(BundleManifest::parse(&manifest(paths)).is_err());
+        }
+        let excessive = (0..33)
+            .map(|index| format!("'/v1/workers/item{index}'"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(BundleManifest::parse(&manifest(&excessive)).is_err());
+    }
+    Ok(())
+}
+
 fn bundle() -> Bundle {
     let files = BTreeMap::from([
         (

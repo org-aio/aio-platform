@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::{
     Json,
     extract::State,
@@ -8,6 +8,7 @@ use axum::{
 use az_plugin_contract::{
     EnhancementRequest, EnhancementResponse, InvocationScope, RequestContext,
 };
+use az_plugin_runtime::HostServices;
 use std::sync::Arc;
 
 use super::model::Gateway;
@@ -21,20 +22,37 @@ pub(super) async fn invoke(
     let result: Result<EnhancementResponse> = async {
         let _permit = gateway.quota.try_acquire()?;
         let components = super::broker::active(&gateway, &headers).await?;
-        let scope = InvocationScope {
-            source_id: gateway.start.source.to_string(),
-            revision: gateway.start.revision.clone(),
-            context: RequestContext {
+        let source = gateway.start.source.to_string();
+        let context_id = headers
+            .get("x-aio-context")
+            .map(|header| header.to_str())
+            .transpose()
+            .context("交互上下文无效")?;
+        let context = match context_id {
+            Some(id) => components
+                .services
+                .interactive(id, &gateway.start.tenant, &source)?,
+            None => RequestContext {
                 tenant_id: Some(gateway.start.tenant.clone()),
                 ..Default::default()
             },
+        };
+        let scope = InvocationScope {
+            source_id: source,
+            revision: gateway.start.revision.clone(),
+            context,
             // 固定为创建此进程时的能力，避免并发升级让旧票据取得新版额外权限。
             grants: az_plugin_contract::CapabilityGrants {
                 enhancements: gateway.enhancements.clone(),
+                runtime: gateway.runtime_capabilities.clone(),
                 ..Default::default()
             },
         };
-        components.enhancements.invoke(&scope, request).await
+        if context_id.is_some() {
+            components.services.enhance(&scope, request).await
+        } else {
+            components.enhancements.invoke(&scope, request).await
+        }
     }
     .await;
     match result {
@@ -48,146 +66,5 @@ pub(super) async fn invoke(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::runtime::server::{
-        components::{Components, tests::TestIdentity},
-        store::PluginStore,
-    };
-    use anyhow::{Context, ensure};
-    use az_plugin_enhancement::{Enhancement, Example, Language, Package};
-    use serde_json::json;
-    use sqlx::PgPool;
-
-    #[tokio::test]
-    #[ignore = "需要独立本机 PostgreSQL"]
-    async fn sidecar_enhancements_bind_identity_grants_and_active_revision() -> Result<()> {
-        let database = std::env::var("AIO_ENHANCEMENT_TEST_DATABASE_URL")?;
-        ensure!(
-            database.contains("127.0.0.1") && database.contains("_test"),
-            "只接受本机独立增强测试库"
-        );
-        let pool = PgPool::connect(&database).await?;
-        PluginStore::new(pool.clone()).migrate().await?;
-        let root = tempfile::tempdir()?;
-        let enhancements = Arc::new(
-            crate::runtime::server::enhancements::Enhancements::open(
-                pool.clone(),
-                az_plugin_enhancement::default_runtime()?,
-            )
-            .await?,
-        );
-        let resource_catalog = dill::Catalog::builder()
-            .add::<crate::runtime::server::plugins::PostgresComponentPlugin>()
-            .add::<crate::runtime::server::plugins::FileObjectStoragePlugin>()
-            .build();
-        let components = Components::open(
-            pool.clone(),
-            &crate::configuration::ComponentStorage {
-                database_url: database.clone(),
-                root: root.path().into(),
-            },
-            Arc::new(crate::runtime::server::components::load_keyring(
-                &root.path().join("keys.json"),
-            )?),
-            Arc::new(TestIdentity),
-            resource_catalog.weak_ref(),
-            enhancements,
-            crate::runtime::server::components::tests::default_executors()?,
-        )
-        .await?;
-        let tenant = uuid::Uuid::new_v4().to_string();
-        let source = uuid::Uuid::new_v4();
-        let path = "/v1/caller/scope";
-        let package = Package { schema_version: 1, enhancements: vec![Enhancement {
-            calls: vec![],
-            path: path.into(), language: Language::Rhai,
-            source: "fn invoke(input, context) { #{tenant:context.tenant_id,source:context.source_id} }".into(),
-            examples: vec![Example { input: json!({}), output: json!({"tenant":"validation","source":"validation"}) }],
-        }] };
-        let enhancement = components
-            .enhancements
-            .propose(&tenant, "test", package.clone())
-            .await?;
-        components
-            .enhancements
-            .activate(&tenant, "test", Some(&enhancement), 0, false)
-            .await?
-            .context("激活增强失败")?;
-        let revision = format!("{}{}", source.simple(), source.simple());
-        // 此夹具只验证 broker 边界，不启动或伪装为已经执行的外部程序。
-        sqlx::query("INSERT INTO component_sources(id,git) VALUES($1,$2)")
-            .bind(source)
-            .bind(format!("https://example.com/{source}.git"))
-            .execute(&pool)
-            .await?;
-        sqlx::query("INSERT INTO component_versions(digest,source_id,archive,version,source_commit,description,metadata,permissions) VALUES($1,$2,$3,'1.0.0',$4,$5,'{}','{}')")
-            .bind(&revision).bind(source).bind(Vec::<u8>::new()).bind("a".repeat(40)).bind(json!({"label":"Fixture","pages":[]})).execute(&pool).await?;
-        sqlx::query("INSERT INTO component_installations(tenant_id,source_id,digest,generation) VALUES($1,$2,$3,$4)")
-            .bind(&tenant).bind(source).bind(&revision).bind(uuid::Uuid::new_v4()).execute(&pool).await?;
-        let make_gateway = |grants| {
-            Arc::new(Gateway {
-                components: Arc::downgrade(&components),
-                start: super::super::model::Start {
-                    source,
-                    tenant: tenant.clone(),
-                    revision: revision.clone(),
-                },
-                token: "fixture-token".into(),
-                endpoints: vec![],
-                http_endpoints: vec![],
-                worker_capabilities: vec![],
-                services: vec![],
-                enhancements: grants,
-                client: reqwest::Client::new(),
-                quota: Arc::new(tokio::sync::Semaphore::new(2)),
-            })
-        };
-        let socket = root.path().join("broker.sock");
-        let listener = tokio::net::UnixListener::bind(&socket)?;
-        let router = super::super::broker::router(make_gateway(vec![path.into()]));
-        let server = tokio::spawn(async move { axum::serve(listener, router).await });
-        let client = reqwest::Client::builder()
-            .unix_socket(socket)
-            .no_proxy()
-            .build()?;
-        let endpoint = "http://localhost/enhancements/invoke";
-        let request = json!({"path":path,"input":{}});
-        let outcome = async {
-            assert_eq!(client.post(endpoint).json(&request).send().await?.status(), 403);
-            let output: EnhancementResponse = client.post(endpoint).header("x-aio-token", "fixture-token").json(&request).send().await?.error_for_status()?.json().await?;
-            assert_eq!(output.output, json!({"tenant":tenant,"source":source.to_string()}));
-            assert_eq!(output.revision, enhancement);
-            let mut composed = package.clone();
-            let mut leaf = composed.enhancements[0].clone();
-            leaf.path = "/v1/caller/identity".into();
-            composed.enhancements[0].language = Language::TypeScript;
-            composed.enhancements[0].calls = vec![leaf.path.clone()];
-            composed.enhancements[0].source = "export function invoke(input, context) { context.tenant_id = 'forged'; return call_enhancement('/v1/caller/identity', input); }".into();
-            composed.enhancements.push(leaf);
-            let updated = components.enhancements.propose(&tenant, "test", composed).await?;
-            components.enhancements.activate(&tenant, "test", Some(&updated), 1, false).await?.context("激活组合增强失败")?;
-            // 已启动进程不会因增强增加依赖就自动取得新权限。
-            assert_eq!(client.post(endpoint).header("x-aio-token", "fixture-token").json(&request).send().await?.status(), 403);
-            let socket = root.path().join("composed-broker.sock");
-            let listener = tokio::net::UnixListener::bind(&socket)?;
-            let router = super::super::broker::router(make_gateway(vec![path.into(), "/v1/caller/identity".into()]));
-            let composed_server = tokio::spawn(async move { axum::serve(listener, router).await });
-            let composed_client = reqwest::Client::builder().unix_socket(socket).no_proxy().build()?;
-            let response = async {
-                composed_client.post(endpoint).header("x-aio-token", "fixture-token").json(&request).send().await?.error_for_status()?.json::<EnhancementResponse>().await
-            }.await;
-            composed_server.abort();
-            let output = response?;
-            assert_eq!(output.revision, updated);
-            assert_eq!(output.output, json!({"tenant":tenant,"source":source.to_string()}));
-            let denied = json!({"path":"/v1/not/granted","input":{}});
-            assert_eq!(client.post(endpoint).header("x-aio-token", "fixture-token").json(&denied).send().await?.status(), 403);
-            sqlx::query("UPDATE component_installations SET enabled=false WHERE tenant_id=$1 AND source_id=$2").bind(&tenant).bind(source).execute(&pool).await?;
-            assert_eq!(client.post(endpoint).header("x-aio-token", "fixture-token").json(&request).send().await?.status(), 403);
-            Ok::<_, anyhow::Error>(())
-        }.await;
-        server.abort();
-        outcome
-    }
-}
+#[path = "enhancements_tests.rs"]
+mod tests;

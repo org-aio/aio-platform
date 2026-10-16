@@ -19,6 +19,9 @@ pub struct Enhancement {
     /// 可以组合的同版本增强路径；实际执行还需调用者逐项授权。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub calls: Vec<String>,
+    /// 可调用的宿主能力路径；发布声明与调用授权分别校验。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
     pub examples: Vec<Example>,
 }
 
@@ -35,6 +38,9 @@ pub enum Language {
 pub struct Example {
     pub input: Value,
     pub output: Value,
+    /// 候选验证只消费这些调用记录，不执行真实宿主能力。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<crate::CapabilityExample>,
 }
 
 /// 宿主注入的调用归属；脚本不接收会话凭据、数据库连接或网络句柄。

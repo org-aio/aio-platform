@@ -108,6 +108,7 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
         crate::runtime::server::enhancements::Enhancements::open(
             pool.clone(),
             az_plugin_enhancement::default_runtime()?,
+            None,
         )
         .await?,
     );
@@ -196,6 +197,7 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
         crate::runtime::server::enhancements::Enhancements::open(
             pool.clone(),
             az_plugin_enhancement::default_runtime()?,
+            None,
         )
         .await?,
     );

@@ -205,6 +205,7 @@ pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
         .add::<ScriptRuntimePlugin>()
         .add::<EnhancementServicePlugin>()
         .add::<WorkerServicePlugin>()
+        .add::<super::WorkerCapabilitiesPlugin>()
         .add::<WorkerWebviewServicePlugin>()
         .add::<PersonalConfigServicePlugin>()
         .add::<ClipboardServicePlugin>()

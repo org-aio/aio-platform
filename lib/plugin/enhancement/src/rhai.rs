@@ -73,6 +73,18 @@ pub(super) fn invoke(ast: &AST, input: &Value, invocation: &ScriptInvocation) ->
             call().map_err(|error| format!("{error:#}").into())
         },
     );
+    let caller = invocation.clone();
+    engine.register_fn(
+        "call_capability",
+        move |path: &str, input: Dynamic| -> Result<Dynamic, Box<rhai::EvalAltResult>> {
+            let call = || -> Result<Dynamic> {
+                let input = rhai::serde::from_dynamic(&input)?;
+                let output = caller.call_capability(path, &input)?;
+                Ok(rhai::serde::to_dynamic(output)?)
+            };
+            call().map_err(|error| format!("{error:#}").into())
+        },
+    );
     let input = rhai::serde::to_dynamic(input)?;
     let context = rhai::serde::to_dynamic(invocation.context())?;
     let output: Dynamic = engine

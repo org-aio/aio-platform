@@ -188,15 +188,20 @@ async fn invoke_inner(
         sqlx::query_scalar("SELECT s.id FROM component_sources s JOIN component_installations i ON i.source_id=s.id WHERE s.git=$1 AND i.tenant_id=$2 AND i.enabled").bind(&request.target).bind(&request.tenant_id).fetch_optional(&components.pool).await?.context("目标插件未启用")?
     };
     let bundle = components.bundle(source, &request.tenant_id).await?;
-    let background;
-    let context = if request.interactive {
+    let caller = gateway.start.source.to_string();
+    let target = source.to_string();
+    let authorization = if request.interactive {
         let id = request
             .context_id
             .as_deref()
             .context("交互调用缺少宿主上下文")?;
         let context = components
             .services
-            .interactive(id, &request.tenant_id, &request.user_id)?;
+            .interactive(id, &request.tenant_id, &caller)?;
+        ensure!(
+            context.user_id.as_deref() == Some(&request.user_id),
+            "交互用户不匹配"
+        );
         let live = components
             .identity
             .session_active(
@@ -206,7 +211,7 @@ async fn invoke_inner(
             )
             .await?;
         ensure!(live, "交互会话已失效");
-        context
+        components.services.delegate(&context, &caller, &target)?
     } else {
         let permissions = bundle
             .manifest()
@@ -215,13 +220,13 @@ async fn invoke_inner(
             .iter()
             .map(|p| services::permission(source, p))
             .collect();
-        background = components.services.background(
+        components.services.background(
             &request.tenant_id,
             &request.user_id,
-            &gateway.start.source.to_string(),
+            &caller,
+            &target,
             permissions,
-        )?;
-        background.context.clone()
+        )?
     };
     let path = reqwest::Url::parse(&format!("http://plugin{}", request.path))?;
     ensure!(
@@ -244,7 +249,7 @@ async fn invoke_inner(
             &request.tenant_id,
             bundle.digest(),
             input.try_into()?,
-            context,
+            authorization.context.clone(),
         )
         .await?;
     let body: serde_json::Value = if response.body.is_empty() {

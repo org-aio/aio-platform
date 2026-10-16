@@ -18,6 +18,7 @@ pub(in crate::runtime::server) struct Enhancements {
     runtime: Arc<ScriptRuntime>,
     cache: Mutex<BTreeMap<(String, String), Arc<PreparedPackage>>>,
     execution: Arc<Semaphore>,
+    capabilities: Option<super::CapabilityEnvironment>,
 }
 
 // 请求等待被取消时通知整条脚本调用链；并发配额仍由工作线程持有到真正退出。
@@ -43,20 +44,36 @@ pub(in crate::runtime::server) struct Revision {
 }
 
 impl Enhancements {
+    pub(in crate::runtime::server) fn runtime_catalog(
+        &self,
+    ) -> Result<Vec<super::RuntimeCapability>> {
+        self.capabilities
+            .as_ref()
+            .map(|environment| environment.runtime()?.catalog())
+            .unwrap_or_else(|| Ok(vec![]))
+    }
+
     /// 发现和调用读取同一活动指针；目录不暴露源码，也不保存独立的协议版本状态。
     pub(in crate::runtime::server) async fn catalog(
         &self,
         tenant: &str,
         permitted: impl Fn(&str) -> bool,
+        permitted_capability: impl Fn(&str) -> bool,
     ) -> Result<(Option<String>, Vec<String>)> {
         let Some(revision) = self.head(tenant).await?.revision else {
             return Ok((None, Vec::new()));
         };
         let prepared = self.load(tenant, &revision).await?;
+        let available = self.runtime_catalog()?;
         let mut paths = Vec::new();
         for item in &prepared.package().enhancements {
             let required = prepared.required_paths(&item.path)?;
-            if required.iter().all(|path| permitted(path)) {
+            let capabilities = prepared.required_capabilities(&item.path)?;
+            if required.iter().all(|path| permitted(path))
+                && capabilities.iter().all(|path| {
+                    permitted_capability(path) && available.iter().any(|entry| &entry.path == path)
+                })
+            {
                 paths.push(item.path.clone());
             }
         }
@@ -67,6 +84,7 @@ impl Enhancements {
     pub(in crate::runtime::server) async fn open(
         pool: PgPool,
         runtime: Arc<ScriptRuntime>,
+        capabilities: Option<super::CapabilityEnvironment>,
     ) -> Result<Self> {
         sqlx::raw_sql(include_str!("schema.sql"))
             .execute(&pool)
@@ -76,6 +94,7 @@ impl Enhancements {
             runtime,
             cache: Mutex::default(),
             execution: Arc::new(Semaphore::new(4)),
+            capabilities,
         })
     }
 
@@ -168,6 +187,15 @@ impl Enhancements {
         }
         if let Some(revision) = revision {
             let candidate = self.load(tenant, revision).await?;
+            let available = self.runtime_catalog()?;
+            for entry in &candidate.package().enhancements {
+                for path in &entry.capabilities {
+                    ensure!(
+                        available.iter().any(|capability| &capability.path == path),
+                        "增强依赖的宿主能力未装配: {path}"
+                    );
+                }
+            }
             if !rollback && let Some(previous) = previous.revision {
                 let package = self.package(tenant, &previous).await?;
                 let permit = self
@@ -236,7 +264,14 @@ impl Enhancements {
             .clone()
             .try_acquire_owned()
             .context("增强执行并发已满")?;
-        let invocation = prepared.invocation(context, scope.grants.enhancements.clone());
+        let capabilities = self
+            .capabilities
+            .as_ref()
+            .map(|environment| environment.bind(scope))
+            .transpose()?
+            .unwrap_or_default();
+        let invocation =
+            prepared.invocation(context, scope.grants.enhancements.clone(), capabilities);
         let _cancel = CancelInvocation(invocation.clone());
         // 将配额交给工作线程；取消 HTTP/WIT 等待不会提早释放仍在执行的配额。
         let output = tokio::task::spawn_blocking(move || {

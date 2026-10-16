@@ -33,13 +33,24 @@ fn permitted(session: &SessionContext, path: &str) -> bool {
         .any(|value| value == "plugin:manage" || value == &permission)
 }
 
+fn permitted_capability(session: &SessionContext, path: &str) -> bool {
+    session
+        .permissions
+        .iter()
+        .any(|value| value == &format!("runtime:{path}"))
+}
+
 pub(super) async fn catalog(
     state: &RuntimeState,
     session: &SessionContext,
 ) -> Result<(Option<String>, Vec<String>), RuntimeError> {
     let (revision, paths) = state
         .service::<Enhancements>()?
-        .catalog(&session.tenant_id, |path| permitted(session, path))
+        .catalog(
+            &session.tenant_id,
+            |path| permitted(session, path),
+            |path| permitted_capability(session, path),
+        )
         .await?;
     Ok((revision, paths))
 }
@@ -69,6 +80,11 @@ pub(super) async fn invoke(
         },
         grants: CapabilityGrants {
             enhancements: grants,
+            runtime: session
+                .permissions
+                .iter()
+                .filter_map(|permission| permission.strip_prefix("runtime:").map(str::to_owned))
+                .collect(),
             ..Default::default()
         },
     };
