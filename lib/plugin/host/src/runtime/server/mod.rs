@@ -94,6 +94,12 @@ impl RuntimeState {
             .context("宿主未安装所需服务插件")
     }
 
+    /// 当前代的唯一 Dill 容器，供既有 Controller 按类型装配路由。
+    /// 保存容器的插件必须声明 observe_catalog；应用路由只在当前代使用该引用。
+    pub fn catalog(&self) -> &dill::Catalog {
+        &self.extensions.services
+    }
+
     pub(crate) fn worker_keyring(&self) -> Result<az_plugin_runtime::Keyring> {
         Ok(self
             .service::<az_plugin_runtime::Keyring>()?

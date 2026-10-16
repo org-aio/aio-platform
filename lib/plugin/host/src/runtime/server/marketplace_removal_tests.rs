@@ -64,7 +64,7 @@ async fn removal_http_authorization_not_found_and_install_rejection() -> Result<
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let base = format!("http://{}", listener.local_addr()?);
     let server = tokio::spawn(
-        axum::serve(listener, super::super::routes::router(state.clone())).into_future(),
+        axum::serve(listener, super::super::routes::router(state.clone())?).into_future(),
     );
     let result = exercise_http(&reqwest::Client::new(), &base, &git).await;
     server.abort();

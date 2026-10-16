@@ -2,6 +2,28 @@
 
 use super::*;
 
+#[tokio::test]
+async fn initial_route_error_closes_created_resources() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let trace = Arc::new(Trace::default());
+    let plugin = Arc::new(ValuePlugin(Settings {
+        value: 1,
+        failure: Failure::RouteError,
+        trace: trace.clone(),
+    }));
+    let result = RuntimeHost::initialize(config(root.path()), vec![plugin]).await;
+    let error = result.err().context("路由故障必须拒绝启动")?;
+    assert!(format!("{error:#}").contains("控制器依赖装配失败"));
+    assert_eq!(trace.stopped.load(Ordering::SeqCst), 1);
+    let resources = trace
+        .opened
+        .lock()
+        .map_err(|_| anyhow::anyhow!("记录锁损坏"))?;
+    assert_eq!(resources.len(), 1);
+    assert!(resources[0].closed.load(Ordering::SeqCst));
+    Ok(())
+}
+
 async fn fixture(reject: bool, panic: bool) -> Result<Fixture> {
     let root = tempfile::tempdir()?;
     let trace = Arc::new(Trace::default());

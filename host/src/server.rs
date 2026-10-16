@@ -115,7 +115,7 @@ pub async fn run() -> Result<()> {
         .merge(az_plugin_host::runtime::server::development::router(
             state.clone(),
         )?)
-        .merge(az_plugin_host::runtime::server::router(state.clone()))
+        .merge(az_plugin_host::runtime::server::router(state.clone())?)
         .fallback_service(application)
         .layer(axum::middleware::from_fn(
             move |mut request: axum::extract::Request, next: axum::middleware::Next| {

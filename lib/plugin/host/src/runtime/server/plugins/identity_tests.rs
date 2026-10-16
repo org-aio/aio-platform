@@ -133,9 +133,9 @@ impl Plugin<RuntimeAssembly> for ProtectedRoutes {
             assembly.require_service::<dyn IdentityProvider>();
             assembly.require_service::<dyn AuthorizationProvider>();
             assembly.add_routes(|_| {
-                Router::new()
+                Ok(Router::new()
                     .route("/private", get(read))
-                    .route("/publish", get(publish))
+                    .route("/publish", get(publish)))
             });
             Ok(())
         })
@@ -191,7 +191,7 @@ async fn independent_identity_and_policy_plugins_share_live_instances() -> Resul
     assert!(!root.path().join("cache").exists());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let base = format!("http://{}", listener.local_addr()?);
-    let router = crate::runtime::server::router(state.clone());
+    let router = crate::runtime::server::router(state.clone())?;
     let server = tokio::spawn(async move { axum::serve(listener, router).await });
     let client = reqwest::Client::builder().no_proxy().build()?;
     let result = async {

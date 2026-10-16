@@ -30,19 +30,22 @@ use crate::runtime::{
     PageDefinition, PluginRequest, PublishedPluginView, RuntimeCatalog, RuntimeResponse,
 };
 
-pub fn router(state: RuntimeState) -> Router {
-    super::plugins::admit_router(state.clone(), assemble(state))
+pub fn router(state: RuntimeState) -> anyhow::Result<Router> {
+    Ok(super::plugins::admit_router(
+        state.clone(),
+        assemble(state)?,
+    ))
 }
 
-pub(super) fn assemble(state: RuntimeState) -> Router {
+pub(super) fn assemble(state: RuntimeState) -> anyhow::Result<Router> {
     let mut router = Router::new().route(
         "/api/runtime/{*unknown}",
         any(|| async { StatusCode::NOT_FOUND }),
     );
     for factory in &state.extensions.routes {
-        router = router.merge(factory(&state));
+        router = router.merge(factory(&state).context("装配插件路由失败")?);
     }
-    router.with_state(state)
+    Ok(router.with_state(state))
 }
 
 pub(super) fn frontend() -> Router<RuntimeState> {

@@ -59,7 +59,7 @@ pub use wasm_execution::{WasmActivation, WasmExecutor};
 pub use worker_capabilities::WorkerCapabilitiesPlugin;
 
 /// 插件贡献的 HTTP 路由；认证仍由各能力的正式入口执行。
-pub type RouteFactory = fn(&RuntimeState) -> Router<RuntimeState>;
+pub type RouteFactory = fn(&RuntimeState) -> Result<Router<RuntimeState>>;
 
 /// 插件的启动、就绪或停止动作；任务作用域按具体插件类型共享。
 pub type LifecycleHook =

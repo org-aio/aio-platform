@@ -156,7 +156,7 @@ impl Plugin<RuntimeAssembly> for Dependent {
                 })
             });
             assembly.add_routes(|_| {
-                Router::new()
+                Ok(Router::new()
                     .route("/probe", get(|| async { "ok" }))
                     .route("/write", get(write_request))
                     .route(
@@ -168,7 +168,7 @@ impl Plugin<RuntimeAssembly> for Dependent {
                             .chain(futures_util::stream::pending());
                             Body::from_stream(stream)
                         }),
-                    )
+                    ))
             });
             Ok(())
         })
@@ -352,7 +352,7 @@ async fn shutdown_rejects_new_http_requests_and_drains_handlers_and_streams() ->
     signalled(&trace.entered).await?;
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let origin = format!("http://{}", listener.local_addr()?);
-    let router = super::super::router(state.clone());
+    let router = super::super::router(state.clone())?;
     let mut servers = tokio::task::JoinSet::new();
     servers.spawn(async move { axum::serve(listener, router).await });
     let client = reqwest::Client::builder()

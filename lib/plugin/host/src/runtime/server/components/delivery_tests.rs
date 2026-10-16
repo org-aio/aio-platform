@@ -25,7 +25,7 @@ async fn delivery_publishes_bundles_and_respects_tenant_choices() -> Result<()> 
         RuntimeState::isolated_component_test(identity.clone(), &database, &base, root.path())
             .await?;
     let components = state.components()?;
-    let router = crate::runtime::server::routes::router(state.clone());
+    let router = crate::runtime::server::routes::router(state.clone())?;
     let server = tokio::spawn(async move { axum::serve(listener, router).await });
     let client = Client::new();
     assert_eq!(

@@ -143,7 +143,7 @@ async fn external_plugin_replaces_builtin_service_without_replacing_authenticati
         "http://{}/api/runtime/clipboard/head",
         listener.local_addr()?
     );
-    let router = az_plugin_host::runtime::server::router(state.clone());
+    let router = az_plugin_host::runtime::server::router(state.clone())?;
     let server = tokio::spawn(async move { axum::serve(listener, router).await });
     let client = reqwest::Client::builder().no_proxy().build()?;
     let outcome = async {

@@ -11,7 +11,7 @@ use crate::generated::{clipboard, personal_config, worker, worker_webview};
 
 // 每项能力声明自己的服务、路由和具体类型依赖；宏只展开同一套注册步骤。
 macro_rules! route_plugin {
-    ($name:ident, [$($dependency:ty),*], [$($required:ty),*], $routes:expr) => {
+    ($name:ident, [$($dependency:ty),*], [$($required:ty),*], |$state:pat_param| $routes:expr) => {
         /// 向宿主贡献该能力的服务与路由，由应用装配层决定是否安装。
         #[dill::component]
         #[dill::interface(dyn Plugin<RuntimeAssembly>)]
@@ -26,7 +26,7 @@ macro_rules! route_plugin {
                 Box::pin(async move {
                     assembly.require_service::<dyn crate::identity::IdentityProvider>();
                     $(assembly.require_service::<$required>();)*
-                    assembly.add_routes($routes);
+                    assembly.add_routes(|$state| Ok($routes));
                     Ok(())
                 })
             }
@@ -56,7 +56,7 @@ route_plugin!(
     ToolsPlugin,
     [StorePlugin, RepositoryPlugin],
     [dyn worker::WorkerService, dyn crate::authorization::AuthorizationProvider],
-    |_| { super::super::tools::router() }
+    |_| super::super::tools::router()
 );
 route_plugin!(WorkersPlugin, [], [dyn worker::WorkerService], |_| {
     worker::controller::router()
@@ -83,7 +83,7 @@ impl Plugin<RuntimeAssembly> for ManagementPlugin {
             assembly.require_service::<dyn crate::authorization::AuthorizationProvider>();
             // 发布任务按安装包动态选择执行器，持有的运行时快照必须随组合更新。
             assembly.observe_catalog();
-            assembly.add_routes(|state| super::super::routes::management(state.clone()));
+            assembly.add_routes(|state| Ok(super::super::routes::management(state.clone())));
             assembly.on_start::<Self>(|state, _tasks| {
                 Box::pin(async move {
                     state.ensure_default_plugins().await?;
@@ -112,7 +112,7 @@ impl Plugin<RuntimeAssembly> for ComponentsPlugin {
         Box::pin(async move {
             assembly.require_service::<dyn crate::identity::IdentityProvider>();
             assembly.require_service::<dyn crate::authorization::AuthorizationProvider>();
-            assembly.add_routes(|state| super::super::components::router(state.clone()));
+            assembly.add_routes(|state| Ok(super::super::components::router(state.clone())));
             assembly.on_start::<Self>(|state, _tasks| {
                 Box::pin(async move {
                     if let Some(components) = state.optional_components()? {
@@ -140,7 +140,7 @@ impl Plugin<RuntimeAssembly> for DeliveryPlugin {
     }
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
-            assembly.add_routes(|_| super::super::delivery::router());
+            assembly.add_routes(|_| Ok(super::super::delivery::router()));
             assembly.on_ready::<Self>(|state, tasks| {
                 Box::pin(async move {
                     super::super::delivery::start(state, tasks)?;

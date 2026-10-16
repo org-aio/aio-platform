@@ -308,7 +308,7 @@ impl Generation {
 
     fn new(state: RuntimeState, compose: &ApplicationRoutes) -> Result<Self> {
         let router = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            let runtime = super::super::routes::assemble(state.clone());
+            let runtime = super::super::routes::assemble(state.clone())?;
             compose(&state, runtime)
         }))
         .map_err(|_| anyhow::anyhow!("插件或应用路由冲突、装配回调 panic"))??;

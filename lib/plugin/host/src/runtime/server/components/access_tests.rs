@@ -78,7 +78,7 @@ async fn tenant_installation_grants_members_and_menu_visibility_preserves_runtim
     let first = super::tests::package(&package_root, &git, None, "1.0.0")?;
     let source = components.publish(first.clone(), "权限测试").await?;
     components.install(&tenant, &git, None).await?;
-    let router = crate::runtime::server::routes::router(state.clone());
+    let router = crate::runtime::server::routes::router(state.clone())?;
     let server = tokio::spawn(async move { axum::serve(listener, router).await });
     let client = reqwest::Client::new();
     let bootstrap = |user: &str, tenant: &str| {

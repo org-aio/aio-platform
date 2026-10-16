@@ -190,7 +190,7 @@ async fn external_executor_handles_publication_protocol_calls_and_persisted_rest
             ),
         )
         .await?;
-        let router = az_plugin_host::runtime::server::router(state.clone());
+        let router = az_plugin_host::runtime::server::router(state.clone())?;
         let server = tokio::spawn(async move { axum::serve(listener, router).await });
         let result = async {
             if generation == 0 {

@@ -80,7 +80,7 @@ impl Plugin<RuntimeAssembly> for ProbePlugin {
                     Ok(())
                 })
             });
-            assembly.add_routes(|_| Router::new().route("/api/runtime/probe", get(probe)));
+            assembly.add_routes(|_| Ok(Router::new().route("/api/runtime/probe", get(probe))));
             Ok(())
         })
     }
@@ -202,7 +202,7 @@ async fn selected_plugins_control_real_http_routes() -> Result<()> {
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let origin = format!("http://{}", listener.local_addr()?);
-    let router = super::super::router(state.clone());
+    let router = super::super::router(state.clone())?;
     let server = tokio::spawn(async move { axum::serve(listener, router).await });
     let client = reqwest::Client::builder().no_proxy().build()?;
     let outcome = async {

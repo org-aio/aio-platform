@@ -59,6 +59,7 @@ enum Failure {
     Panic,
     Stop,
     Routes,
+    RouteError,
 }
 
 #[derive(Clone)]
@@ -119,6 +120,9 @@ impl Plugin<RuntimeAssembly> for ValuePlugin {
             if matches!(self.0.failure, Failure::Routes) {
                 assembly.add_routes(|_| panic!("路由装配故障"));
             }
+            if matches!(self.0.failure, Failure::RouteError) {
+                assembly.add_routes(|_| anyhow::bail!("控制器依赖装配失败"));
+            }
             Ok(())
         })
     }
@@ -147,9 +151,9 @@ impl Plugin<RuntimeAssembly> for Routes {
             assembly.require_service::<Cached>();
             assembly.require_service::<Settings>();
             assembly.add_routes(|_| {
-                Router::new()
+                Ok(Router::new()
                     .route("/value", get(read))
-                    .route("/slow", get(slow))
+                    .route("/slow", get(slow)))
             });
             Ok(())
         })
@@ -206,12 +210,12 @@ impl Plugin<RuntimeAssembly> for StablePlugin {
                 })
             });
             assembly.add_routes(|_| {
-                Router::new().route(
+                Ok(Router::new().route(
                     "/stable",
                     get(|State(state): State<RuntimeState>| async move {
                         Ok::<_, RuntimeError>(Json(json!({"id":state.service::<Stable>()?.id})))
                     }),
-                )
+                ))
             });
             Ok(())
         })
@@ -341,7 +345,12 @@ async fn replaces_and_restarts_injected_services_preserving_unrelated_singletons
 #[tokio::test]
 async fn failed_initialization_panic_and_route_factory_restore_fresh_previous_resources()
 -> Result<()> {
-    for failure in [Failure::Initialize, Failure::Panic, Failure::Routes] {
+    for failure in [
+        Failure::Initialize,
+        Failure::Panic,
+        Failure::Routes,
+        Failure::RouteError,
+    ] {
         let fixture = Fixture::new().await?;
         let before = fixture.get("/value").await?;
         let error = fixture
@@ -546,7 +555,7 @@ impl Plugin<RuntimeAssembly> for ObserverPlugin {
             assembly.services.add::<Observer>();
             assembly.require_service::<Observer>();
             assembly.add_routes(|_| {
-                Router::new().route(
+                Ok(Router::new().route(
                     "/observer",
                     get(|State(state): State<RuntimeState>| async move {
                         let observer = state.service::<Observer>()?;
@@ -554,7 +563,7 @@ impl Plugin<RuntimeAssembly> for ObserverPlugin {
                         let (id, value) = catalog.get_one::<Cached>()?.value.read()?;
                         Ok::<_, RuntimeError>(Json(json!({"id":id,"value":value})))
                     }),
-                )
+                ))
             });
             Ok(())
         })

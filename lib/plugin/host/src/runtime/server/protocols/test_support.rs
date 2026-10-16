@@ -160,7 +160,7 @@ impl Fixture {
             crate::runtime::server::plugins::assemble(state.config.clone(), Vec::new()).await?;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let origin = format!("http://{}", listener.local_addr()?);
-        let router = crate::runtime::server::router(state);
+        let router = crate::runtime::server::router(state)?;
         let server = tokio::spawn(async move { axum::serve(listener, router).await });
         let result = async {
             for path in ["/api/runtime/mcp", "/aio.runtime.v1.Enhancements/List"] {
@@ -260,7 +260,7 @@ impl Fixture {
             assert!(state.store().is_err());
         }
         assert!(!root.path().join("cache").exists());
-        let router = crate::runtime::server::router(state.clone());
+        let router = crate::runtime::server::router(state.clone())?;
         let server = tokio::spawn(async move { axum::serve(listener, router).await });
         Ok(Self {
             base,

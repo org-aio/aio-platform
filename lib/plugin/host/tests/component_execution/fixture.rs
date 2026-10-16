@@ -309,7 +309,7 @@ impl Host {
             ),
         )
         .await?;
-        let router = az_plugin_host::runtime::server::router(state.clone());
+        let router = az_plugin_host::runtime::server::router(state.clone())?;
         let server = tokio::spawn(async move { axum::serve(listener, router).await });
         let mut headers = axum::http::HeaderMap::new();
         headers.insert("cookie", "session=component-test".parse()?);
