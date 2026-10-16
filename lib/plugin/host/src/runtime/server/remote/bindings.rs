@@ -15,8 +15,9 @@ use super::super::plugins::{
 };
 use super::{
     configuration::{self, Loaded, Transport},
-    grpc::Grpc,
-    mcp::Mcp,
+    grpc::{Grpc, Prepared},
+    mcp::{Connection, Mcp},
+    mcp_http::BoundedClient,
 };
 
 /// 一代不可变的协议绑定；调用持有它直至整条脚本链结束。
@@ -38,6 +39,12 @@ enum Binding {
     Grpc(Grpc),
 }
 
+enum Pending {
+    Mcp(Mcp),
+    // Tonic Endpoint 较大，MCP 候选无需承担它的栈空间。
+    Grpc(Box<Prepared>),
+}
+
 impl Bindings {
     pub async fn open(
         loaded: Loaded,
@@ -54,11 +61,22 @@ impl Bindings {
                 "远端能力必须绑定明确租户"
             );
             az_plugin_contract::validate_enhancement_path(&import.capability.path)?;
-            let auth = configuration::credential(import.credential_env.as_deref())?;
-            configuration::endpoint(
-                &import.endpoint,
-                matches!(import.transport, Transport::Grpc { .. }),
-            )?;
+            let auth = if matches!(import.transport, Transport::McpStdio { .. }) {
+                ensure!(
+                    import.endpoint.is_none() && import.credential_env.is_none(),
+                    "MCP stdio 不接受 endpoint 或 Bearer 凭据，请配置 command.env"
+                );
+                None
+            } else {
+                configuration::endpoint(
+                    import
+                        .endpoint
+                        .as_deref()
+                        .context("远端能力缺少 endpoint")?,
+                    matches!(import.transport, Transport::Grpc { .. }),
+                )?;
+                configuration::credential(import.credential_env.as_deref())?
+            };
             ensure!(
                 bindings.insert((import.capability.path.clone(), import.tenant_id.clone())),
                 "同一租户的远端能力路径重复"
@@ -81,38 +99,51 @@ impl Bindings {
                     },
                 );
             }
-            pending.push((import, descriptor, auth));
-        }
-        for (import, descriptor, auth) in pending {
             let binding = match import.transport {
-                Transport::Mcp { tool, output } => Binding::Mcp(
-                    Mcp::open(
-                        &import.endpoint,
-                        auth,
-                        tool,
-                        output,
-                        &import.capability,
-                        &tasks,
-                    )
-                    .await?,
-                ),
+                Transport::Mcp { tool, output } => Pending::Mcp(Mcp::new(
+                    Connection::Http {
+                        endpoint: import.endpoint.context("远端能力缺少 endpoint")?,
+                        client: BoundedClient::new(auth)?,
+                    },
+                    tool,
+                    output,
+                    &import.capability,
+                )?),
+                Transport::McpStdio {
+                    tool,
+                    output,
+                    command,
+                } => Pending::Mcp(Mcp::new(
+                    Connection::Stdio(Arc::new(command.prepare().await?)),
+                    tool,
+                    output,
+                    &import.capability,
+                )?),
                 Transport::Grpc {
                     service, method, ..
-                } => Binding::Grpc(
-                    Grpc::open(
-                        &import.endpoint,
-                        auth,
-                        descriptor.as_deref().context("缺少 gRPC 描述快照")?,
-                        &service,
-                        &method,
-                    )
-                    .await?,
-                ),
+                } => Pending::Grpc(Box::new(Grpc::prepare(
+                    import
+                        .endpoint
+                        .as_deref()
+                        .context("远端能力缺少 endpoint")?,
+                    auth,
+                    descriptor.as_deref().context("缺少 gRPC 描述快照")?,
+                    &service,
+                    &method,
+                )?)),
             };
-            let route = routes
-                .get_mut(&import.capability.path)
-                .context("导入契约缺失")?;
-            route.tenants.insert(import.tenant_id, binding);
+            pending.push((import.tenant_id, import.capability.path, binding));
+        }
+        for (tenant, path, pending) in pending {
+            let binding = match pending {
+                Pending::Mcp(client) => {
+                    client.validate(&tasks).await?;
+                    Binding::Mcp(client)
+                }
+                Pending::Grpc(client) => Binding::Grpc(client.connect().await?),
+            };
+            let route = routes.get_mut(&path).context("导入契约缺失")?;
+            route.tenants.insert(tenant, binding);
         }
         Ok(Self {
             routes,

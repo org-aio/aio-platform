@@ -5,6 +5,7 @@ mod configuration;
 mod grpc;
 mod mcp;
 mod mcp_http;
+mod mcp_stdio;
 mod provider;
 #[cfg(test)]
 mod tests;

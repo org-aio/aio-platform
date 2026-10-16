@@ -18,6 +18,10 @@ use upstream::Upstream;
 #[path = "remote_reload_tests.rs"]
 mod reload;
 
+#[cfg(target_os = "linux")]
+#[path = "stdio_tests.rs"]
+mod stdio;
+
 fn package(protocol: &str, typescript: bool) -> Result<Package> {
     let path = format!("/v1/remote/{protocol}");
     let source = if typescript {

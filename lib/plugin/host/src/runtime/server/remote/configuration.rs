@@ -25,7 +25,7 @@ pub(super) struct Configuration {
 pub(super) struct Import {
     pub tenant_id: String,
     pub capability: RuntimeCapability,
-    pub endpoint: String,
+    pub endpoint: Option<String>,
     pub credential_env: Option<String>,
     pub transport: Transport,
 }
@@ -36,6 +36,11 @@ pub(super) enum Transport {
     Mcp {
         tool: String,
         output: McpOutput,
+    },
+    McpStdio {
+        tool: String,
+        output: McpOutput,
+        command: super::mcp_stdio::CommandSpec,
     },
     Grpc {
         descriptor_set: PathBuf,
@@ -131,14 +136,7 @@ pub(super) fn credential(name: Option<&str>) -> Result<Option<axum::http::Header
     let Some(name) = name else {
         return Ok(None);
     };
-    ensure!(
-        !name.is_empty()
-            && name.len() <= 128
-            && name
-                .bytes()
-                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_'),
-        "凭据环境变量名无效"
-    );
+    environment_name(name)?;
     let value =
         std::env::var(name).map_err(|_| anyhow::anyhow!("远端能力凭据未配置或编码无效: {name}"))?;
     ensure!(!value.trim().is_empty(), "远端能力凭据为空");
@@ -146,4 +144,16 @@ pub(super) fn credential(name: Option<&str>) -> Result<Option<axum::http::Header
         .context("远端能力凭据不是有效认证头")?;
     header.set_sensitive(true);
     Ok(Some(header))
+}
+
+pub(super) fn environment_name(name: &str) -> Result<()> {
+    ensure!(
+        !name.is_empty()
+            && name.len() <= 128
+            && name
+                .bytes()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_'),
+        "环境变量名无效"
+    );
+    Ok(())
 }

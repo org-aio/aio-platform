@@ -1,6 +1,6 @@
 # 外部 MCP 与 gRPC 能力
 
-从 `plugins/remote_capabilities.rs` 看装配与生命周期，再看 `provider.rs` 的在线发布、`bindings.rs` 的不可变租户路由及输入输出校验，最后看 `mcp.rs`、`grpc.rs` 的协议适配。原生插件身份仍是 Dill 中的具体 TypeId；外部服务名、工具名和版本路径只是协议符号。
+从 `plugins/remote_capabilities.rs` 看装配与生命周期，再看 `provider.rs` 的在线发布、`bindings.rs` 的不可变租户路由及输入输出校验，最后看 `mcp.rs`、`grpc.rs` 的协议适配。`mcp_stdio.rs` 只处理本机进程及受限管道，复用 MCP 的发现、调用和取消。原生插件身份仍是 Dill 中的具体 TypeId；外部服务名、工具名和版本路径只是协议符号。
 
 启用 `az-plugin-host/remote`，在宿主组合中选择 `RemoteCapabilitiesPlugin`，并设置 `HostConfig.remote_capabilities`。默认组合在启用 feature 后包含该插件；不配置文件时没有远端能力和连接。该 feature 只依赖 `server`，不启用 Wasm 或 Sidecar。提供了配置但未启用 feature 或未装配插件时，宿主启动失败，避免静默忽略。
 
@@ -18,13 +18,22 @@ protoc --include_imports --descriptor_set_out=calculator.bin calculator.proto
 | --- | --- |
 | `tenant_id` | 明确租户，无通配符；同一租户同一路径只能绑定一次 |
 | `capability` | 版本路径、说明、副作用类型和输入输出 JSON Schema |
-| `endpoint` | HTTPS，或使用固定回环/私网 IP 的 HTTP；无地址凭据、查询参数或片段；gRPC 无路径前缀 |
+| `endpoint` | HTTP MCP/gRPC 必填；HTTPS，或固定回环/私网 IP 的 HTTP；无地址凭据、查询参数或片段；gRPC 无路径前缀；stdio 禁用 |
 | `credential_env` | 可省略；指定包含 Bearer token 的环境变量名，不转发用户的会话或 Cookie |
-| `transport.protocol` | `mcp` 或 `grpc` |
+| `transport.protocol` | `mcp`、`mcp_stdio` 或 `grpc` |
 | MCP `tool` / `output` | 工具名；`structured` 返回 `structuredContent`，`envelope` 返回完整成功结果对象 |
+| stdio `command` | 绝对 `program`、绝对 `cwd`、字面 `args` 数组、子进程变量名到宿主变量名的 `env` 映射；禁用 `credential_env` |
 | gRPC `descriptor_set` / `service` / `method` | FileDescriptorSet 文件、完整服务名、unary 方法名 |
 
 配置版本为 1，每份配置允许 0 到 64 个绑定，配置和描述文件各最多 1 MiB，单次候选读取总量最多 8 MiB。输入输出使用离线 JSON Schema 校验；只解析 schema 内定义的引用，不取网络或本机文件。不同租户可把同一路径绑定到不同上游，但公开契约必须完全一致。
+
+## 本机 MCP stdio
+
+复制 [stdio 示例](examples/stdio.json)，由部署方安装可执行程序并配置工作目录。宿主不下载软件、不拼接 shell、不转发用户会话；命令和环境来自固定部署文件，租户及脚本不能提交命令。`env` 只保存名称映射，例如 `{"API_TOKEN":"CALCULATOR_TOKEN"}`，值在绑定准备时读取。子进程环境先清空，`PATH`、`HOME` 等也须显式映射；程序需要额外的系统环境时由部署方声明。最多 128 个参数、64 个变量，参数与环境总量不超过 64 KiB。
+
+启动导入和每次调用均创建独立进程，完成握手及契约发现后最多执行一次工具，随后关闭会话并终止进程组、等待直接子进程退出。取消、截止时间、握手失败和插件关闭都走同一任务作用域，清理完成前不释放并发配额。Unix 使用独立进程组，Windows 使用 Job Object；异常 Drop 会再次尝试终止。它是受信任的本机程序连接方式，不提供文件、网络、CPU 或内存沙箱；进程主动脱离 Unix 进程组也不受此机制限制。需要系统隔离时使用现有 Sidecar 容器与监督服务。
+
+stdout 只接收 MCP JSON 消息，单行最多 1 MiB，整场会话累计读取最多 4 MiB；无效消息或超额立即关闭。stderr 丢弃，原始错误行不会写入此适配器的日志。协议编码、消息及握手使用官方 SDK；受限行解码使用 Tokio LinesCodec，避免 SDK 解码错误日志带出原始行。正式配置使用不可变的版本化程序路径，升级时切换配置；绑定快照固定命令和环境，但不会复制或校验磁盘上的可执行文件内容。
 
 ## 在线更新与停用
 
@@ -38,7 +47,7 @@ protoc --include_imports --descriptor_set_out=calculator.bin calculator.proto
 
 文件观察任务由插件生命周期管理，停止会取消候选校验并禁止后续发布。MCP 的发现和工具请求共用受管理的会话，取消时先发送协议取消通知再关闭会话；有状态服务器的发现请求也纳入关闭验收。开发沙箱不运行正式宿主的后台就绪钩子，仍在启动时导入。没有允许租户修改上游地址的 HTTP 接口；凭据继续使用宿主环境，环境变量值的轮换需要重新启动进程。
 
-MCP 使用官方 SDK 的 Streamable HTTP，支持有状态和无状态服务器。启动和每次调用前检查工具目录及输入 schema；`structured` 还要求上游声明完全相同的输出 schema。`read` 要求上游明确标记只读，`idempotent_write` 要求只读或幂等标记；`write` 表示不能保证幂等。注解是契约声明，不是副作用证明。任何类型均不自动重试业务调用，不重新提交交互任务，不因会话过期重放工具；调用后关闭独立会话。
+MCP 使用官方 SDK 的 Streamable HTTP 或 stdio；HTTP 支持有状态和无状态服务器。启动和每次调用前检查工具目录及输入 schema；`structured` 还要求上游声明完全相同的输出 schema。`read` 要求上游明确标记只读，`idempotent_write` 要求只读或幂等标记；`write` 表示不能保证幂等。注解是契约声明，不是副作用证明。任何类型均不自动重试业务调用，不重新提交交互任务，不因会话过期重放工具；调用后关闭独立会话。
 
 gRPC 复用 Tonic Channel 和 Prost 动态消息，输入按 Protobuf JSON 解码且拒绝未知字段，输出保留普通字段的默认值。64 位整数为字符串、bytes 为 base64、枚举通常为名称，schema 必须遵循 Protobuf JSON 映射；可选字段和 oneof 保留存在性语义。它不自动生成业务 schema，也不提供服务反射或 streaming RPC。
 
@@ -58,15 +67,21 @@ export function invoke(input: { value: number }) {
 
 增强包的 `capabilities` 声明直接依赖；样例提供有序 `{path,input,output}` 调用记录，验证不连接真实服务。用户还需 `runtime:<path>` 权限；Wasm/Sidecar 的包声明与交互用户授权求交集。声明外部能力、能看到目录或管理增强都不自动获得执行权。租户路由、身份、授权和截止时间来自宿主，脚本不能指定上游地址或改写这些数据。
 
-调用沿用整条脚本链的截止时间，gRPC 入口传入的较短期限继续传播到上游 `grpc-timeout`。关闭或取消等待会丢弃协议工作，不把仍执行的脚本计为已释放。传输响应最多 1 MiB，最终 JSON 仍限 64 KiB；MCP 在解析前限制 JSON、分块响应和未终止 SSE 的累计字节，并拒绝重定向。每个 MCP 绑定最多 4 个调用，取消清理继续持有配额；取消通知与会话关闭各限 2 秒，清理任务由插件收容并在停止时等待。取消只能停止协作的调用和等待，已经产生的外部写入没有自动补偿。
+调用沿用整条脚本链的截止时间，gRPC 入口传入的较短期限继续传播到上游 `grpc-timeout`。关闭或取消等待会丢弃协议工作，不把仍执行的脚本计为已释放。传输响应最多 1 MiB，最终 JSON 仍限 64 KiB；MCP HTTP 在解析前限制 JSON、分块响应和未终止 SSE 的累计字节，并拒绝重定向。每个 MCP 绑定最多 4 个调用，取消清理继续持有配额；握手限 5 秒，取消通知、会话关闭和 stdio 进程等待各限 2 秒，清理任务由插件收容并在停止时等待。取消不能撤销已经产生的外部写入，没有自动补偿。
 
 运行真实 PostgreSQL、MCP SDK 和独立 gRPC 服务的验收：
 
 ```sh
+cargo build -p az-plugin-host --no-default-features --features remote --example mcp-stdio-fixture
 AIO_ENHANCEMENT_TEST_DATABASE_URL=postgresql://test@127.0.0.1:5432/remote_test \
 AIO_REMOTE_TEST_CREDENTIAL=remote-test \
+AIO_MCP_STDIO_TEST_EXECUTABLE="$PWD/target/debug/examples/mcp-stdio-fixture" \
+AIO_MCP_STDIO_TEST_TOKEN=stdio-test \
+AIO_MCP_STDIO_HOST_SECRET=must-not-inherit \
   cargo test -p az-plugin-host --no-default-features --features remote \
   --lib protocols::tests::remote -- --ignored --test-threads=1
 ```
 
-覆盖双语言、双协议、同路径不同租户绑定、候选无副作用、恢复、权限撤销、失败不重试、契约漂移、超限响应、零值 Protobuf JSON、短超时和取消传播。在线更新验收将真实脚本暂停在第一次远端调用中，切换绑定后证明旧脚本的第二次调用仍访问旧上游，新请求通过 MCP/gRPC 入口访问新上游，另一个租户的绑定保持独立；还覆盖空配置、整批拒绝、删除后契约冲突和描述文件更新。MCP stdio、流式 RPC、模型生成策略与原生宿主自更新仍在完整目标的待实现范围内。
+覆盖双语言、双协议、同路径不同租户绑定、候选无副作用、恢复、权限撤销、失败不重试、契约漂移、超限响应、零值 Protobuf JSON、短超时和取消传播。在线更新验收将真实脚本暂停在第一次远端调用中，切换绑定后证明旧脚本的第二次调用仍访问旧上游，新请求通过 MCP/gRPC 入口访问新上游，另一个租户的绑定保持独立；还覆盖空配置、整批拒绝、删除后契约冲突和描述文件更新。
+
+Linux stdio 验收使用真实 SDK 子进程及其后代，覆盖双语言、环境与字面参数、恶意/超大输出、通知洪泛、异常退出、握手/发现挂起、取消、满额和插件停用；直接子进程必须被 wait，后代不得继续运行。还覆盖整批配置预检、失败保留旧绑定及运行中的脚本固定命令快照。macOS/Windows 的实际进程验收、流式 RPC、MCP 交互/后台任务和原生宿主自更新仍待完成。

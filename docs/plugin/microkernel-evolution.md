@@ -89,7 +89,7 @@ cargo run -p az-plugin-enhancement --example verify -- \
 | MCP | 给 AI 提供工具发现和执行 | 官方 SDK 的 Streamable HTTP 已接入增强；工具发现提供业务输入及输出 schema；已授权演进脚本可以调用统一版本服务 |
 | gRPC | 有类型的跨进程/跨机器通信 | Tonic 与生成的 Protobuf 契约已接入增强发现、Describe 契约查询、执行、消息限额和截止时间；当前为 unary |
 
-MCP 和 gRPC 适配器消费同一份增强目录、请求响应与版本服务，不保存另一套活动指针，也不允许调用方自报租户。MCP 的工具发现不是授权；gRPC 的类型正确不代表权限正确。Sidecar 是执行边界，可以承载 MCP 或 gRPC 服务，但宿主仍决定哪些能力能被调用。接入方式、权限和真实客户端验收见 [协议入口](../../lib/plugin/host/src/runtime/server/protocols/README.md)。外部 MCP 工具与描述文件定义的 unary gRPC 方法现可通过可选 `RemoteCapabilitiesPlugin` 导入，配置租户、地址、契约和凭据环境变量名。导入者与协议入口共用同一能力层；两种语言均通过 `call_capability` 消费。真实验收与配置见 [外部能力](../../lib/plugin/host/src/runtime/server/remote/README.md)。启动导入及部署文件在线变更已实现：候选整批校验后原子发布，拒绝更新保留旧版，调用链持有不可变能力快照；MCP stdio 和 streaming 尚未实现。
+MCP 和 gRPC 适配器消费同一份增强目录、请求响应与版本服务，不保存另一套活动指针，也不允许调用方自报租户。MCP 的工具发现不是授权；gRPC 的类型正确不代表权限正确。Sidecar 是执行边界，可以承载 MCP 或 gRPC 服务，但宿主仍决定哪些能力能被调用。接入方式、权限和真实客户端验收见 [协议入口](../../lib/plugin/host/src/runtime/server/protocols/README.md)。外部 MCP 工具与描述文件定义的 unary gRPC 方法现可通过可选 `RemoteCapabilitiesPlugin` 导入，配置租户、地址或本机 stdio 命令、契约和凭据环境变量名。导入者与协议入口共用同一能力层；两种语言均通过 `call_capability` 消费。真实验收与配置见 [外部能力](../../lib/plugin/host/src/runtime/server/remote/README.md)。启动导入及部署文件在线变更已实现：候选整批校验后原子发布，拒绝更新保留旧版，调用链持有不可变能力快照。stdio 握手与调用由插件任务管理，取消和停止会回收进程组，已完成 Linux 实测；macOS/Windows 运行验收、streaming 和 MCP 交互/后台任务尚待完成。
 
 ## 下一层改进的验收门槛
 

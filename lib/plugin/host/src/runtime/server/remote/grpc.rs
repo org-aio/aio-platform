@@ -19,14 +19,20 @@ pub(super) struct Grpc {
     auth: Option<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>,
 }
 
+pub(super) struct Prepared {
+    address: Endpoint,
+    method: MethodDescriptor,
+    auth: Option<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>,
+}
+
 impl Grpc {
-    pub async fn open(
+    pub fn prepare(
         endpoint: &str,
         auth: Option<axum::http::HeaderValue>,
         descriptor: &[u8],
         service: &str,
         method: &str,
-    ) -> Result<Self> {
+    ) -> Result<Prepared> {
         let pool = DescriptorPool::decode(descriptor).context("gRPC 描述文件无效")?;
         let service = pool
             .get_service_by_name(service)
@@ -51,9 +57,8 @@ impl Grpc {
                 Ok::<_, anyhow::Error>(metadata)
             })
             .transpose()?;
-        let channel = address.connect().await.context("连接远端 gRPC 失败")?;
-        Ok(Self {
-            channel,
+        Ok(Prepared {
+            address,
             method,
             auth,
         })
@@ -92,6 +97,17 @@ impl Grpc {
         Ok(response
             .into_inner()
             .serialize_with_options(serde_json::value::Serializer, &options)?)
+    }
+}
+
+impl Prepared {
+    pub async fn connect(self) -> Result<Grpc> {
+        let channel = self.address.connect().await.context("连接远端 gRPC 失败")?;
+        Ok(Grpc {
+            channel,
+            method: self.method,
+            auth: self.auth,
+        })
     }
 }
 

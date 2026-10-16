@@ -26,6 +26,7 @@ rmcp = { version = "3.5.1", default-features = false, features = ["server", "tra
 tonic = { version = "0.14.6", optional = true }
 prost = { version = "0.14.4", optional = true }
 prost-reflect = { version = "0.16", features = ["serde"], optional = true }
+process-wrap = { version = "10.0.1", default-features = false, features = ["tokio1", "process-group", "job-object", "kill-on-drop"], optional = true }
 jsonschema = { version = "0.58.6", default-features = false, optional = true }
 sse-stream = { version = "0.2", optional = true }
 dill = "0.15.0"
@@ -61,7 +62,7 @@ components = ["dep:az-plugin-bundle", "dep:az-plugin-contract", "dep:az-plugin-r
 default = []
 wasm = ["server", "dep:wasmtime", "az-plugin-runtime/wasm", "az-plugin-manifest/wasm-validation"]
 sidecar = ["server"]
-remote = ["server", "dep:arc-swap", "dep:prost", "dep:prost-reflect", "dep:jsonschema", "dep:sse-stream", "rmcp/client", "rmcp/transport-streamable-http-client", "tonic/tls-webpki-roots"]
+remote = ["server", "dep:arc-swap", "dep:prost", "dep:prost-reflect", "dep:process-wrap", "dep:nix", "dep:jsonschema", "dep:sse-stream", "tokio-util/io", "rmcp/client", "rmcp/transport-async-rw", "rmcp/transport-streamable-http-client", "tonic/tls-webpki-roots"]
 ui = ["dep:dioxus", "dep:dioxus-icons", "dep:az-dioxus-admin-shell", "dep:az-ui-components"]
 web = ["ui", "dioxus/web", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
 desktop = ["ui", "dioxus/desktop", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
@@ -70,7 +71,11 @@ server = ["dep:schemars", "dep:tokio-util", "dep:http-body", "dep:jsonwebtoken",
 [lints.rust]
 unsafe_code = "forbid"
 
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.31.1", default-features = false, features = ["signal"], optional = true }
+
 [dev-dependencies]
+tokio = { version = "1.47.1", features = ["io-std"] }
 jsonschema = { version = "0.58.6", default-features = false }
 prost-types = "0.14.4"
 tonic-prost = "0.14.6"
@@ -78,3 +83,8 @@ tempfile = "3.23.0"
 reqwest = { version = "0.12.23", default-features = false, features = ["http2"] }
 rmcp = { version = "3.5.1", default-features = false, features = ["client", "transport-streamable-http-client-reqwest"] }
 reqwest-mcp = { package = "reqwest", version = "0.13.2", default-features = false }
+
+[[example]]
+name = "mcp-stdio-fixture"
+path = "tests/stdio/fixture.rs"
+required-features = ["remote"]

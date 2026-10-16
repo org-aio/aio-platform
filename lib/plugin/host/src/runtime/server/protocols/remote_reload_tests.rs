@@ -4,7 +4,7 @@ use crate::runtime::server::{
 };
 use az_plugin_contract::{CapabilityGrants, EnhancementRequest, InvocationScope, RequestContext};
 
-fn twice(protocol: &str, typescript: bool) -> Result<Package> {
+pub(super) fn twice(protocol: &str, typescript: bool) -> Result<Package> {
     let path = format!("/v1/remote/{protocol}");
     let source = if typescript {
         format!(
@@ -35,7 +35,7 @@ fn config_path(fixture: &Fixture) -> Result<&std::path::Path> {
         .context("缺少测试配置")
 }
 
-async fn write_imports(fixture: &Fixture, mut imports: Vec<Value>) -> Result<()> {
+pub(super) async fn write_imports(fixture: &Fixture, mut imports: Vec<Value>) -> Result<()> {
     for import in &mut imports {
         if import["tenant_id"] == "test" {
             import["tenant_id"] = json!(fixture.identity.tenant);
@@ -70,7 +70,7 @@ async fn observed_update(fixture: &Fixture, imports: Vec<Value>) -> Result<()> {
     Ok(())
 }
 
-async fn reload(fixture: &Fixture) -> Result<bool> {
+pub(super) async fn reload(fixture: &Fixture) -> Result<bool> {
     fixture
         .state
         .service::<RemoteCapabilities>()?
