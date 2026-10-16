@@ -40,6 +40,10 @@ pub struct Counts {
     pub credentials: AtomicUsize,
     pub deadlines: AtomicUsize,
     pub last_timeout_micros: AtomicUsize,
+    pub release: tokio::sync::Notify,
+    pub pause_catalog: AtomicBool,
+    pub catalog_entered: tokio::sync::Notify,
+    pub catalog_release: tokio::sync::Notify,
 }
 
 struct Active(Arc<Counts>);
@@ -181,8 +185,15 @@ impl ServerHandler for Tools {
     async fn list_tools(
         &self,
         _: Option<PaginatedRequestParams>,
-        _: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
+        if self.0.pause_catalog.load(Ordering::SeqCst) {
+            self.0.catalog_entered.notify_one();
+            tokio::select! {
+                _ = self.0.catalog_release.notified() => {},
+                _ = context.ct.cancelled() => return Err(ErrorData::internal_error("发现已取消", None)),
+            }
+        }
         let mut input = schema();
         if self.0.changed.load(Ordering::SeqCst) {
             input["properties"]["value"]["type"] = json!("string");
@@ -212,6 +223,12 @@ impl ServerHandler for Tools {
             .and_then(Value::as_i64)
             .ok_or_else(|| ErrorData::invalid_params("缺少 value", None))?;
         let _active = Active::enter(self.0.clone());
+        if value == -5 {
+            tokio::select! {
+                _ = self.0.release.notified() => {},
+                _ = context.ct.cancelled() => return Err(ErrorData::internal_error("已取消", None)),
+            }
+        }
         if value == -1 {
             context.ct.cancelled().await;
             return Err(ErrorData::internal_error("已取消", None));
@@ -247,8 +264,11 @@ impl tonic::server::UnaryService<Number> for Double {
     fn call(&mut self, request: tonic::Request<Number>) -> Self::Future {
         let counts = self.0.clone();
         Box::pin(async move {
-            let _active = Active::enter(counts);
+            let _active = Active::enter(counts.clone());
             let value = request.into_inner().value;
+            if value == -5 {
+                counts.release.notified().await;
+            }
             if value == -1 {
                 std::future::pending::<()>().await;
             }

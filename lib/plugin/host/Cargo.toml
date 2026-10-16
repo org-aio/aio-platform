@@ -11,6 +11,7 @@ az-plugin-development = { path = "../development" }
 az-plugin-delivery = { path = "../delivery" }
 base64 = "0.22.1"
 anyhow = "1.0.99"
+arc-swap = { workspace = true, optional = true }
 async-trait = { version = "0.1", optional = true }
 futures-util = { version = "0.3", optional = true }
 az-plugin-bundle = { path = "../bundle", optional = true }
@@ -60,7 +61,7 @@ components = ["dep:az-plugin-bundle", "dep:az-plugin-contract", "dep:az-plugin-r
 default = []
 wasm = ["server", "dep:wasmtime", "az-plugin-runtime/wasm", "az-plugin-manifest/wasm-validation"]
 sidecar = ["server"]
-remote = ["server", "dep:prost", "dep:prost-reflect", "dep:jsonschema", "dep:sse-stream", "rmcp/client", "rmcp/transport-streamable-http-client", "tonic/tls-webpki-roots"]
+remote = ["server", "dep:arc-swap", "dep:prost", "dep:prost-reflect", "dep:jsonschema", "dep:sse-stream", "rmcp/client", "rmcp/transport-streamable-http-client", "tonic/tls-webpki-roots"]
 ui = ["dep:dioxus", "dep:dioxus-icons", "dep:az-dioxus-admin-shell", "dep:az-ui-components"]
 web = ["ui", "dioxus/web", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
 desktop = ["ui", "dioxus/desktop", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]

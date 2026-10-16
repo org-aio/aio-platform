@@ -1,7 +1,7 @@
 use std::{
-    any::Any,
+    any::{Any, TypeId},
     collections::{BTreeMap, HashSet},
-    sync::{Arc, OnceLock, Weak},
+    sync::{Arc, Mutex, OnceLock, Weak},
     time::Duration,
 };
 
@@ -80,6 +80,11 @@ impl CapabilityRequest {
 #[async_trait::async_trait]
 pub trait CapabilityProvider: Any + Send + Sync {
     fn capabilities(&self) -> Vec<RuntimeCapability>;
+    /// 动态提供者返回不可变的执行快照；一次增强调用及其子调用始终持有同一快照。
+    /// 默认实现表示静态提供者，其能力必须在初始化时完整声明。
+    fn snapshot(&self) -> Option<Arc<dyn CapabilityProvider>> {
+        None
+    }
     /// 租户资源是否已装配；这是可用性检查，不代替运行时的显式能力授权。
     fn available(&self, _path: &str, _tenant: &str) -> bool {
         true
@@ -90,54 +95,111 @@ pub trait CapabilityProvider: Any + Send + Sync {
 /// 从宿主的 Dill 容器解析全部提供者，脚本执行器和协议入口不维护第二套注册表。
 pub struct RuntimeCapabilities {
     providers: Vec<Arc<dyn CapabilityProvider>>,
-    routes: OnceLock<Result<CapabilityRoutes, String>>,
+    registry: OnceLock<Result<Mutex<Registry>, String>>,
 }
 
-type CapabilityRoutes = BTreeMap<String, (RuntimeCapability, Arc<dyn CapabilityProvider>)>;
+#[derive(Clone)]
+struct CapabilityRoute {
+    owner: TypeId,
+    capability: RuntimeCapability,
+    provider: Arc<dyn CapabilityProvider>,
+}
+
+type CapabilityRoutes = BTreeMap<String, CapabilityRoute>;
+
+struct Registry {
+    routes: Arc<CapabilityRoutes>,
+    dynamic: HashSet<TypeId>,
+    // 删除后仍保留契约，防止旧脚本在同一路径重新出现时获得不同副作用语义。
+    contracts: BTreeMap<String, (TypeId, RuntimeCapability)>,
+}
 
 #[dill::component(pub)]
 #[dill::scope(dill::Singleton)]
 impl RuntimeCapabilities {
-    /// 只保存 Dill 解析的提供者；能力目录首次校验后固定，不在每次脚本指令重建 schema。
+    /// 只保存 Dill 解析的提供者；目录与已编译 schema 按快照共享，不在脚本指令中重建。
     pub fn new(providers: Vec<Arc<dyn CapabilityProvider>>) -> Self {
         Self {
             providers,
-            routes: OnceLock::new(),
+            registry: OnceLock::new(),
         }
     }
 
     pub fn validate(&self) -> Result<()> {
-        self.routes()?;
+        self.registry()?;
         Ok(())
     }
 
-    fn routes(&self) -> Result<&CapabilityRoutes> {
-        self.routes
-            .get_or_init(|| self.build_routes().map_err(|error| format!("{error:#}")))
+    fn registry(&self) -> Result<&Mutex<Registry>> {
+        self.registry
+            .get_or_init(|| {
+                self.build_registry()
+                    .map(Mutex::new)
+                    .map_err(|error| format!("{error:#}"))
+            })
             .as_ref()
             .map_err(|error| anyhow::anyhow!(error.clone()))
     }
 
-    fn build_routes(&self) -> Result<CapabilityRoutes> {
+    fn build_registry(&self) -> Result<Registry> {
         let mut types = HashSet::new();
         let mut routes = BTreeMap::new();
+        let mut contracts = BTreeMap::new();
+        let mut dynamic = HashSet::new();
         for provider in &self.providers {
-            ensure!(
-                types.insert(provider.as_ref().type_id()),
-                "宿主能力提供者类型被重复注册"
-            );
-            let capabilities = provider.capabilities();
-            ensure!(!capabilities.is_empty(), "宿主能力提供者未声明任何能力");
-            for capability in capabilities {
-                az_plugin_contract::validate_enhancement_path(&capability.path)?;
-                ensure!(
-                    !routes.contains_key(&capability.path),
-                    "多个提供者声明了同一宿主能力路径"
-                );
-                routes.insert(capability.path.clone(), (capability, provider.clone()));
+            let owner = provider.as_ref().type_id();
+            ensure!(types.insert(owner), "宿主能力提供者类型被重复注册");
+            let snapshot = provider.snapshot();
+            if snapshot.is_some() {
+                dynamic.insert(owner);
             }
+            let snapshot = snapshot.unwrap_or_else(|| provider.clone());
+            ensure!(
+                dynamic.contains(&owner) || !snapshot.capabilities().is_empty(),
+                "宿主能力提供者未声明任何能力"
+            );
+            add_routes(&mut routes, &mut contracts, owner, snapshot)?;
         }
-        Ok(routes)
+        Ok(Registry {
+            routes: Arc::new(routes),
+            dynamic,
+            contracts,
+        })
+    }
+
+    fn routes(&self) -> Result<Arc<CapabilityRoutes>> {
+        let registry = self
+            .registry()?
+            .lock()
+            .map_err(|_| anyhow::anyhow!("能力目录锁已损坏"))?;
+        Ok(registry.routes.clone())
+    }
+
+    /// 原生动态提供者在候选完全准备好后发布；先校验全局路径及历史契约，再同步提交。
+    /// commit 只更新提供者的内存快照，不得执行 I/O 或递归访问目录；返回错误前不得修改状态。
+    /// 校验或提交失败保留整个旧目录。
+    pub fn publish<P: CapabilityProvider>(
+        &self,
+        snapshot: Arc<dyn CapabilityProvider>,
+        commit: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        let owner = TypeId::of::<P>();
+        let mut registry = self
+            .registry()?
+            .lock()
+            .map_err(|_| anyhow::anyhow!("能力目录锁已损坏"))?;
+        ensure!(
+            registry.dynamic.contains(&owner),
+            "提供者未通过 Dill 声明动态能力"
+        );
+        let mut routes = registry.routes.as_ref().clone();
+        routes.retain(|_, route| route.owner != owner);
+        let mut contracts = registry.contracts.clone();
+        add_routes(&mut routes, &mut contracts, owner, snapshot)?;
+        commit()?;
+        registry.routes = Arc::new(routes);
+        registry.contracts = contracts;
+        Ok(())
     }
 
     /// 目录、候选激活与调用都只使用该租户已装配的能力。
@@ -145,15 +207,42 @@ impl RuntimeCapabilities {
         Ok(self
             .routes()?
             .values()
-            .filter(|(capability, provider)| provider.available(&capability.path, tenant))
-            .map(|(capability, _)| capability.clone())
+            .filter(|route| route.provider.available(&route.capability.path, tenant))
+            .map(|route| route.capability.clone())
             .collect())
     }
+}
 
-    fn provider(&self, path: &str) -> Result<Arc<dyn CapabilityProvider>> {
-        let (_, provider) = self.routes()?.get(path).context("宿主能力提供者未装配")?;
-        Ok(provider.clone())
+fn add_routes(
+    routes: &mut CapabilityRoutes,
+    contracts: &mut BTreeMap<String, (TypeId, RuntimeCapability)>,
+    owner: TypeId,
+    provider: Arc<dyn CapabilityProvider>,
+) -> Result<()> {
+    for capability in provider.capabilities() {
+        az_plugin_contract::validate_enhancement_path(&capability.path)?;
+        ensure!(
+            !routes.contains_key(&capability.path),
+            "多个提供者声明了同一宿主能力路径"
+        );
+        if let Some((previous_owner, previous)) = contracts.get(&capability.path) {
+            ensure!(
+                *previous_owner == owner && previous == &capability,
+                "已有能力路径的提供者和契约不可变，请使用新版本路径"
+            );
+        }
+        contracts.insert(capability.path.clone(), (owner, capability.clone()));
+        routes.insert(
+            capability.path.clone(),
+            CapabilityRoute {
+                owner,
+                capability,
+                provider: provider.clone(),
+            },
+        );
     }
+    ensure!(contracts.len() <= 4096, "进程内能力契约历史超过 4096 项");
+    Ok(())
 }
 
 pub(in crate::runtime::server) struct CapabilityEnvironment {
@@ -171,7 +260,7 @@ impl CapabilityEnvironment {
         Ok(InvocationCapabilities {
             grants: scope.grants.runtime.clone(),
             caller: Some(Arc::new(Caller {
-                runtime: self.runtime()?,
+                routes: self.runtime()?.routes()?,
                 identity: self.identity.clone(),
                 scope: scope.clone(),
                 handle: tokio::runtime::Handle::try_current().context("宿主能力缺少异步运行时")?,
@@ -181,7 +270,7 @@ impl CapabilityEnvironment {
 }
 
 struct Caller {
-    runtime: Arc<RuntimeCapabilities>,
+    routes: Arc<CapabilityRoutes>,
     identity: Arc<dyn IdentityProvider>,
     scope: InvocationScope,
     handle: tokio::runtime::Handle,
@@ -189,18 +278,22 @@ struct Caller {
 
 impl CapabilityCaller for Caller {
     fn available(&self, path: &str) -> bool {
-        self.runtime.provider(path).is_ok_and(|provider| {
+        self.routes.get(path).is_some_and(|route| {
             self.scope
                 .context
                 .tenant_id
                 .as_deref()
-                .is_some_and(|tenant| provider.available(path, tenant))
+                .is_some_and(|tenant| route.provider.available(path, tenant))
         })
     }
 
     fn call(&self, path: &str, input: &Value, control: &InvocationControl) -> Result<Value> {
         control.check()?;
-        let provider = self.runtime.provider(path)?;
+        let provider = &self
+            .routes
+            .get(path)
+            .context("宿主能力提供者未装配")?
+            .provider;
         let request = CapabilityRequest {
             path: path.into(),
             input: input.clone(),

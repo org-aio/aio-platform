@@ -3,7 +3,9 @@ use std::{any::TypeId, sync::Arc, time::Duration};
 use az_plugin_core::{Plugin, PluginFuture};
 
 use super::super::remote::RemoteCapabilities;
-use super::{CapabilityProvider, Resource, RuntimeAssembly, ScriptRuntimePlugin};
+use super::{
+    CapabilityProvider, Resource, RuntimeAssembly, RuntimeCapabilities, ScriptRuntimePlugin,
+};
 
 /// 可选的远端能力提供者；地址、契约和租户绑定由部署方文件提供，不开放任意 URL 代理。
 #[dill::component]
@@ -52,6 +54,19 @@ impl Plugin<RuntimeAssembly> for RemoteCapabilitiesPlugin {
                         capabilities.shutdown();
                     }
                     Ok(())
+                })
+            });
+            assembly.on_ready::<Self>(|state, _| {
+                Box::pin(async move {
+                    use anyhow::Context;
+                    let path = state
+                        .config
+                        .remote_capabilities
+                        .clone()
+                        .context("远端能力配置缺失")?;
+                    state
+                        .service::<RemoteCapabilities>()?
+                        .watch(path, &state.service::<RuntimeCapabilities>()?)
                 })
             });
             Ok(())

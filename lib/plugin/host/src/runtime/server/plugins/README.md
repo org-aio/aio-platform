@@ -58,6 +58,8 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 
 这是原生宿主插件的装配边界，还不包含在线卸载或单插件重启。HTTP 路由不能替代能力授权。数据库连接、密钥来源与执行器创建已由所选插件管理；组件执行契约已经接通，组件数据库与对象后端也已通过独立 Provider 接入，完整目标见 [一切皆插件验收清单](../../../../../../../docs/plugin/everything-as-plugin.md)。
 
+动态宿主能力通过同一 Dill `CapabilityProvider` 提供者发布。实现 `snapshot()` 返回不可变的能力与执行对象，准备好完整候选后调用 `RuntimeCapabilities::publish::<Self>(snapshot, commit)`；目录先校验所有提供者的路径冲突和已使用契约，再同步执行内存提交。`commit` 不得执行 I/O、递归读目录或在失败前修改状态。新调用取得新快照，当前脚本及同包子调用继续持有原快照；停止标记与取消信号应由所有代共享。外部 MCP/gRPC 的 `RemoteCapabilitiesPlugin` 是此契约的实际实现，配置示例与故障边界见 [外部能力](../remote/README.md)。这不等于动态卸载原生插件类型。
+
 验证：`cargo test -p az-plugin-host --features server plugins::tests`。真实 HTTP 精简组合验收使用无效数据库地址，无需数据库即可运行。
 
 故障验收：`cargo test -p az-plugin-host --features server lifecycle_tests` 覆盖真实端口释放、启动/就绪失败、取消等待、回调 panic、后台工作提交与 HTTP 收尾。`cargo test -p az-plugin-host --features sidecar process::shutdown_tests` 使用真实 Unix socket 监督器协议验证只停止本次创建的进程；Component 的持久化停止验收复用 `publication_preserves_running_singleton_process`。

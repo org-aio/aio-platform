@@ -15,6 +15,9 @@ use crate::runtime::server::plugins::{RemoteCapabilitiesPlugin, RuntimeCapabilit
 mod upstream;
 use upstream::Upstream;
 
+#[path = "remote_reload_tests.rs"]
+mod reload;
+
 fn package(protocol: &str, typescript: bool) -> Result<Package> {
     let path = format!("/v1/remote/{protocol}");
     let source = if typescript {

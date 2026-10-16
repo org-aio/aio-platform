@@ -89,12 +89,12 @@ cargo run -p az-plugin-enhancement --example verify -- \
 | MCP | 给 AI 提供工具发现和执行 | 官方 SDK 的 Streamable HTTP 已接入增强；当前 schema 是通用 JSON input，不提供自动发布 |
 | gRPC | 有类型的跨进程/跨机器通信 | Tonic 与生成的 Protobuf 契约已接入增强发现/执行、消息限额和截止时间；当前为 unary |
 
-MCP 和 gRPC 适配器消费同一份增强目录、请求响应与版本服务，不保存另一套活动指针，也不允许调用方自报租户。MCP 的工具发现不是授权；gRPC 的类型正确不代表权限正确。Sidecar 是执行边界，可以承载 MCP 或 gRPC 服务，但宿主仍决定哪些能力能被调用。接入方式、权限和真实客户端验收见 [协议入口](../../lib/plugin/host/src/runtime/server/protocols/README.md)。外部 MCP 工具与描述文件定义的 unary gRPC 方法现可通过可选 `RemoteCapabilitiesPlugin` 导入，配置租户、地址、契约和凭据环境变量名。导入者与协议入口共用同一能力层；两种语言均通过 `call_capability` 消费。真实验收与配置见 [外部能力](../../lib/plugin/host/src/runtime/server/remote/README.md)。启动导入已实现，在线变更、MCP stdio 和 streaming 尚未实现。
+MCP 和 gRPC 适配器消费同一份增强目录、请求响应与版本服务，不保存另一套活动指针，也不允许调用方自报租户。MCP 的工具发现不是授权；gRPC 的类型正确不代表权限正确。Sidecar 是执行边界，可以承载 MCP 或 gRPC 服务，但宿主仍决定哪些能力能被调用。接入方式、权限和真实客户端验收见 [协议入口](../../lib/plugin/host/src/runtime/server/protocols/README.md)。外部 MCP 工具与描述文件定义的 unary gRPC 方法现可通过可选 `RemoteCapabilitiesPlugin` 导入，配置租户、地址、契约和凭据环境变量名。导入者与协议入口共用同一能力层；两种语言均通过 `call_capability` 消费。真实验收与配置见 [外部能力](../../lib/plugin/host/src/runtime/server/remote/README.md)。启动导入及部署文件在线变更已实现：候选整批校验后原子发布，拒绝更新保留旧版，调用链持有不可变能力快照；MCP stdio 和 streaming 尚未实现。
 
 ## 下一层改进的验收门槛
 
 1. 将身份、策略、存储、调度、可观测性等平台服务逐个拆成可替换提供者；保留独立救援入口，避免身份插件失败后无法管理系统。
-2. 同包增强与宿主任务能力已有依赖声明、授权衰减、共享预算、截止时间、取消及幂等；包内循环被拒绝。外部 MCP/unary gRPC 已接入同一调用链与租户契约；进一步支持在线绑定变更、流式任务时，仍需定义升级生命周期与通用副作用补偿。
+2. 同包增强与宿主任务能力已有依赖声明、授权衰减、共享预算、截止时间、取消及幂等；包内循环被拒绝。外部 MCP/unary gRPC 已接入同一调用链与租户契约；在线绑定变更已覆盖整批提交、执行快照与停止取消；流式任务与通用副作用补偿仍待实现。
 3. 对多节点演进增加分批放量、真实健康指标、自动回退政策和运行时版本兼容矩阵。当前数据库指针保证版本一致，不能代替整个集群的滚动升级。
 4. 自动回退前验证数据迁移兼容性。代码回滚不能被描述为业务数据回滚。
 5. 故障演练覆盖宿主崩溃、监督器重启、数据库断连及执行器耗尽资源。正常样例和单次发布成功不能证明架构完美。

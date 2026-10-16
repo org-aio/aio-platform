@@ -1,198 +1,169 @@
 use std::{
-    collections::{BTreeMap, HashSet},
     path::Path,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::Instant,
+    time::Duration,
 };
 
 use anyhow::{Context, Result, ensure};
+use arc_swap::ArcSwap;
 use serde_json::Value;
 
 use super::super::plugins::{
-    CapabilityProvider, CapabilityRequest, PluginTasks, RuntimeCapability,
+    CapabilityProvider, CapabilityRequest, PluginTasks, RuntimeCapabilities, RuntimeCapability,
 };
-use super::{
-    configuration::{self, Configuration, Transport},
-    grpc::Grpc,
-    mcp::Mcp,
-};
+use super::{bindings::Bindings, configuration::Loaded};
 
-/// 同一原生 Provider 承载配置中的协议路由；业务路径和租户不冒充插件 TypeId。
+/// Dill 中只有一个管理实例；每次发布生成不可变绑定快照，已有调用继续持有旧快照。
 pub(in crate::runtime::server) struct RemoteCapabilities {
-    routes: BTreeMap<String, Route>,
-    stopped: AtomicBool,
+    active: ArcSwap<Version>,
+    stopped: Arc<AtomicBool>,
     tasks: Arc<PluginTasks>,
+    publication: tokio::sync::Mutex<()>,
 }
 
-struct Route {
-    capability: RuntimeCapability,
-    input: jsonschema::Validator,
-    output: jsonschema::Validator,
-    tenants: BTreeMap<String, Binding>,
-}
-
-enum Binding {
-    Mcp(Mcp),
-    Grpc(Grpc),
+struct Version {
+    revision: String,
+    generation: u64,
+    bindings: Arc<Bindings>,
 }
 
 impl RemoteCapabilities {
     pub async fn open(path: &Path, tasks: Arc<PluginTasks>) -> Result<Self> {
-        let config: Configuration = serde_json::from_slice(&configuration::read(path).await?)?;
-        ensure!(config.schema_version == 1, "不支持的远端能力配置版本");
-        ensure!(
-            !config.imports.is_empty() && config.imports.len() <= 64,
-            "远端能力绑定数必须在 1 到 64 之间"
-        );
-        let mut routes = BTreeMap::<String, Route>::new();
-        let mut bindings = HashSet::new();
-        let mut pending = Vec::new();
-        // 先校验整份配置的地址、凭据、schema 与重复绑定，避免发现本地错误前连接上游。
-        for import in config.imports {
-            ensure!(
-                !import.tenant_id.trim().is_empty() && import.tenant_id != "*",
-                "远端能力必须绑定明确租户"
-            );
-            az_plugin_contract::validate_enhancement_path(&import.capability.path)?;
-            let auth = configuration::credential(import.credential_env.as_deref())?;
-            configuration::endpoint(
-                &import.endpoint,
-                matches!(import.transport, Transport::Grpc { .. }),
-            )?;
-            ensure!(
-                bindings.insert((import.capability.path.clone(), import.tenant_id.clone())),
-                "同一租户的远端能力路径重复"
-            );
-            if let Some(route) = routes.get(&import.capability.path) {
-                ensure!(
-                    route.capability == import.capability,
-                    "不同租户的同一路径必须具有相同契约"
-                );
-            } else {
-                let input = validator(&import.capability.input_schema)?;
-                let output = validator(&import.capability.output_schema)?;
-                routes.insert(
-                    import.capability.path.clone(),
-                    Route {
-                        capability: import.capability.clone(),
-                        input,
-                        output,
-                        tenants: BTreeMap::new(),
-                    },
-                );
-            }
-            pending.push((import, auth));
-        }
-        for (import, auth) in pending {
-            let binding = match import.transport {
-                Transport::Mcp { tool, output } => Binding::Mcp(
-                    Mcp::open(&import.endpoint, auth, tool, output, &import.capability).await?,
-                ),
-                Transport::Grpc {
-                    descriptor_set,
-                    service,
-                    method,
-                } => {
-                    let descriptor = path.parent().unwrap_or(Path::new(".")).join(descriptor_set);
-                    Binding::Grpc(
-                        Grpc::open(
-                            &import.endpoint,
-                            auth,
-                            &configuration::read(&descriptor).await?,
-                            &service,
-                            &method,
-                        )
-                        .await?,
-                    )
-                }
-            };
-            let route = routes
-                .get_mut(&import.capability.path)
-                .context("导入契约缺失")?;
-            route.tenants.insert(import.tenant_id, binding);
-        }
+        let loaded = Loaded::read(path).await?;
+        let revision = loaded.revision.clone();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let bindings = Bindings::open(loaded, tasks.clone(), stopped.clone()).await?;
+        let active = ArcSwap::from_pointee(Version {
+            revision,
+            generation: 1,
+            bindings: Arc::new(bindings),
+        });
         Ok(Self {
-            routes,
-            stopped: AtomicBool::new(false),
+            active,
+            stopped,
             tasks,
+            publication: tokio::sync::Mutex::new(()),
         })
     }
 
     pub fn shutdown(&self) {
         self.stopped.store(true, Ordering::Release);
     }
-}
 
-pub(super) fn validator(schema: &schemars::Schema) -> Result<jsonschema::Validator> {
-    // 显式禁用外部解析，即使其他 Cargo feature 启用网络也不能从 schema 读取远端或文件。
-    jsonschema::options()
-        .offline()
-        .build(schema.as_value())
-        .map_err(|error| anyhow::anyhow!("远端能力 schema 无效: {error}"))
+    pub(in crate::runtime::server) async fn reload(
+        &self,
+        path: &Path,
+        runtime: &RuntimeCapabilities,
+    ) -> Result<bool> {
+        let _publication = self.publication.lock().await;
+        self.check_running()?;
+        let loaded = Loaded::read(path).await?;
+        let current = self.active.load_full();
+        if loaded.revision == current.revision {
+            return Ok(false);
+        }
+        let revision = loaded.revision.clone();
+        let bindings =
+            Arc::new(Bindings::open(loaded, self.tasks.clone(), self.stopped.clone()).await?);
+        // 上游校验期间可能收到下一次部署，禁止把已经过期的候选覆盖到目录。
+        ensure!(
+            Loaded::read(path).await?.revision == revision,
+            "校验期间远端能力文件发生变化"
+        );
+        let candidate = Arc::new(Version {
+            revision,
+            generation: current
+                .generation
+                .checked_add(1)
+                .context("远端能力代数溢出")?,
+            bindings: bindings.clone(),
+        });
+        runtime.publish::<Self>(bindings, || {
+            self.check_running()?;
+            self.active.store(candidate);
+            Ok(())
+        })?;
+        Ok(true)
+    }
+
+    fn check_running(&self) -> Result<()> {
+        ensure!(
+            !self.stopped.load(Ordering::Acquire) && !self.tasks.cancellation().is_cancelled(),
+            "远端能力提供者已停止"
+        );
+        Ok(())
+    }
+
+    /// 仅观察部署方指定的固定文件；不向普通租户开放地址或凭据修改入口。
+    pub fn watch(
+        self: &Arc<Self>,
+        path: std::path::PathBuf,
+        runtime: &Arc<RuntimeCapabilities>,
+    ) -> Result<()> {
+        let provider = Arc::downgrade(self);
+        let runtime = Arc::downgrade(runtime);
+        let cancellation = self.tasks.cancellation();
+        self.tasks.spawn(async move {
+            let mut delay = Duration::from_secs(2);
+            let mut reported = None;
+            loop {
+                tokio::select! {
+                    _ = cancellation.cancelled() => return Ok(()),
+                    _ = tokio::time::sleep(delay) => {},
+                }
+                let (Some(provider), Some(runtime)) = (provider.upgrade(), runtime.upgrade()) else {
+                    return Ok(());
+                };
+                let result = tokio::select! {
+                    _ = cancellation.cancelled() => return Ok(()),
+                    result = tokio::time::timeout(Duration::from_secs(30), provider.reload(&path, &runtime)) => {
+                        result.context("在线导入远端能力超时").and_then(|result| result)
+                    },
+                };
+                match result {
+                    Ok(changed) => {
+                        delay = Duration::from_secs(2);
+                        let recovered = reported.take().is_some();
+                        if changed {
+                            let active = provider.active.load();
+                            eprintln!("远端能力已切换: generation={}, revision={}", active.generation, active.revision);
+                        } else if recovered {
+                            eprintln!("远端能力文件已恢复为当前活动版本");
+                        }
+                    }
+                    Err(error) => {
+                        let error = format!("{error:#}");
+                        if reported.as_ref() != Some(&error) {
+                            eprintln!("远端能力候选被拒绝，保留活动版本: {error}");
+                            reported = Some(error);
+                        }
+                        delay = (delay * 2).min(Duration::from_secs(30));
+                    }
+                }
+            }
+        })
+    }
 }
 
 #[async_trait::async_trait]
 impl CapabilityProvider for RemoteCapabilities {
-    fn available(&self, path: &str, tenant: &str) -> bool {
-        !self.stopped.load(Ordering::Acquire)
-            && self
-                .routes
-                .get(path)
-                .is_some_and(|route| route.tenants.contains_key(tenant))
+    fn capabilities(&self) -> Vec<RuntimeCapability> {
+        self.active.load().bindings.capabilities()
     }
 
-    fn capabilities(&self) -> Vec<RuntimeCapability> {
-        self.routes
-            .values()
-            .map(|route| route.capability.clone())
-            .collect()
+    fn snapshot(&self) -> Option<Arc<dyn CapabilityProvider>> {
+        Some(self.active.load().bindings.clone())
+    }
+
+    fn available(&self, path: &str, tenant: &str) -> bool {
+        self.active.load().bindings.available(path, tenant)
     }
 
     async fn invoke(&self, request: &CapabilityRequest) -> Result<Value> {
-        ensure!(
-            !self.stopped.load(Ordering::Acquire),
-            "远端能力提供者已停止"
-        );
-        ensure!(Instant::now() < request.deadline(), "远端能力调用已过期");
-        let route = self
-            .routes
-            .get(&request.path)
-            .context("远端能力路径不存在")?;
-        let tenant = request
-            .scope()
-            .context
-            .tenant_id
-            .as_deref()
-            .context("远端能力缺少租户")?;
-        let binding = route
-            .tenants
-            .get(tenant)
-            .context("当前租户未绑定此远端能力")?;
-        ensure!(
-            route.input.is_valid(&request.input),
-            "远端能力输入不符合 schema"
-        );
-        let operation = async {
-            match binding {
-                Binding::Mcp(client) => {
-                    client
-                        .invoke(&request.input, &self.tasks, request.deadline())
-                        .await
-                }
-                Binding::Grpc(client) => client.invoke(&request.input, request.deadline()).await,
-            }
-        };
-        let output = tokio::time::timeout_at(request.deadline().into(), operation)
-            .await
-            .context("远端能力等待超时")??;
-        ensure!(
-            serde_json::to_vec(&output)?.len() <= az_plugin_enhancement::MAX_VALUE_BYTES,
-            "远端能力输出超过配额"
-        );
-        ensure!(route.output.is_valid(&output), "远端能力输出不符合 schema");
-        Ok(output)
+        let bindings = self.active.load().bindings.clone();
+        bindings.invoke(request).await
     }
 }

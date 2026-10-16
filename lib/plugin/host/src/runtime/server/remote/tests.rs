@@ -27,12 +27,12 @@ fn remote_endpoints_require_explicit_secure_addresses() -> Result<()> {
 fn schemas_only_resolve_declared_local_references() -> Result<()> {
     let local =
         serde_json::from_value(json!({"$defs":{"n":{"type":"integer"}},"$ref":"#/$defs/n"}))?;
-    let validator = super::provider::validator(&local)?;
+    let validator = super::bindings::validator(&local)?;
     assert!(validator.is_valid(&json!(7)));
     assert!(!validator.is_valid(&json!("seven")));
     for reference in ["https://example.com/schema.json", "file:///etc/passwd"] {
         let schema = serde_json::from_value(json!({"$ref":reference}))?;
-        assert!(super::provider::validator(&schema).is_err());
+        assert!(super::bindings::validator(&schema).is_err());
     }
     Ok(())
 }

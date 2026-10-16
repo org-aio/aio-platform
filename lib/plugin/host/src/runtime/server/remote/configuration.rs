@@ -5,6 +5,7 @@ use std::{
 
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 use super::super::plugins::RuntimeCapability;
 
@@ -48,6 +49,47 @@ pub(super) enum Transport {
 pub(super) enum McpOutput {
     Structured,
     Envelope,
+}
+
+/// 配置和描述文件先读为同一候选的内存内容，连接校验期间不再读取变化中的文件。
+pub(super) struct Loaded {
+    pub revision: String,
+    pub imports: Vec<(Import, Option<Vec<u8>>)>,
+}
+
+impl Loaded {
+    pub async fn read(path: &Path) -> Result<Self> {
+        let bytes = read(path).await?;
+        let config: Configuration = serde_json::from_slice(&bytes)?;
+        ensure!(config.schema_version == 1, "不支持的远端能力配置版本");
+        ensure!(config.imports.len() <= 64, "远端能力绑定数不能超过 64");
+        let mut digest = Sha256::new();
+        digest.update((bytes.len() as u64).to_le_bytes());
+        digest.update(&bytes);
+        let mut imports = Vec::new();
+        let mut total = bytes.len();
+        for import in config.imports {
+            let descriptor = if let Transport::Grpc { descriptor_set, .. } = &import.transport {
+                let descriptor = path.parent().unwrap_or(Path::new(".")).join(descriptor_set);
+                let bytes = read(&descriptor).await?;
+                total += bytes.len();
+                ensure!(
+                    total <= 8 * MAX_WIRE_BYTES,
+                    "远端能力候选文件总量超过 8 MiB"
+                );
+                digest.update((bytes.len() as u64).to_le_bytes());
+                digest.update(&bytes);
+                Some(bytes)
+            } else {
+                None
+            };
+            imports.push((import, descriptor));
+        }
+        Ok(Self {
+            revision: format!("{:x}", digest.finalize()),
+            imports,
+        })
+    }
 }
 
 pub(super) async fn read(path: &Path) -> Result<Vec<u8>> {

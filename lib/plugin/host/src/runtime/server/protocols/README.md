@@ -45,7 +45,7 @@ cargo test -p az-plugin-host --features server protocols::tests -- --ignored
 
 真实 MCP SDK 与生成的 gRPC 客户端通过同一个 TCP 监听地址验证：权限过滤、匿名与跨租户拒绝、身份不可伪造、Rhai → TypeScript 在线升级、同连接回滚、会话撤销、停用、消息大小、超时和移除插件后的路由消失。测试只装配上述精简组合，并检查组件、密钥、Wasm、Sidecar 和包缓存均不存在。
 
-这里负责把运行时增强暴露给外部客户端。导入外部 MCP 工具和描述文件定义的 unary gRPC 方法由可选的 [RemoteCapabilitiesPlugin](../remote/README.md) 提供，复用同一授权、租户绑定、schema 和取消预算。在线注册变更与流式任务调度仍待实现。Sidecar 已有独立进程监督器，可以在其内部运行这些协议，但不会因此绕过宿主能力检查。
+这里负责把运行时增强暴露给外部客户端。导入外部 MCP 工具和描述文件定义的 unary gRPC 方法由可选的 [RemoteCapabilitiesPlugin](../remote/README.md) 提供，复用同一授权、租户绑定、schema 和取消预算。部署方文件可在线更新绑定，新调用读取新目录，已有脚本持有同一执行快照；流式任务调度仍待实现。Sidecar 已有独立进程监督器，可以在其内部运行这些协议，但不会因此绕过宿主能力检查。
 
 宿主能力依赖参与同一工具目录过滤与调用前检查。用户需要每项 `runtime:<path>` 权限，增强管理权限不能代替它；两种语言通过 `call_capability` 调用已装配服务。原生能力目录、schema、幂等与 Sidecar 身份边界见 [增强服务](../enhancements/README.md#宿主能力与脚本自举)。
 
