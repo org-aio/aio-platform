@@ -136,3 +136,18 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 `plugins::tests` 使用无效数据库地址启动真实 HTTP 入口，验证仅安装自定义路由时没有隐式资源；`plugins::infrastructure_tests` 验证注入共享、初始化顺序、无业务恢复时资源仍就绪、失败与 panic 后补偿、重复资源及歧义 Provider 拒绝。独立 PostgreSQL 测试验证替换 Provider 后的迁移、查询和连接池关闭。协议与 Sidecar 测试复用正式装配，验证所有调用通道继续共享增强版本和授权。
 
 外部 crate 集成测试 `tests/component_executors.rs` 只消费公开契约，覆盖实际 HTTP 发布、安装、挂载、调用、不同执行器切换、回滚、真实 COMMIT 失败、停用、卸载和重启恢复；还覆盖缺失/歧义匹配、重复类型、初始化失败、panic、取消等待和关闭错误的补偿。默认 Wasm/Sidecar 回归使用真实 WIT 组件和 Unix socket。
+
+## 替换组件数据库和对象存储
+
+保留 `ComponentResourcesPlugin`，省略 `PostgresComponentPlugin` / `FileObjectStoragePlugin` 中需要替换的项，绑定自己的 Provider：
+
+```rust,ignore
+assembly.services
+    .add_value(MyDatabaseProvider)
+    .bind::<dyn ComponentDatabaseProvider, MyDatabaseProvider>();
+assembly.services
+    .add_value(MyObjectStorageProvider)
+    .bind::<dyn ObjectStorageProvider, MyObjectStorageProvider>();
+```
+
+两者的 `open(&ComponentStorage)` 分别返回 `Arc<dyn ComponentDatabase>` 和 `Arc<dyn ObjectStorage>`。Provider 只负责异步创建，返回后的关闭由组件生命周期负责，不要重复登记关闭钩子。实现契约位于 `az-plugin-runtime`；原生实现身份仍使用 TypeId，来源/租户属于独立业务身份。读取顺序是本目录 `component_resources.rs` → `components/resources.rs` → runtime 的 `component_database.rs` / `storage.rs`。

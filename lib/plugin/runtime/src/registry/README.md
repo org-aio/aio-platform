@@ -1,6 +1,6 @@
 # 持久 Component 激活
 
-`DatabaseProvisioner::component_slot` 创建绑定来源 UUID 和租户的 v2 执行槽。整包、实际能力、活动版本及变更历史保存在宿主 PostgreSQL schema；插件数据角色不可访问。宿主先通过 `install` 绑定数据库并完成受控增量迁移，再提供 `InvocationResources` 激活。
+`PersistentComponentSlot::open(ComponentDatabase::release_pool(), ...)` 创建绑定来源 UUID 和租户的 v2 执行槽。整包、实际能力、活动版本及变更历史保存在宿主 PostgreSQL schema；插件数据角色不可访问。宿主先通过 `install` 绑定数据库并完成受控增量迁移，再提供 `InvocationResources` 激活。
 
 `activate` 在旧版本继续服务时完成候选校验与生命周期，随后排空本进程请求，并以 PostgreSQL 行锁排空其他宿主中的在途请求。活动记录提交后才交换本地实例。并发发布使用代数比较，失败保留已有版本。取消期间提交结果不确定时，旧实例拒绝后续调用，由 `restore` 恢复数据库中的版本。
 

@@ -2,7 +2,7 @@ use std::{panic::AssertUnwindSafe, path::Path, sync::Arc};
 
 use anyhow::{Context, Result, ensure};
 use az_plugin_bundle::VerifiedBundle;
-use az_plugin_runtime::{DatabaseProvisioner, InvocationResources, Keyring, ObjectStore};
+use az_plugin_runtime::{InvocationResources, Keyring, ObjectStore};
 use futures_util::FutureExt;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -28,16 +28,16 @@ impl Components {
             .execute(&pool)
             .await?;
         permissions::backfill(&pool).await?;
-        let provisioner = DatabaseProvisioner::connect(&storage.database_url).await?;
+        let backends =
+            super::backends::ComponentBackends::open(&runtime_services.upgrade(), storage).await?;
         let services = Arc::new(services::Services::with_enhancements(enhancements.clone()));
         let components = Arc::new(Self {
             #[cfg(feature = "sidecar")]
             enhancements,
             pool,
             development: Default::default(),
-            provisioner,
+            backends,
             keyring,
-            objects: storage.root.join("objects"),
             services,
             #[cfg(feature = "sidecar")]
             identity,
@@ -73,6 +73,10 @@ impl Components {
         tenant: &str,
         verified: &VerifiedBundle,
     ) -> Result<InvocationResources> {
+        ensure!(
+            !source.is_nil() && !tenant.is_empty() && tenant.len() <= 128,
+            "组件资源归属无效"
+        );
         let grants = &verified.manifest().plugin.capabilities;
         ensure!(
             !grants.management && !grants.identity_provider,
@@ -85,7 +89,8 @@ impl Components {
         let resources = InvocationResources {
             database: if grants.database {
                 Some(
-                    self.provisioner
+                    self.backends
+                        .database
                         .install(&source.to_string(), tenant, &migrations, &self.keyring)
                         .await?,
                 )
@@ -93,7 +98,11 @@ impl Components {
                 None
             },
             storage: if grants.storage {
-                Some(ObjectStore::open(self.objects.clone(), &source.to_string(), tenant).await?)
+                Some(ObjectStore::new(
+                    self.backends.storage.clone(),
+                    &source.to_string(),
+                    tenant,
+                )?)
             } else {
                 None
             },

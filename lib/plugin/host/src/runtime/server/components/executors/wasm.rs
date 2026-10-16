@@ -46,14 +46,13 @@ impl WasmComponentExecutor {
         }
         let components = state.context.components()?;
         let slot = Arc::new(
-            components
-                .provisioner
-                .component_slot(
-                    source,
-                    tenant.into(),
-                    semver::Version::parse(env!("CARGO_PKG_VERSION"))?,
-                )
-                .await?,
+            PersistentComponentSlot::open(
+                components.backends.database.release_pool(),
+                source,
+                tenant.into(),
+                semver::Version::parse(env!("CARGO_PKG_VERSION"))?,
+            )
+            .await?,
         );
         slots.insert(key, slot.clone());
         Ok(slot)

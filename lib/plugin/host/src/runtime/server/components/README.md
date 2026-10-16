@@ -49,4 +49,14 @@ assembly.services
 
 初始化失败与 panic 会在资源交出前补偿；关闭按反序尝试所有实现并汇总错误。`shutdown` 必须允许部分初始化且只释放当前宿主拥有的资源，不能删除安装记录和持久版本。开发 Sidecar 由 CLI 启停，宿主只释放自身 broker 与转发。默认 Wasm 的前端刷新继续复用后端实例。
 
-这是可信原生扩展接口，具体实现负责自己的执行配额、进程隔离和实例取消。脚本自举使用独立的增强服务，其权限和版本提交仍由宿主控制。当前只覆盖 v2 整包执行；旧 v1 的 `WasmPlugin` / `ProcessPlugin` 以及数据库 provisioner、对象存储仍有独立迁移工作。
+这是可信原生扩展接口，具体实现负责自己的执行配额、进程隔离和实例取消。脚本自举使用独立的增强服务，其权限和版本提交仍由宿主控制。v2 整包执行器与旧 v1 的 `WasmExecutor` / `ProcessExecutor` 分别装配，组件资源也通过独立 Provider 替换。
+
+## 可替换资源
+
+从 `plugins/component_resources.rs` 注册 `ComponentDatabaseProvider` 与 `ObjectStorageProvider`。默认组合选择 `PostgresComponentPlugin` 和 `FileObjectStoragePlugin`；定制组合可以省略任一默认实现，在自己的插件中绑定同一接口。`ComponentResourcesPlugin` 会在资源创建前拒绝缺失或多个绑定，不回退默认实现。
+
+Provider 的 `open` 返回本次宿主拥有的后端。资源准备、执行器初始化、实例恢复沿用同一生命周期；停止时先退出执行器，再关闭对象后端和数据库。对象后端初始化失败或 panic 会补偿已打开的数据库，关闭某个后端失败仍会继续清理其他后端。Provider 在 `open` 内失败时负责尚未返回资源的清理。
+
+`resources.rs` 按包授权创建 `InvocationResources`，校验来源和租户后交给 Wasm 或外部执行器。Sidecar 数据库配置也通过此入口；Sidecar 当前仍未开放对象存储能力。对象读写的租户命名空间、键校验和大小限制由运行时句柄执行，后端只消费已校验地址。
+
+`tests/component_execution/resources.rs` 移除默认 Provider，使用预先分配的 PostgreSQL 连接和测试对象后端，验证两个外部执行器共享资源、Wasm 的真实 WIT 读写与撤权、Sidecar 数据角色和表权限、持久槽恢复、错误归属拒绝及失败补偿。PostgreSQL 仍是数据和发布记录协议；这不代表任意数据库引擎已可切换。

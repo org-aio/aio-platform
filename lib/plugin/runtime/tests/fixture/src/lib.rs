@@ -47,6 +47,21 @@ impl Guest for Fixture {
     }
 
     fn handle(request: Request) -> Response {
+        if request.path == "/storage" || request.path == "/database" {
+            let result = resource_request(&request);
+            return match result {
+                Ok(body) => Response {
+                    status: 200,
+                    headers: vec![],
+                    body,
+                },
+                Err(error) => Response {
+                    status: 403,
+                    headers: vec![],
+                    body: error.into_bytes(),
+                },
+            };
+        }
         if request.path == "/management" {
             return aio::plugin::management::invoke(&request).unwrap_or_else(|error| Response {
                 status: 403,
@@ -87,6 +102,32 @@ impl Guest for Fixture {
             headers: vec![],
             body: request.body,
         }
+    }
+}
+
+// 通过真实 WIT 导入读取宿主替代后端，测试不能绕过能力检查直接访问测试状态。
+fn resource_request(request: &Request) -> Result<Vec<u8>, String> {
+    if request.path == "/storage" {
+        if request.method == "POST" {
+            aio::plugin::storage::write("shared", &request.body)?;
+        }
+        return aio::plugin::storage::read("shared");
+    }
+    let transaction = aio::plugin::database::begin()?;
+    if request.method == "PUT" {
+        let value = String::from_utf8(request.body.clone()).map_err(|error| error.to_string())?;
+        aio::plugin::database::execute(
+            transaction,
+            "INSERT INTO records (id,value) VALUES (1,$1) ON CONFLICT(id) DO UPDATE SET value=$1",
+            &[aio::plugin::database::Value::Text(value)],
+        )?;
+    }
+    let rows =
+        aio::plugin::database::query(transaction, "SELECT value FROM records WHERE id=1", &[])?;
+    aio::plugin::database::finish(transaction, true)?;
+    match rows.values.first().and_then(|row| row.first()) {
+        Some(aio::plugin::database::Value::Text(value)) => Ok(value.as_bytes().to_vec()),
+        _ => Err("测试数据库没有预期记录".into()),
     }
 }
 

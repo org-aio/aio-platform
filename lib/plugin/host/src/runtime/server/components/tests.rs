@@ -111,6 +111,10 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
         )
         .await?,
     );
+    let resource_catalog = dill::Catalog::builder()
+        .add::<crate::runtime::server::plugins::PostgresComponentPlugin>()
+        .add::<crate::runtime::server::plugins::FileObjectStoragePlugin>()
+        .build();
     let components = Components::open(
         pool.clone(),
         &crate::configuration::ComponentStorage {
@@ -120,7 +124,7 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
         Arc::new(super::load_keyring(&temp.path().join("keys.json"))?),
         #[cfg(feature = "sidecar")]
         identity.clone(),
-        dill::Catalog::builder().build().weak_ref(),
+        resource_catalog.weak_ref(),
         enhancements,
         super::tests::default_executors()?,
     )
@@ -195,6 +199,10 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
         )
         .await?,
     );
+    let resource_catalog = dill::Catalog::builder()
+        .add::<crate::runtime::server::plugins::PostgresComponentPlugin>()
+        .add::<crate::runtime::server::plugins::FileObjectStoragePlugin>()
+        .build();
     let restored = Components::open(
         pool,
         &crate::configuration::ComponentStorage {
@@ -204,7 +212,7 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
         Arc::new(super::load_keyring(&temp.path().join("keys.json"))?),
         #[cfg(feature = "sidecar")]
         identity.clone(),
-        dill::Catalog::builder().build().weak_ref(),
+        resource_catalog.weak_ref(),
         enhancements,
         super::tests::default_executors()?,
     )

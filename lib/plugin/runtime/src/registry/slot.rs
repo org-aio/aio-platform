@@ -8,9 +8,7 @@ use sqlx::PgPool;
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
-use crate::{
-    ComponentEngine, ComponentSlot, DatabaseProvisioner, InvocationResources, ReleaseSnapshot,
-};
+use crate::{ComponentEngine, ComponentSlot, InvocationResources, ReleaseSnapshot};
 
 use super::{StoredRelease, storage};
 
@@ -23,9 +21,10 @@ pub struct PersistentComponentSlot {
     state: RwLock<Option<Arc<ComponentSlot>>>,
 }
 
-impl DatabaseProvisioner {
-    pub async fn component_slot(
-        &self,
+impl PersistentComponentSlot {
+    /// 绑定发布记录连接池；不要求使用某个具体数据库 provisioner。
+    pub async fn open(
+        pool: PgPool,
         source: Uuid,
         tenant: String,
         host_version: semver::Version,
@@ -34,9 +33,9 @@ impl DatabaseProvisioner {
             !source.is_nil() && !tenant.is_empty() && tenant.len() <= 128,
             "安装归属无效"
         );
-        storage::initialize(&self.pool).await?;
-        Ok(PersistentComponentSlot {
-            pool: self.pool.clone(),
+        storage::initialize(&pool).await?;
+        Ok(Self {
+            pool,
             source,
             tenant,
             host_version,
@@ -44,9 +43,6 @@ impl DatabaseProvisioner {
             state: RwLock::new(None),
         })
     }
-}
-
-impl PersistentComponentSlot {
     pub async fn stored(&self) -> Result<Option<StoredRelease>> {
         storage::stored(&self.pool, self.source, &self.tenant).await
     }

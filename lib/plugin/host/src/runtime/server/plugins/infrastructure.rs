@@ -292,6 +292,8 @@ impl Plugin<RuntimeAssembly> for ComponentResourcesPlugin {
             if assembly.config.component_storage.is_none() {
                 return Ok(());
             }
+            assembly.require_service::<dyn super::ComponentDatabaseProvider>();
+            assembly.require_service::<dyn super::ObjectStorageProvider>();
             assembly.declare_resource::<Components>()?;
             assembly.on_initialize::<Self>(|state, _| {
                 Box::pin(async move {

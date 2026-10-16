@@ -9,6 +9,7 @@ use axum::{
 use az_plugin_bundle::Bundle;
 use serde_json::json;
 use std::path::Path;
+use std::path::PathBuf;
 use tokio::{net::UnixListener, task::JoinHandle};
 
 struct Running {
@@ -137,6 +138,10 @@ async fn publication_preserves_running_singleton_process() -> Result<()> {
         )
         .await?,
     );
+    let resource_catalog = dill::Catalog::builder()
+        .add::<crate::runtime::server::plugins::PostgresComponentPlugin>()
+        .add::<crate::runtime::server::plugins::FileObjectStoragePlugin>()
+        .build();
     let components = Components::open(
         pool,
         &crate::configuration::ComponentStorage {
@@ -145,7 +150,7 @@ async fn publication_preserves_running_singleton_process() -> Result<()> {
         },
         Arc::new(super::load_keyring(&root.path().join("keys.json"))?),
         Arc::new(super::tests::TestIdentity),
-        dill::Catalog::builder().build().weak_ref(),
+        resource_catalog.weak_ref(),
         enhancements,
         super::tests::default_executors()?,
     )

@@ -115,28 +115,12 @@ impl Processes {
         };
         let mut jobs = JoinSet::new();
         let database_url = if manifest.capabilities.database {
-            let migrations = verified
-                .migrations()
-                .map(|(name, sql)| (name.to_owned(), sql.to_owned()))
-                .collect::<Vec<_>>();
-            let database = components
-                .provisioner
-                .install(
-                    &start.source.to_string(),
-                    &start.tenant,
-                    &migrations,
-                    &components.keyring,
-                )
+            let resources = components
+                .resources_verified(start.source, &start.tenant, verified)
                 .await?;
+            let database = resources.database.context("未授予 process 数据库")?;
+            let connection = database.connection_options();
             drop(database);
-            let connection = components
-                .provisioner
-                .process_connection(
-                    &start.source.to_string(),
-                    &start.tenant,
-                    &components.keyring,
-                )
-                .await?;
             if local {
                 Some(connection.to_url_lossy().to_string())
             } else {

@@ -1,5 +1,5 @@
 #[cfg(any(feature = "wasm", feature = "sidecar"))]
-use super::component_execution::*;
+use super::{component_execution::*, component_resources::*};
 use std::any::TypeId;
 
 use anyhow::Result;
@@ -226,6 +226,8 @@ pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
     catalog.add::<ProcessPlugin>().add::<SidecarPlugin>();
     #[cfg(any(feature = "wasm", feature = "sidecar"))]
     catalog
+        .add::<PostgresComponentPlugin>()
+        .add::<FileObjectStoragePlugin>()
         .add::<ComponentExecutionPlugin>()
         .add::<ComponentResourcesPlugin>()
         .add::<ComponentsPlugin>()

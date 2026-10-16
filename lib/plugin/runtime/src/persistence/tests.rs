@@ -1,4 +1,4 @@
-use crate::{DatabaseProvisioner, Keyring};
+use crate::{ComponentDatabase, DatabaseProvisioner, Keyring};
 use anyhow::Result;
 use std::collections::BTreeMap;
 
@@ -131,6 +131,7 @@ async fn databases_isolate_roles_and_reopen_persisted_bindings() -> Result<()> {
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
+    let first_role = database.connection_options().get_username().to_owned();
     drop(database);
     let other = second
         .install(&source, tenant, &migrations, &keyring)
@@ -143,16 +144,7 @@ async fn databases_isolate_roles_and_reopen_persisted_bindings() -> Result<()> {
         0
     );
     tx.commit().await?;
-    let first_role = first
-        .process_connection(&source, tenant, &keyring)
-        .await?
-        .get_username()
-        .to_owned();
-    let second_role = second
-        .process_connection(&source, tenant, &keyring)
-        .await?
-        .get_username()
-        .to_owned();
+    let second_role = other.connection_options().get_username().to_owned();
     assert_ne!(first_role, second_role);
     // 持久记录拥有角色身份；算法调整或恢复备份不会要求在线服务更换数据库账号。
     let existing_role = format!("r_{}", crate::provision::namespace(&source, tenant));
@@ -179,12 +171,6 @@ async fn databases_isolate_roles_and_reopen_persisted_bindings() -> Result<()> {
         "first-database"
     );
     tx.commit().await?;
-    assert_eq!(
-        first
-            .process_connection(&source, tenant, &keyring)
-            .await?
-            .get_username(),
-        existing_role
-    );
+    assert_eq!(reopened.connection_options().get_username(), existing_role);
     Ok(())
 }

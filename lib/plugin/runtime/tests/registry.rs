@@ -13,7 +13,10 @@ use anyhow::Result;
 use async_trait::async_trait;
 use az_plugin_bundle::Bundle;
 use az_plugin_contract::{InvocationScope, RequestContext};
-use az_plugin_runtime::{ComponentEngine, DatabaseProvisioner, HostServices, InvocationResources};
+use az_plugin_runtime::{
+    ComponentDatabase, ComponentEngine, DatabaseProvisioner, HostServices, InvocationResources,
+    PersistentComponentSlot,
+};
 
 #[derive(Default)]
 struct Services {
@@ -54,9 +57,13 @@ async fn cancelled_persistent_request_recovers_for_follow_up_without_replay() ->
         "1.0.0",
         "index.html",
     )?;
-    let slot = provisioner
-        .component_slot(source, tenant.clone(), "2026.9.12".parse()?)
-        .await?;
+    let slot = PersistentComponentSlot::open(
+        provisioner.release_pool(),
+        source,
+        tenant.clone(),
+        "2026.9.12".parse()?,
+    )
+    .await?;
     let host = Arc::new(Services::default());
     let resources = InvocationResources {
         services: Some(host.clone()),
@@ -136,9 +143,13 @@ async fn activation_drains_requests_served_by_another_slot() -> Result<()> {
         "index.html",
     )?;
     let publisher = Arc::new(
-        provisioner
-            .component_slot(source, tenant.clone(), "2026.9.12".parse()?)
-            .await?,
+        PersistentComponentSlot::open(
+            provisioner.release_pool(),
+            source,
+            tenant.clone(),
+            "2026.9.12".parse()?,
+        )
+        .await?,
     );
     publisher
         .activate(&engine, first.clone(), Default::default(), resources())
@@ -149,9 +160,13 @@ async fn activation_drains_requests_served_by_another_slot() -> Result<()> {
         ..Default::default()
     };
     let serving = Arc::new(
-        provisioner
-            .component_slot(source, tenant.clone(), "2026.9.12".parse()?)
-            .await?,
+        PersistentComponentSlot::open(
+            provisioner.release_pool(),
+            source,
+            tenant.clone(),
+            "2026.9.12".parse()?,
+        )
+        .await?,
     );
     serving
         .restore(&engine, Default::default(), grants.clone())
@@ -230,9 +245,13 @@ async fn durable_activation_restores_and_fences_other_hosts() -> Result<()> {
     let engine = ComponentEngine::new()?;
     let source = uuid::Uuid::new_v4();
     let tenant = format!("registry-{source}");
-    let slot = provisioner
-        .component_slot(source, tenant.clone(), "2026.9.12".parse()?)
-        .await?;
+    let slot = PersistentComponentSlot::open(
+        provisioner.release_pool(),
+        source,
+        tenant.clone(),
+        "2026.9.12".parse()?,
+    )
+    .await?;
     let healthy = fs::read(std::env::var("AIO_TEST_HEALTHY_COMPONENT")?)?;
     let first = bundle(&healthy, "1.0.0", "index.html")?;
     slot.activate(&engine, first.clone(), Default::default(), resources())
@@ -256,9 +275,13 @@ async fn durable_activation_restores_and_fences_other_hosts() -> Result<()> {
         first.digest
     );
 
-    let other = provisioner
-        .component_slot(source, tenant.clone(), "2026.9.12".parse()?)
-        .await?;
+    let other = PersistentComponentSlot::open(
+        provisioner.release_pool(),
+        source,
+        tenant.clone(),
+        "2026.9.12".parse()?,
+    )
+    .await?;
     assert!(
         other
             .restore(&engine, Default::default(), resources())
@@ -307,9 +330,13 @@ async fn durable_activation_restores_and_fences_other_hosts() -> Result<()> {
             .await
             .is_err()
     );
-    let isolated = provisioner
-        .component_slot(source, "another-tenant".into(), "2026.9.12".parse()?)
-        .await?;
+    let isolated = PersistentComponentSlot::open(
+        provisioner.release_pool(),
+        source,
+        "another-tenant".into(),
+        "2026.9.12".parse()?,
+    )
+    .await?;
     assert!(isolated.stored().await?.is_none());
     slot.deactivate().await?;
     assert!(slot.stored().await?.is_none());

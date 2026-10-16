@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod access_tests;
+mod backends;
 mod catalog;
 mod controller;
 mod delivery;
@@ -27,9 +28,9 @@ mod store;
 mod tests;
 mod worker_services;
 
-use az_plugin_runtime::{DatabaseProvisioner, Keyring};
+use az_plugin_runtime::Keyring;
 use sqlx::PgPool;
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
@@ -45,9 +46,8 @@ pub(super) struct Components {
     pub(super) enhancements: Arc<super::enhancements::Enhancements>,
     pub pool: PgPool,
     development: RwLock<std::collections::BTreeMap<Uuid, development::Instance>>,
-    provisioner: DatabaseProvisioner,
+    backends: backends::ComponentBackends,
     keyring: Arc<Keyring>,
-    objects: PathBuf,
     services: Arc<services::Services>,
     #[cfg(feature = "sidecar")]
     identity: Arc<dyn crate::identity::IdentityProvider>,

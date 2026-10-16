@@ -14,13 +14,18 @@ pub struct ScopedDatabase {
 }
 
 impl ScopedDatabase {
-    pub(crate) async fn connect_options(
+    /// 原生数据库实现使用此入口创建绑定；连接后检查实际角色和 schema 隔离。
+    pub async fn connect_options(
         options: PgConnectOptions,
         role: &str,
         schema: &str,
         source: &str,
         tenant: &str,
     ) -> Result<Self> {
+        ensure!(
+            !source.is_empty() && !tenant.is_empty() && tenant.len() <= 128,
+            "数据库归属无效"
+        );
         let pool = PgPoolOptions::new()
             .max_connections(4)
             .acquire_timeout(Duration::from_secs(3))
@@ -28,7 +33,7 @@ impl ScopedDatabase {
             .await
             .context("连接插件专属数据库失败")?;
         let safe: bool = sqlx::query_scalar(
-            "SELECT current_user = $1 AND current_schema() = $2 AND NOT (rolsuper OR rolcreaterole OR rolcreatedb OR rolbypassrls) FROM pg_roles WHERE rolname = current_user",
+            "SELECT current_user = $1 AND session_user = $1 AND current_schema() = $2 AND NOT (rolsuper OR rolcreaterole OR rolcreatedb OR rolbypassrls) AND NOT has_schema_privilege(current_user, $2, 'CREATE') FROM pg_roles WHERE rolname = current_user",
         )
         .bind(role)
         .bind(schema)
@@ -59,6 +64,11 @@ impl ScopedDatabase {
         self.source == source && self.tenant == tenant
     }
 
+    /// 为 Sidecar 导出已校验连接的相同凭据，不另设可绕过隔离检查的凭据通道。
+    pub fn connection_options(&self) -> PgConnectOptions {
+        self.pool.connect_options().as_ref().clone()
+    }
+
     /// 供可信原生执行器开启受租户隔离和数据库超时限制的事务。
     pub async fn begin(&self) -> Result<Transaction<'static, Postgres>> {
         let mut transaction = self.pool.begin().await.context("开始插件事务失败")?;
@@ -78,6 +88,62 @@ impl ScopedDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    #[ignore = "需要独立本机 PostgreSQL"]
+    async fn external_bindings_reject_admin_wrong_schema_and_schema_creation() -> Result<()> {
+        use std::str::FromStr;
+        let url = std::env::var("AIO_TEST_DATABASE_URL")?;
+        let options = PgConnectOptions::from_str(&url)?;
+        let role = options.get_username().to_owned();
+        assert!(
+            ScopedDatabase::connect_options(options, &role, "public", "source", "tenant")
+                .await
+                .is_err()
+        );
+        let provisioner = crate::DatabaseProvisioner::connect(&url).await?;
+        let source = uuid::Uuid::new_v4().to_string();
+        let database = provisioner
+            .create(&source, "tenant", "CREATE TABLE records(id BIGINT)")
+            .await?;
+        let schema: String = sqlx::query_scalar("SELECT current_schema()")
+            .fetch_one(&database.pool)
+            .await?;
+        let options = database.connection_options();
+        let role = options.get_username().to_owned();
+        // SET ROLE 不能把管理员登录伪装成专属角色，否则进程可以 RESET ROLE 提权。
+        let masked = PgConnectOptions::from_str(&url)?
+            .options([("role", role.as_str()), ("search_path", schema.as_str())]);
+        assert!(
+            ScopedDatabase::connect_options(masked, &role, &schema, &source, "tenant")
+                .await
+                .is_err()
+        );
+        assert!(
+            ScopedDatabase::connect_options(options.clone(), &role, "public", &source, "tenant")
+                .await
+                .is_err()
+        );
+        sqlx::query(&format!("GRANT CREATE ON SCHEMA {schema} TO {role}"))
+            .execute(&provisioner.pool)
+            .await?;
+        assert!(
+            ScopedDatabase::connect_options(options.clone(), &role, &schema, &source, "tenant")
+                .await
+                .is_err()
+        );
+        sqlx::query(&format!("REVOKE CREATE ON SCHEMA {schema} FROM {role}"))
+            .execute(&provisioner.pool)
+            .await?;
+        let reopened =
+            ScopedDatabase::connect_options(options, &role, &schema, &source, "tenant").await?;
+        let mut tx = reopened.begin().await?;
+        sqlx::query("INSERT INTO records VALUES (1)")
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
 
     #[tokio::test]
     #[ignore = "requires a disposable PostgreSQL database"]

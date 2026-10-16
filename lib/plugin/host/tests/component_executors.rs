@@ -3,6 +3,9 @@
 #[path = "component_execution/fixture.rs"]
 mod fixture;
 
+#[path = "component_execution/resources.rs"]
+mod resources;
+
 use anyhow::{Context, Result};
 use az_plugin_host::runtime::server::{RuntimeState, plugins::*};
 use fixture::*;

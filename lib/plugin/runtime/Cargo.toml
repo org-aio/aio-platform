@@ -15,7 +15,7 @@ uuid.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sqlx = { workspace = true, features = ["uuid"] }
-tokio = { workspace = true, features = ["fs", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["fs", "io-util", "rt-multi-thread"] }
 wasmtime = { workspace = true, features = ["async", "component-model-async", "cache"], optional = true }
 wasmtime-wasi = { version = "48.0.1", default-features = false, features = ["p2"], optional = true }
 getrandom = "0.4.2"

@@ -5,12 +5,22 @@ use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
 use sqlx::Row;
 
 use crate::{
-    DatabaseProvisioner, Keyring, ScopedDatabase,
+    ComponentDatabase, DatabaseProvisioner, Keyring, ScopedDatabase,
     provision::{namespace, role_namespace, validate_migration, validate_role},
 };
 
-impl DatabaseProvisioner {
-    pub async fn install(
+#[async_trait::async_trait]
+impl ComponentDatabase for DatabaseProvisioner {
+    fn release_pool(&self) -> sqlx::PgPool {
+        self.pool.clone()
+    }
+
+    async fn shutdown(&self) -> Result<()> {
+        self.pool.close().await;
+        Ok(())
+    }
+
+    async fn install(
         &self,
         source: &str,
         tenant: &str,

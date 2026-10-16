@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 #[derive(Default)]
 pub struct Probe {
+    pub context: Mutex<Option<ExecutionContext>>,
     pub active: Mutex<HashMap<(Uuid, String), Arc<VerifiedBundle>>>,
     pub events: Mutex<Vec<&'static str>>,
     pub pool: Mutex<Option<Arc<PgPool>>>,
@@ -44,6 +45,7 @@ impl<const ID: u8> ComponentExecutor for Replacement<ID> {
             || bundle.manifest().plugin.runtime.artifact == format!("server-{ID}")
     }
     async fn initialize(&self, context: ExecutionContext) -> Result<()> {
+        *self.0.context.lock().await = Some(context.clone());
         self.0.events.lock().await.push("initialize");
         *self.0.pool.lock().await = Some(context.services()?.get::<dill::OneOf<PgPool>>()?);
         self.0.entered.notify_one();
@@ -139,6 +141,7 @@ impl<const ID: u8> ComponentExecutor for Replacement<ID> {
         Ok(())
     }
     async fn shutdown(&self) -> Result<()> {
+        self.0.context.lock().await.take();
         self.0.events.lock().await.push("shutdown");
         self.0.active.lock().await.clear();
         self.0.stopped.fetch_add(1, Ordering::SeqCst);
@@ -215,6 +218,8 @@ pub fn plugins(probes: [Arc<Probe>; 2], surfaces: bool) -> Vec<DynPlugin<Runtime
     let mut plugins: Vec<DynPlugin<RuntimeAssembly>> = vec![
         Arc::new(ComponentsPlugin),
         Arc::new(ComponentResourcesPlugin),
+        Arc::new(PostgresComponentPlugin),
+        Arc::new(FileObjectStoragePlugin),
         Arc::new(ComponentExecutionPlugin),
         Arc::new(Replacements(probes)),
         Arc::new(StorePlugin),

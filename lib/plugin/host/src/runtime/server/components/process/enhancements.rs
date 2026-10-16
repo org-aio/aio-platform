@@ -77,6 +77,10 @@ mod tests {
             )
             .await?,
         );
+        let resource_catalog = dill::Catalog::builder()
+            .add::<crate::runtime::server::plugins::PostgresComponentPlugin>()
+            .add::<crate::runtime::server::plugins::FileObjectStoragePlugin>()
+            .build();
         let components = Components::open(
             pool.clone(),
             &crate::configuration::ComponentStorage {
@@ -87,7 +91,7 @@ mod tests {
                 &root.path().join("keys.json"),
             )?),
             Arc::new(TestIdentity),
-            dill::Catalog::builder().build().weak_ref(),
+            resource_catalog.weak_ref(),
             enhancements,
             crate::runtime::server::components::tests::default_executors()?,
         )

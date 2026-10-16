@@ -29,8 +29,22 @@ Rust 和 Kotlin SDK 的 WASI 仅开放受限 I/O、时间、安全随机及空�
 
 ## 持久激活与加密
 
-`DatabaseProvisioner::component_slot` 提供 `PersistentComponentSlot`，在宿主数据库保存整包、授权、活动摘要和激活历史。恢复时重新校验整包和当前宿主授权；发布前校验候选，再以本地锁和 PostgreSQL 行锁排空在途请求，提交活动版本后切换实例。其他宿主上的旧版本调用被数据库记录拒绝。详情见 `src/registry/README.md`。
+`PersistentComponentSlot::open` 接收宿主发布记录连接池并创建持久执行槽，在宿主数据库保存整包、授权、活动摘要和激活历史。恢复时重新校验整包和当前宿主授权；发布前校验候选，再以本地锁和 PostgreSQL 行锁排空在途请求，提交活动版本后切换实例。其他宿主上的旧版本调用被数据库记录拒绝。详情见 `src/registry/README.md`。
 
 `Keyring` 以版本化 AES-256-GCM 信封绑定插件、租户和用途，支持保留旧密钥后轮换活动密钥。只有运行阶段且授予 cryptography 的实例可以调用；数据库凭据不进入插件。宿主不得启用包含动态角色密码的 SQL 语句日志。
 
-宿主停止时，持久化槽调用 `unload()` 释放执行实例，保留活动版本；全部槽与后台工作退出后调用 `DatabaseProvisioner::close()` 关闭所持连接池。`deactivate()` 会改变持久化激活状态，只用于明确停用插件。
+宿主停止时，持久化槽调用 `unload()` 释放执行实例，保留活动版本；全部槽与后台工作退出后调用 `ComponentDatabase::shutdown()` 关闭所持连接池。`deactivate()` 会改变持久化激活状态，只用于明确停用插件。
+
+## 可替换资源
+
+`ComponentDatabase` 是数据库分配与迁移接口，默认 `DatabaseProvisioner` 直接实现它。替代实现仍以 PostgreSQL 为持久化协议，使用 `ScopedDatabase::connect_options` 创建句柄：运行时检查登录身份与当前角色一致、当前 schema、跨 schema 权限、角色继承及建表权限。`InvocationResources::validate_scope` 再检查来源与租户。Sidecar 从这个已校验句柄导出 `connection_options()`，不会另向 Provider 索取未经检查的凭据。发布记录使用 `release_pool()`，保持原有数据库位置与恢复格式。
+
+`ObjectStorage` 只负责后端读写和关闭，`ObjectStore` 负责来源与租户命名空间、键长度、摘要地址和 16 MiB 读写上限。`ObjectKey` 不接受外部构造，后端消费 `namespace()` 与 `digest()`。默认 `FileObjectStorage` 继续读取既有目录和摘要文件，保留原子写入与符号链接拒绝。
+
+```rust,ignore
+let backend = Arc::new(FileObjectStorage::new(root));
+let storage = ObjectStore::new(backend, "source", "tenant")?;
+storage.write("record", b"data").await?;
+```
+
+替代后端属于可信原生代码，其内部 I/O、内存及远端请求仍由实现负责约束；脚本和 Sidecar 不直接取得 Provider。`cargo test -p az-plugin-runtime --test storage` 验证后端替换、租户和来源隔离、超限拒绝、现有文件布局读取及符号链接拒绝。
