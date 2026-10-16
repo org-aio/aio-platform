@@ -42,16 +42,17 @@ jobs:
       - run: node --test sdk/web/bridge.test.mjs sdk/web/file-drop.test.mjs sdk/web/device-transport.test.mjs sdk/web/static-transport.test.mjs cli/src/tools/release.test.cjs
       - name: 验证精简宿主与独立执行器编译边界
         run: |
-          for executor_profile in server sidecar; do
+          for executor_profile in server sidecar remote; do
             cargo tree -p az-plugin-host --no-default-features --features "$executor_profile" -e normal,build --prefix none > /tmp/aio-executor-dependencies
             if grep -E '^(wasmtime|cranelift)' /tmp/aio-executor-dependencies; then
               exit 1
             fi
           done
-          for executor_profile in server wasm sidecar; do
+          for executor_profile in server wasm sidecar remote; do
             cargo clippy -p az-plugin-host --no-default-features --features "$executor_profile" --all-targets -- -D warnings
           done
           cargo test -p az-plugin-host --no-default-features --features server
+          cargo test -p az-plugin-host --no-default-features --features remote remote::tests
           cargo test -p az-plugin-runtime --no-default-features
           cargo test -p az-plugin-manifest --no-default-features --features validation
           cargo clippy -p az-plugin-manifest --no-default-features --features validation --all-targets -- -D warnings
@@ -67,10 +68,11 @@ jobs:
           cargo test -p az-plugin-host --lib --features server,wasm,sidecar plugins::lifecycle_tests -- --ignored --test-threads=1
           cargo test -p az-plugin-host --features server,wasm,sidecar --test service_plugins -- --ignored
           cargo test -p az-plugin-host --no-default-features --features server --test executor_plugins -- --ignored
-          cargo test -p az-plugin-host --lib --no-default-features --features server protocols::tests -- --ignored --test-threads=1
+          cargo test -p az-plugin-host --lib --no-default-features --features remote protocols::tests -- --ignored --test-threads=1
           cargo test -p az-plugin-host --lib --no-default-features --features sidecar sidecar_enhancements_bind_identity_grants_and_active_revision -- --ignored
         env:
           AIO_ENHANCEMENT_TEST_DATABASE_URL: postgresql://postgres:channel-test@127.0.0.1:5432/channel_test
+          AIO_REMOTE_TEST_CREDENTIAL: remote-test
       - name: 验证 sidecar 任务、设备视图消息、资源及撤权
         run: |
           cargo test -p az-plugin-host --lib --features server,wasm,sidecar workspace_access_cancel_and_bridge_isolation -- --ignored

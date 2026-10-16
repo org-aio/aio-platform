@@ -201,6 +201,7 @@ impl IdentityProvider for Identity {
 
 pub fn config(root: &Path, database: &str, origin: &str) -> HostConfig {
     HostConfig {
+        remote_capabilities: None,
         database_url: database.into(),
         public_origin: origin.into(),
         cache_root: root.join("legacy"),

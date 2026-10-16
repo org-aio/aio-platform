@@ -17,6 +17,9 @@ use support::*;
 mod capabilities;
 #[path = "composition_tests.rs"]
 mod composition;
+#[cfg(feature = "remote")]
+#[path = "remote_tests.rs"]
+mod remote;
 
 #[tokio::test]
 #[ignore = "需要独立本机 PostgreSQL"]

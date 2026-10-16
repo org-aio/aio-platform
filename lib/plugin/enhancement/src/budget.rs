@@ -39,12 +39,14 @@ pub(crate) struct CapabilityWait {
 }
 
 impl InvocationControl {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(deadline: Option<Instant>) -> Self {
         let started = Instant::now();
         Self {
             budget: Arc::new(Budget {
                 started,
-                deadline: started + WALL_TIMEOUT,
+                deadline: deadline
+                    .unwrap_or(started + WALL_TIMEOUT)
+                    .min(started + WALL_TIMEOUT),
                 waiting: Mutex::default(),
                 remaining_calls: AtomicUsize::new(MAX_CALLS),
                 remaining_bytes: AtomicUsize::new(MAX_TRANSFER_BYTES),

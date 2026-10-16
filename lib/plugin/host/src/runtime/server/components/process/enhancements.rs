@@ -51,7 +51,7 @@ pub(super) async fn invoke(
         if context_id.is_some() {
             components.services.enhance(&scope, request).await
         } else {
-            components.enhancements.invoke(&scope, request).await
+            components.enhancements.invoke(&scope, request, None).await
         }
     }
     .await;

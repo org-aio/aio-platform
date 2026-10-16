@@ -95,6 +95,7 @@ pub(super) async fn extensions(
 
 pub(super) fn config(root: &std::path::Path) -> crate::configuration::HostConfig {
     crate::configuration::HostConfig {
+        remote_capabilities: None,
         database_url: "deliberately invalid: no database".into(),
         cache_root: root.join("cache"),
         public_origin: "http://127.0.0.1".into(),
@@ -110,6 +111,21 @@ async fn empty_profile_has_no_implicit_services_or_routes() -> Result<()> {
     let extensions = extensions(Vec::new()).await?;
     assert!(extensions.routes.is_empty());
     assert!(extensions.services.get_one::<dyn WorkerService>().is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn remote_configuration_requires_its_feature_and_plugin() -> Result<()> {
+    let mut config = config(std::path::Path::new("/unused"));
+    config.remote_capabilities = Some("/unused/remote.json".into());
+    let error = assemble(Arc::new(config), vec![])
+        .await
+        .err()
+        .ok_or_else(|| anyhow::anyhow!("未装配远端能力插件仍接受配置"))?;
+    #[cfg(feature = "remote")]
+    assert!(error.to_string().contains("RemoteCapabilitiesPlugin"));
+    #[cfg(not(feature = "remote"))]
+    assert!(error.to_string().contains("remote feature"));
     Ok(())
 }
 

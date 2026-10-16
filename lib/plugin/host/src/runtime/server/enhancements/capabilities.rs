@@ -8,21 +8,24 @@ use std::{
 use anyhow::{Context, Result, ensure};
 use az_plugin_contract::InvocationScope;
 use az_plugin_enhancement::{CapabilityCaller, InvocationCapabilities, InvocationControl};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::identity::{IdentityProvider, SessionContext};
 
-/// 宿主能力的副作用约定；写操作必须以业务幂等标识拒绝不同输入的重复请求。
-#[derive(Clone, Copy, Debug, Serialize)]
+/// 宿主能力的副作用约定；幂等写操作必须以业务标识拒绝不同输入的重复请求。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityEffect {
     Read,
     IdempotentWrite,
+    /// 外部写操作不保证幂等；适配器不得自动重试。
+    Write,
 }
 
 /// 跨语言能力契约。路径用于业务路由，原生提供者仍按具体 TypeId 校验身份。
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeCapability {
     pub path: String,
     pub description: String,
@@ -36,9 +39,15 @@ pub struct CapabilityRequest {
     pub path: String,
     pub input: Value,
     scope: InvocationScope,
+    deadline: std::time::Instant,
 }
 
 impl CapabilityRequest {
+    /// 整条调用链的截止时间，远端连接及请求均须沿用，不能为子调用重新计时。
+    pub fn deadline(&self) -> std::time::Instant {
+        self.deadline
+    }
+
     pub fn scope(&self) -> &InvocationScope {
         &self.scope
     }
@@ -67,10 +76,14 @@ impl CapabilityRequest {
 }
 
 /// 原生服务或远端协议适配器的扩展点。不得脱离调用另起无人管理的副作用任务；
-/// Future 被丢弃时停止等待，写操作须保证按业务幂等标识重试不会重复提交。
+/// Future 被丢弃时停止等待，非幂等写操作不得自动重试。
 #[async_trait::async_trait]
 pub trait CapabilityProvider: Any + Send + Sync {
     fn capabilities(&self) -> Vec<RuntimeCapability>;
+    /// 租户资源是否已装配；这是可用性检查，不代替运行时的显式能力授权。
+    fn available(&self, _path: &str, _tenant: &str) -> bool {
+        true
+    }
     async fn invoke(&self, request: &CapabilityRequest) -> Result<Value>;
 }
 
@@ -127,11 +140,12 @@ impl RuntimeCapabilities {
         Ok(routes)
     }
 
-    /// 供装配方和能力发现使用；这里的声明不授予任何调用权限。
-    pub fn catalog(&self) -> Result<Vec<RuntimeCapability>> {
+    /// 目录、候选激活与调用都只使用该租户已装配的能力。
+    pub fn catalog(&self, tenant: &str) -> Result<Vec<RuntimeCapability>> {
         Ok(self
             .routes()?
             .values()
+            .filter(|(capability, provider)| provider.available(&capability.path, tenant))
             .map(|(capability, _)| capability.clone())
             .collect())
     }
@@ -175,7 +189,13 @@ struct Caller {
 
 impl CapabilityCaller for Caller {
     fn available(&self, path: &str) -> bool {
-        self.runtime.provider(path).is_ok()
+        self.runtime.provider(path).is_ok_and(|provider| {
+            self.scope
+                .context
+                .tenant_id
+                .as_deref()
+                .is_some_and(|tenant| provider.available(path, tenant))
+        })
     }
 
     fn call(&self, path: &str, input: &Value, control: &InvocationControl) -> Result<Value> {
@@ -185,12 +205,14 @@ impl CapabilityCaller for Caller {
             path: path.into(),
             input: input.clone(),
             scope: self.scope.clone(),
+            deadline: control.deadline(),
         };
         // 解释器位于 spawn_blocking 中；只在该线程等待，异步 I/O 仍由宿主运行时驱动。
         self.handle.block_on(async {
             let operation = async {
                 let context = &self.scope.context;
                 let tenant = context.tenant_id.as_deref().context("宿主能力缺少租户")?;
+                ensure!(provider.available(path, tenant), "租户未装配该宿主能力");
                 match (&context.user_id, &context.session_id) {
                     (Some(user), Some(session)) => {
                         ensure!(

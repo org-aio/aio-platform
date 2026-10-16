@@ -59,6 +59,7 @@ pub(super) async fn invoke(
     state: &RuntimeState,
     session: &SessionContext,
     request: EnhancementRequest,
+    deadline: Option<std::time::Instant>,
 ) -> Result<EnhancementResponse, RuntimeError> {
     az_plugin_contract::validate_enhancement_path(&request.path)?;
     if !permitted(session, &request.path) {
@@ -90,6 +91,6 @@ pub(super) async fn invoke(
     };
     Ok(state
         .service::<Enhancements>()?
-        .invoke(&scope, request)
+        .invoke(&scope, request, deadline)
         .await?)
 }

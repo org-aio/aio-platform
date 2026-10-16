@@ -120,6 +120,7 @@ async fn exercise(fixture: &Fixture) -> Result<()> {
                 path: pipeline.into(),
                 input: json!(21),
             },
+            None,
         )
         .await?;
     assert_eq!(output.revision, first);

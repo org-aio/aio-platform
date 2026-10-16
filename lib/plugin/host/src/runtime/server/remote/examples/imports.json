@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "imports": [
+    {
+      "tenant_id": "replace-with-tenant-id",
+      "capability": {
+        "path": "/v1/calculator/mcp_double",
+        "description": "通过 MCP 计算两倍数值",
+        "effect": "read",
+        "input_schema": {
+          "type": "object",
+          "properties": { "value": { "type": "integer" } },
+          "required": ["value"],
+          "additionalProperties": false
+        },
+        "output_schema": {
+          "type": "object",
+          "properties": { "value": { "type": "integer" } },
+          "required": ["value"],
+          "additionalProperties": false
+        }
+      },
+      "endpoint": "https://tools.example.com/mcp",
+      "credential_env": "CALCULATOR_TOKEN",
+      "transport": { "protocol": "mcp", "tool": "double", "output": "structured" }
+    },
+    {
+      "tenant_id": "replace-with-tenant-id",
+      "capability": {
+        "path": "/v1/calculator/grpc_double",
+        "description": "通过 gRPC 计算两倍数值",
+        "effect": "read",
+        "input_schema": {
+          "type": "object",
+          "properties": { "value": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 } },
+          "required": ["value"],
+          "additionalProperties": false
+        },
+        "output_schema": {
+          "type": "object",
+          "properties": { "value": { "type": "integer" } },
+          "required": ["value"],
+          "additionalProperties": false
+        }
+      },
+      "endpoint": "https://calculator.example.com",
+      "credential_env": "CALCULATOR_TOKEN",
+      "transport": {
+        "protocol": "grpc",
+        "descriptor_set": "calculator.bin",
+        "service": "external.calculator.Math",
+        "method": "Double"
+      }
+    }
+  ]
+}

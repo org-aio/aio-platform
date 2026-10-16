@@ -92,6 +92,7 @@ async fn external_executor_uses_public_plugin_contract_without_database_or_compo
     let calls = Arc::new(AtomicUsize::new(0));
     let state = RuntimeState::initialize_with_plugins(
         HostConfig {
+            remote_capabilities: None,
             database_url: "deliberately invalid: no database".into(),
             public_origin: "http://127.0.0.1".into(),
             cache_root: root.path().join("cache"),
@@ -115,7 +116,8 @@ async fn external_executor_uses_public_plugin_contract_without_database_or_compo
             .invocation(
                 ScriptContext::default(),
                 vec!["/v1/math/double".into()],
-                Default::default()
+                Default::default(),
+                None
             )
             .invoke("/v1/math/double", &json!(21))?,
         json!(42)
@@ -158,6 +160,7 @@ async fn external_executor_handles_publication_protocol_calls_and_persisted_rest
         let base = format!("http://{}", listener.local_addr()?);
         let state = RuntimeState::initialize_with_plugins(
             HostConfig {
+                remote_capabilities: None,
                 database_url: database.clone(),
                 public_origin: base.clone(),
                 cache_root: root.path().join("cache"),

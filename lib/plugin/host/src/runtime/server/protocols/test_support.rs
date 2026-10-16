@@ -63,6 +63,14 @@ impl IdentityProvider for Identity {
             .into_iter()
             .map(str::to_owned)
             .collect(),
+            "remote" => [
+                "enhancement:/v1/remote/double",
+                "runtime:/v1/remote/mcp",
+                "runtime:/v1/remote/grpc",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
             _ => return Ok(None),
         };
         if !self.runtime_allowed.load(Ordering::SeqCst) {
@@ -86,8 +94,10 @@ impl IdentityProvider for Identity {
         Ok(true)
     }
     async fn session_active(&self, session: &str, _: &str, _: &str) -> Result<bool> {
-        Ok(!matches!(session, "limited" | "composed" | "capable")
-            || !self.revoked.load(Ordering::SeqCst))
+        Ok(
+            !matches!(session, "limited" | "composed" | "capable" | "remote")
+                || !self.revoked.load(Ordering::SeqCst),
+        )
     }
     async fn can_publish(&self, _: &SessionContext) -> Result<bool> {
         Ok(false)
@@ -136,6 +146,13 @@ impl Fixture {
     pub async fn with_plugins(
         extra: Vec<az_plugin_core::DynPlugin<crate::runtime::server::plugins::RuntimeAssembly>>,
     ) -> Result<Self> {
+        Self::configured(extra, None).await
+    }
+
+    pub async fn configured(
+        extra: Vec<az_plugin_core::DynPlugin<crate::runtime::server::plugins::RuntimeAssembly>>,
+        imports: Option<Vec<Value>>,
+    ) -> Result<Self> {
         let database = std::env::var("AIO_ENHANCEMENT_TEST_DATABASE_URL")?;
         ensure!(
             database.contains("127.0.0.1") && database.contains("_test"),
@@ -147,6 +164,21 @@ impl Fixture {
             revoked: AtomicBool::new(false),
             runtime_allowed: AtomicBool::new(true),
         });
+        let remote_capabilities = if let Some(mut imports) = imports {
+            for import in &mut imports {
+                if import["tenant_id"] == "test" {
+                    import["tenant_id"] = json!(identity.tenant);
+                }
+            }
+            let path = root.path().join("remote.json");
+            std::fs::write(
+                &path,
+                serde_json::to_vec(&json!({"schema_version":1,"imports":imports}))?,
+            )?;
+            Some(path)
+        } else {
+            None
+        };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let base = format!("http://{}", listener.local_addr()?);
         use crate::runtime::server::plugins::*;
@@ -166,6 +198,7 @@ impl Fixture {
         // 协议宿主只装配增强依赖；无组件存储、密钥、Wasm 引擎和 Sidecar 资源。
         let state = RuntimeState::initialize_with_plugins(
             crate::configuration::HostConfig {
+                remote_capabilities,
                 database_url: database,
                 public_origin: base.clone(),
                 cache_root: root.path().join("cache"),

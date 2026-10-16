@@ -33,7 +33,7 @@ Wasm 与 sidecar 继续使用已安装包的 `capabilities.enhancements`，同�
 
 跨语言契约位于 `lib/plugin/contract/proto/enhancements.proto`。Rust 客户端启用 `az-plugin-contract/grpc`，从生成的 `grpc::enhancements_client` 导入。认证信息放入请求 metadata；反向代理须转发 HTTP/2 gRPC 和认证头。远程访问由正式入口提供 TLS，本适配器不另开公网端口。
 
-消息最多 65 KiB，脚本输入输出沿用 64 KiB 限制。`grpc-timeout` 在整个请求期间生效，宿主等待上限 30 秒。取消等待会通知整条脚本调用链，但不会提早释放仍在工作线程上执行的配额。嵌套调用共享 100 ms 脚本计算时限、30 秒总等待期限、64 次调用与 1 MiB 累计 JSON 传输预算；宿主 I/O 等待不计入脚本计算时间。当前是 unary 调用，不宣称实现流式 RPC。
+消息最多 65 KiB，脚本输入输出沿用 64 KiB 限制。`grpc-timeout` 在整个请求期间生效，并通过宿主内部截止时间传入脚本与外部 gRPC 调用；各层只能缩短剩余时间，宿主等待上限 30 秒。取消等待会通知整条脚本调用链，但不会提早释放仍在工作线程上执行的配额。嵌套调用共享 100 ms 脚本计算时限、30 秒总等待期限、64 次调用与 1 MiB 累计 JSON 传输预算；宿主 I/O 等待不计入脚本计算时间。当前是 unary 调用，不宣称实现流式 RPC。
 
 ## 验收与范围
 
@@ -45,7 +45,7 @@ cargo test -p az-plugin-host --features server protocols::tests -- --ignored
 
 真实 MCP SDK 与生成的 gRPC 客户端通过同一个 TCP 监听地址验证：权限过滤、匿名与跨租户拒绝、身份不可伪造、Rhai → TypeScript 在线升级、同连接回滚、会话撤销、停用、消息大小、超时和移除插件后的路由消失。测试只装配上述精简组合，并检查组件、密钥、Wasm、Sidecar 和包缓存均不存在。
 
-这是把运行时增强暴露给外部客户端的适配器。连接任意外部 MCP/gRPC 服务并作为入站能力提供者、远程服务注册和流式任务调度仍需各自的生命周期、授权衰减与预算契约。Sidecar 已有独立进程监督器，可以在其内部运行这些协议，但不会因此绕过宿主能力检查。
+这里负责把运行时增强暴露给外部客户端。导入外部 MCP 工具和描述文件定义的 unary gRPC 方法由可选的 [RemoteCapabilitiesPlugin](../remote/README.md) 提供，复用同一授权、租户绑定、schema 和取消预算。在线注册变更与流式任务调度仍待实现。Sidecar 已有独立进程监督器，可以在其内部运行这些协议，但不会因此绕过宿主能力检查。
 
 宿主能力依赖参与同一工具目录过滤与调用前检查。用户需要每项 `runtime:<path>` 权限，增强管理权限不能代替它；两种语言通过 `call_capability` 调用已装配服务。原生能力目录、schema、幂等与 Sidecar 身份边界见 [增强服务](../enhancements/README.md#宿主能力与脚本自举)。
 

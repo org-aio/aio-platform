@@ -23,6 +23,10 @@ getrandom = { version = "0.4.2", optional = true }
 axum = { version = "0.8.6", features = ["ws"], optional = true }
 rmcp = { version = "3.5.1", default-features = false, features = ["server", "transport-streamable-http-server"], optional = true }
 tonic = { version = "0.14.6", optional = true }
+prost = { version = "0.14.4", optional = true }
+prost-reflect = { version = "0.16", features = ["serde"], optional = true }
+jsonschema = { version = "0.58.6", default-features = false, optional = true }
+sse-stream = { version = "0.2", optional = true }
 dill = "0.15.0"
 dioxus = { version = "=0.7.9", default-features = false, features = ["macro", "html", "signals"], optional = true }
 dioxus-icons = { version = "0.1.0", default-features = false, optional = true }
@@ -56,6 +60,7 @@ components = ["dep:az-plugin-bundle", "dep:az-plugin-contract", "dep:az-plugin-r
 default = []
 wasm = ["server", "dep:wasmtime", "az-plugin-runtime/wasm", "az-plugin-manifest/wasm-validation"]
 sidecar = ["server"]
+remote = ["server", "dep:prost", "dep:prost-reflect", "dep:jsonschema", "dep:sse-stream", "rmcp/client", "rmcp/transport-streamable-http-client", "tonic/tls-webpki-roots"]
 ui = ["dep:dioxus", "dep:dioxus-icons", "dep:az-dioxus-admin-shell", "dep:az-ui-components"]
 web = ["ui", "dioxus/web", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
 desktop = ["ui", "dioxus/desktop", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
@@ -65,6 +70,8 @@ server = ["dep:schemars", "dep:tokio-util", "dep:http-body", "dep:jsonwebtoken",
 unsafe_code = "forbid"
 
 [dev-dependencies]
+prost-types = "0.14.4"
+tonic-prost = "0.14.6"
 tempfile = "3.23.0"
 reqwest = { version = "0.12.23", default-features = false, features = ["http2"] }
 rmcp = { version = "3.5.1", default-features = false, features = ["client", "transport-streamable-http-client-reqwest"] }

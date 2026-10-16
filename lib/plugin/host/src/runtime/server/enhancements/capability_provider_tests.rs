@@ -46,7 +46,7 @@ fn provider_type_and_path_conflicts_are_rejected_without_registration_order_fall
     let catalog = services().build();
     let runtime = catalog.get_one::<RuntimeCapabilities>()?;
     runtime.validate()?;
-    assert_eq!(runtime.catalog()?.len(), 1);
+    assert_eq!(runtime.catalog("test")?.len(), 1);
     let original = Arc::downgrade(&runtime);
     drop(runtime);
     assert!(original.upgrade().is_some());

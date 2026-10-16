@@ -36,7 +36,8 @@ fn both_languages_execute_the_same_contract() -> Result<()> {
                 .invocation(
                     ScriptContext::default(),
                     vec!["/v1/math/double".into()],
-                    Default::default()
+                    Default::default(),
+                    None
                 )
                 .invoke("/v1/math/double", &json!(9))?,
             json!(18)
@@ -46,7 +47,8 @@ fn both_languages_execute_the_same_contract() -> Result<()> {
                 .invocation(
                     ScriptContext::default(),
                     vec!["/v2/math/double".into()],
-                    Default::default()
+                    Default::default(),
+                    None
                 )
                 .invoke("/v2/math/double", &json!(9))
                 .is_err()
@@ -140,7 +142,12 @@ fn script_globals_and_context_do_not_leak_between_calls() -> Result<()> {
         };
         assert_eq!(
             prepared
-                .invocation(context, vec!["/v1/math/double".into()], Default::default())
+                .invocation(
+                    context,
+                    vec!["/v1/math/double".into()],
+                    Default::default(),
+                    None
+                )
                 .invoke("/v1/math/double", &json!(3))?,
             json!({"calls":1,"tenant":tenant})
         );

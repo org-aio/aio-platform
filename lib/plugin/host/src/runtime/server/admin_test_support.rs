@@ -31,6 +31,7 @@ impl RuntimeState {
         components: bool,
     ) -> Result<Self> {
         let config = crate::configuration::HostConfig {
+            remote_capabilities: None,
             database_url: database.into(),
             cache_root: cache.into(),
             public_origin: origin.into(),

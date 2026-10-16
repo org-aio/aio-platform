@@ -81,7 +81,8 @@ fn replacement_compiles_validates_and_executes_without_builtin_engines() -> Resu
             .invocation(
                 ScriptContext::default(),
                 vec!["/v1/math/scale".into()],
-                Default::default()
+                Default::default(),
+                None
             )
             .invoke("/v1/math/scale", &json!(7))?,
         json!(21)
@@ -99,6 +100,7 @@ fn replacement_compiles_validates_and_executes_without_builtin_engines() -> Resu
             ScriptContext::default(),
             vec!["/v1/math/scale".into()],
             Default::default(),
+            None,
         )
         .invoke("/v1/math/scale", &oversized)
         .err()

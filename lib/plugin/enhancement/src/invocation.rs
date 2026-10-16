@@ -29,6 +29,7 @@ impl ScriptInvocation {
         context: ScriptContext,
         grants: Vec<String>,
         capabilities: InvocationCapabilities,
+        deadline: Option<std::time::Instant>,
     ) -> Self {
         Self {
             execution: Arc::new(Execution {
@@ -36,7 +37,7 @@ impl ScriptInvocation {
                 context,
                 grants,
                 capabilities,
-                control: InvocationControl::new(),
+                control: InvocationControl::new(deadline),
             }),
             stack: Vec::new(),
         }

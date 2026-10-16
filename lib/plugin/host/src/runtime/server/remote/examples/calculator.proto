@@ -1,0 +1,11 @@
+syntax = "proto3";
+package external.calculator;
+
+// 独立外部服务示例，不依赖 AIO 的协议包。
+service Math {
+  rpc Double(Number) returns (Number);
+}
+
+message Number {
+  int32 value = 1;
+}

@@ -12,6 +12,8 @@ mod lifecycle;
 #[cfg(test)]
 mod lifecycle_tests;
 pub(super) mod process_execution;
+#[cfg(feature = "remote")]
+mod remote_capabilities;
 mod resource;
 mod tasks;
 #[cfg(test)]
@@ -38,6 +40,8 @@ use lifecycle::{HookPlan, Lifecycle};
 pub use process_execution::{
     ProcessExecutor, ProcessInstance, ProcessResponse, StartProcessRequest,
 };
+#[cfg(feature = "remote")]
+pub use remote_capabilities::RemoteCapabilitiesPlugin;
 pub use resource::Resource;
 pub use tasks::PluginTasks;
 pub use wasm_execution::{WasmActivation, WasmExecutor};
@@ -159,6 +163,12 @@ pub(super) async fn assemble(
     config: Arc<crate::configuration::HostConfig>,
     plugins: Vec<DynPlugin<RuntimeAssembly>>,
 ) -> Result<Arc<RuntimeExtensions>> {
+    if config.remote_capabilities.is_some() {
+        #[cfg(not(feature = "remote"))]
+        anyhow::bail!("远端能力配置需要启用 remote feature");
+        #[cfg(feature = "remote")]
+        anyhow::ensure!(plugins.iter().any(|plugin| plugin.as_ref().type_id() == TypeId::of::<RemoteCapabilitiesPlugin>()), "远端能力配置需要装配 RemoteCapabilitiesPlugin");
+    }
     let services = CatalogBuilder::new();
     let mut app = App::new(RuntimeAssembly {
         services,

@@ -229,7 +229,7 @@ impl HostServices for Services {
         self.enhancements
             .as_ref()
             .context("增强服务未绑定")?
-            .invoke(&scope, request)
+            .invoke(&scope, request, None)
             .await
     }
 }

@@ -58,6 +58,7 @@ impl HostServices for Host {
                     grants: scope.grants.runtime.clone(),
                     caller: Some(Arc::new(Math)),
                 },
+                None,
             )
             .invoke(&request.path, &request.input)?;
         Ok(EnhancementResponse {

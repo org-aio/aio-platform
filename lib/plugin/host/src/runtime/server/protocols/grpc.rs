@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::{
     Router,
@@ -23,6 +23,10 @@ use super::{
 
 struct GrpcEnhancements(RuntimeState);
 
+// 只存在于宿主请求扩展中，不能被脚本输入或协议载荷改写。
+#[derive(Clone, Copy)]
+struct Deadline(Instant);
+
 pub(in crate::runtime::server) fn router(state: RuntimeState) -> Router<RuntimeState> {
     let service = EnhancementsServer::new(GrpcEnhancements(state))
         .max_decoding_message_size(az_plugin_enhancement::MAX_VALUE_BYTES + 1024)
@@ -35,7 +39,7 @@ pub(in crate::runtime::server) fn router(state: RuntimeState) -> Router<RuntimeS
 }
 
 // Axum 合并路由不经过 Tonic 的监听器，在这里落实客户端截止时间和宿主等待上限。
-async fn deadline(request: HttpRequest<Body>, next: Next) -> HttpResponse {
+async fn deadline(mut request: HttpRequest<Body>, next: Next) -> HttpResponse {
     let budget = request
         .headers()
         .get("grpc-timeout")
@@ -53,15 +57,17 @@ async fn deadline(request: HttpRequest<Body>, next: Next) -> HttpResponse {
             .min(Duration::from_secs(30)),
         Err(error) => return error.into_http::<Body>(),
     };
+    let deadline = Instant::now() + duration;
+    request.extensions_mut().insert(Deadline(deadline));
     if !duration.is_zero()
-        && let Ok(response) = tokio::time::timeout(duration, next.run(request)).await
+        && let Ok(response) = tokio::time::timeout_at(deadline.into(), next.run(request)).await
     {
         return response;
     }
     Status::deadline_exceeded("增强调用超过截止时间").into_http::<Body>()
 }
 
-fn timeout(value: &str) -> Option<Duration> {
+pub(super) fn timeout(value: &str) -> Option<Duration> {
     if !(2..=9).contains(&value.len()) || !value.is_ascii() {
         return None;
     }
@@ -94,6 +100,7 @@ impl Enhancements for GrpcEnhancements {
         &self,
         request: Request<InvokeRequest>,
     ) -> Result<Response<InvokeResponse>, Status> {
+        let deadline = request.extensions().get::<Deadline>().map(|value| value.0);
         let headers = request.metadata().clone().into_headers();
         let session = access::session(&self.0, &headers).await.map_err(status)?;
         let request = request.into_inner();
@@ -106,6 +113,7 @@ impl Enhancements for GrpcEnhancements {
                 path: request.path,
                 input,
             },
+            deadline,
         )
         .await
         .map_err(status)?;

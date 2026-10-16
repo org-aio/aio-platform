@@ -59,14 +59,15 @@ impl PreparedPackage {
         &self.package
     }
 
-    /// 固定版本和授权快照；每次外部请求创建一条独立的调用链。
+    /// 固定版本和授权快照；截止时间取入口期限与宿主上限的较小值，不能由子调用重置。
     pub fn invocation(
         &self,
         context: ScriptContext,
         grants: Vec<String>,
         capabilities: InvocationCapabilities,
+        deadline: Option<std::time::Instant>,
     ) -> ScriptInvocation {
-        ScriptInvocation::new(self.clone(), context, grants, capabilities)
+        ScriptInvocation::new(self.clone(), context, grants, capabilities, deadline)
     }
 
     /// 返回整个依赖闭包，用于候选检查和调用前的权限校验。
@@ -157,7 +158,7 @@ impl PreparedPackage {
                     grants: self.required_capabilities(&enhancement.path)?,
                     caller: Some(caller.clone()),
                 };
-                let invocation = self.invocation(context.clone(), grants, capabilities);
+                let invocation = self.invocation(context.clone(), grants, capabilities, None);
                 let output = invocation.invoke(&enhancement.path, &example.input)?;
                 caller.finish()?;
                 ensure!(

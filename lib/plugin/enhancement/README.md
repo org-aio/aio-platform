@@ -16,9 +16,9 @@
 
 两种语言均可调用 `call_enhancement(path, input)`，同步返回目标增强的 JSON 输出。源码对应的 `Enhancement.calls` 必须声明直接依赖；依赖必须在同一发布包中，重复、缺失、循环和超过 8 层的依赖在候选验证时被拒绝。TypeScript 编辑器可声明 `declare function call_enhancement(path: string, input: unknown): unknown`，这不会导入外部模块。可运行示例见 `examples/composition.json`，其调用链为 Rhai → TypeScript → Rhai。
 
-宿主为每次请求创建 `prepared.invocation(context, grants, capabilities)`，再调用 `invocation.invoke(path, input)`。`grants` 必须来自真实调用者，包含入口及全部传递依赖；候选中的 `calls` 只声明需要什么，不能授予权限。脚本修改传入的 context 不会改变后续调用的可信身份。整条调用链持有同一个不可变版本快照，升级与回滚在下一次外部请求生效。
+宿主为每次请求创建 `prepared.invocation(context, grants, capabilities, deadline)`，再调用 `invocation.invoke(path, input)`。`deadline` 是宿主内部的可选截止时间，不能通过脚本输入设置；取入口期限与 30 秒上限的较小值。`grants` 必须来自真实调用者，包含入口及全部传递依赖；候选中的 `calls` 只声明需要什么，不能授予权限。脚本修改传入的 context 不会改变后续调用的可信身份。整条调用链持有同一个不可变版本快照，升级与回滚在下一次外部请求生效。
 
-调用链共享 100 ms 脚本计算时限、30 秒总等待期限、最多 64 次调用（含入口和宿主能力）、最多 8 层和累计 1 MiB JSON 传输额度；每次输入或输出仍最多 64 KiB。每个 JS 上下文仍有独立堆上限，嵌套数量受深度限制。捕获异常不会重置额度。宿主可调用 `invocation.cancel()`，默认执行器通过中断检查协作退出；自定义原生 `ScriptProgram` 必须使用传入的 `ScriptInvocation` 并定期 `check()`，不能自行建立新的版本、权限或预算。此协议不提供原生代码的强制抢占。
+调用链共享 100 ms 脚本计算时限、最多 30 秒总等待期限、最多 64 次调用（含入口和宿主能力）、最多 8 层和累计 1 MiB JSON 传输额度；每次输入或输出仍最多 64 KiB。每个 JS 上下文仍有独立堆上限，嵌套数量受深度限制。捕获异常不会重置额度。宿主可调用 `invocation.cancel()`，默认执行器通过中断检查协作退出；自定义原生 `ScriptProgram` 必须使用传入的 `ScriptInvocation` 并定期 `check()`，不能自行建立新的版本、权限或预算。此协议不提供原生代码的强制抢占。
 
 ## 调用宿主能力
 

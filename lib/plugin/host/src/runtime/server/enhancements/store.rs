@@ -46,10 +46,11 @@ pub(in crate::runtime::server) struct Revision {
 impl Enhancements {
     pub(in crate::runtime::server) fn runtime_catalog(
         &self,
+        tenant: &str,
     ) -> Result<Vec<super::RuntimeCapability>> {
         self.capabilities
             .as_ref()
-            .map(|environment| environment.runtime()?.catalog())
+            .map(|environment| environment.runtime()?.catalog(tenant))
             .unwrap_or_else(|| Ok(vec![]))
     }
 
@@ -64,7 +65,7 @@ impl Enhancements {
             return Ok((None, Vec::new()));
         };
         let prepared = self.load(tenant, &revision).await?;
-        let available = self.runtime_catalog()?;
+        let available = self.runtime_catalog(tenant)?;
         let mut paths = Vec::new();
         for item in &prepared.package().enhancements {
             let required = prepared.required_paths(&item.path)?;
@@ -187,7 +188,7 @@ impl Enhancements {
         }
         if let Some(revision) = revision {
             let candidate = self.load(tenant, revision).await?;
-            let available = self.runtime_catalog()?;
+            let available = self.runtime_catalog(tenant)?;
             for entry in &candidate.package().enhancements {
                 for path in &entry.capabilities {
                     ensure!(
@@ -238,6 +239,7 @@ impl Enhancements {
         &self,
         scope: &InvocationScope,
         request: EnhancementRequest,
+        deadline: Option<std::time::Instant>,
     ) -> Result<EnhancementResponse> {
         ensure!(
             scope.grants.enhancements.contains(&request.path),
@@ -270,8 +272,12 @@ impl Enhancements {
             .map(|environment| environment.bind(scope))
             .transpose()?
             .unwrap_or_default();
-        let invocation =
-            prepared.invocation(context, scope.grants.enhancements.clone(), capabilities);
+        let invocation = prepared.invocation(
+            context,
+            scope.grants.enhancements.clone(),
+            capabilities,
+            deadline,
+        );
         let _cancel = CancelInvocation(invocation.clone());
         // 将配额交给工作线程；取消 HTTP/WIT 等待不会提早释放仍在执行的配额。
         let output = tokio::task::spawn_blocking(move || {

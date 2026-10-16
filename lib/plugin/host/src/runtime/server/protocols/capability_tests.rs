@@ -95,7 +95,7 @@ async fn omitting_capability_plugin_removes_discovery_and_prevents_activation() 
             fixture
                 .state
                 .service::<RuntimeCapabilities>()?
-                .catalog()?
+                .catalog(&fixture.identity.tenant)?
                 .is_empty()
         );
         assert!(fixture.publish(package(false)?, 0).await.is_err());
@@ -276,7 +276,7 @@ async fn exercise(fixture: &Fixture) -> Result<()> {
             runtime: fixture
                 .state
                 .service::<RuntimeCapabilities>()?
-                .catalog()?
+                .catalog(&fixture.identity.tenant)?
                 .into_iter()
                 .map(|entry| entry.path)
                 .collect(),
@@ -288,11 +288,11 @@ async fn exercise(fixture: &Fixture) -> Result<()> {
         input: input("get", json!({"id":id})),
     };
     assert_eq!(
-        restored.invoke(&scope, request.clone()).await?.output["state"],
+        restored.invoke(&scope, request.clone(), None).await?.output["state"],
         "cancelled"
     );
     scope.context.tenant_id = Some("other-tenant".into());
-    assert!(restored.invoke(&scope, request).await.is_err());
+    assert!(restored.invoke(&scope, request, None).await.is_err());
 
     fixture
         .identity
@@ -397,7 +397,7 @@ async fn cancelling_host_capabilities_drops_async_io_and_releases_script_slots()
         for _ in 0..4 {
             let service = service.clone();
             let scope = scope.clone();
-            tasks.push(tokio::spawn(async move { service.invoke(&scope, EnhancementRequest { path: "/v1/test/waiter".into(), input: json!(true) }).await }));
+            tasks.push(tokio::spawn(async move { service.invoke(&scope, EnhancementRequest { path: "/v1/test/waiter".into(), input: json!(true) }, None).await }));
         }
         for _ in 0..4 {
             tokio::time::timeout(std::time::Duration::from_secs(2), entries.recv()).await?.context("能力调用未启动")?;
@@ -409,7 +409,7 @@ async fn cancelling_host_capabilities_drops_async_io_and_releases_script_slots()
         tokio::time::timeout(std::time::Duration::from_secs(2), async {
             while dropped.load(Ordering::SeqCst) < 4 { tokio::task::yield_now().await; }
             loop {
-                match service.invoke(&scope, EnhancementRequest { path: "/v1/test/waiter".into(), input: json!(false) }).await {
+                match service.invoke(&scope, EnhancementRequest { path: "/v1/test/waiter".into(), input: json!(false) }, None).await {
                     Ok(response) => { assert_eq!(response.output, 0); break; }
                     Err(error) if error.to_string().contains("并发已满") => tokio::task::yield_now().await,
                     Err(error) => return Err(error),

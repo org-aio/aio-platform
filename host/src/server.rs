@@ -68,6 +68,7 @@ pub async fn run() -> Result<()> {
     az_plugin_host::runtime::server::development::claim_database(&session).await?;
     let state = RuntimeState::initialize(
         HostConfig {
+            remote_capabilities: std::env::var_os("AIO_REMOTE_CAPABILITIES").map(PathBuf::from),
             database_url: session.database_url.clone(),
             cache_root: session.root.join("artifacts"),
             public_origin: origin.clone(),

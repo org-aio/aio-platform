@@ -103,6 +103,7 @@ async fn sidecar_enhancements_bind_identity_grants_and_active_revision() -> Resu
     let identity = Arc::new(Identity::default());
     let extensions = crate::runtime::server::plugins::assemble(
         Arc::new(crate::configuration::HostConfig {
+            remote_capabilities: None,
             database_url: database.clone(),
             public_origin: "http://localhost".into(),
             cache_root: root.path().join("cache"),

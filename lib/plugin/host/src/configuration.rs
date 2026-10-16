@@ -12,6 +12,8 @@ pub struct HostConfig {
     pub default_plugins: Vec<PluginSource>,
     pub delivery: Option<DeliveryConfig>,
     pub development: Option<az_plugin_development::DevHostSession>,
+    /// 部署方提供的远端能力绑定文件；其中只保存凭据环境变量名。
+    pub remote_capabilities: Option<PathBuf>,
 }
 
 #[derive(Clone)]

@@ -91,6 +91,7 @@ fn both_languages_compose_host_calls_with_transitive_grants_and_immutable_identi
                 grants: vec![],
                 caller: Some(caller.clone()),
             },
+            None,
         );
         assert!(denied.invoke(ROOT, &json!(42)).is_err());
         assert_eq!(caller.calls.load(Ordering::SeqCst), 0);
@@ -101,6 +102,7 @@ fn both_languages_compose_host_calls_with_transitive_grants_and_immutable_identi
                 grants: vec![SERVICE.into()],
                 caller: Some(caller.clone()),
             },
+            None,
         );
         assert_eq!(
             invocation.invoke(ROOT, &json!(42))?,
@@ -182,6 +184,7 @@ fn host_waiting_preserves_compute_budget_and_cancellation() -> Result<()> {
             grants: vec![SERVICE.into()],
             caller: Some(caller.clone()),
         },
+        None,
     );
     assert_eq!(
         invocation.invoke(ROOT, &json!(1))?,
@@ -194,6 +197,7 @@ fn host_waiting_preserves_compute_budget_and_cancellation() -> Result<()> {
             grants: vec![SERVICE.into()],
             caller: Some(caller.clone()),
         },
+        None,
     );
     let worker = invocation.clone();
     let thread = std::thread::spawn(move || worker.invoke(ROOT, &json!(1)));
@@ -240,6 +244,7 @@ fn catching_host_errors_cannot_reset_shared_call_or_transfer_limits() -> Result<
                     grants: vec![SERVICE.into()],
                     caller: Some(caller.clone()),
                 },
+                None,
             );
             let error = invocation
                 .invoke(ROOT, &json!(true))

@@ -225,6 +225,8 @@ pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
     catalog.add::<WasmPlugin>().add::<WasmComponentPlugin>();
     #[cfg(feature = "sidecar")]
     catalog.add::<ProcessPlugin>().add::<SidecarPlugin>();
+    #[cfg(feature = "remote")]
+    catalog.add::<super::RemoteCapabilitiesPlugin>();
     #[cfg(any(feature = "wasm", feature = "sidecar"))]
     catalog
         .add::<PostgresComponentPlugin>()

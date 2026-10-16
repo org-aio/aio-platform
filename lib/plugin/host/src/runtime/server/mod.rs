@@ -35,6 +35,8 @@ mod publication;
 mod publication_validation;
 mod publisher_store;
 mod releases;
+#[cfg(feature = "remote")]
+mod remote;
 mod remote_access;
 mod repository;
 pub(crate) mod request_context;

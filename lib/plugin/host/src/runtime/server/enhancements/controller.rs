@@ -51,7 +51,11 @@ async fn capabilities(
     {
         return Err(RuntimeError::unauthorized("会话已撤销"));
     }
-    Ok(Json(state.service::<Enhancements>()?.runtime_catalog()?))
+    Ok(Json(
+        state
+            .service::<Enhancements>()?
+            .runtime_catalog(&session.tenant_id)?,
+    ))
 }
 
 async fn head(

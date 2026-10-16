@@ -19,13 +19,18 @@ fn mixed_language_chain_requires_full_grants_and_preserves_version() -> Result<(
     let new = default_runtime()?.prepare(replacement)?;
     new.check_examples(old.package())?;
     assert_ne!(old.revision(), new.revision());
-    let invocation = old.invocation(ScriptContext::default(), grants.clone(), Default::default());
+    let invocation = old.invocation(
+        ScriptContext::default(),
+        grants.clone(),
+        Default::default(),
+        None,
+    );
     assert_eq!(
         invocation.invoke("/v1/math/pipeline", &json!(21))?,
         json!(43)
     );
     assert_eq!(
-        new.invocation(ScriptContext::default(), grants, Default::default())
+        new.invocation(ScriptContext::default(), grants, Default::default(), None)
             .invoke("/v1/math/pipeline", &json!(21))?,
         json!(64)
     );
@@ -33,6 +38,7 @@ fn mixed_language_chain_requires_full_grants_and_preserves_version() -> Result<(
         ScriptContext::default(),
         vec!["/v1/math/pipeline".into(), "/v1/math/double".into()],
         Default::default(),
+        None,
     );
     let error = limited
         .invoke("/v1/math/pipeline", &json!(21))
@@ -104,6 +110,7 @@ fn nested_scope_cannot_be_forged_by_mutating_script_context() -> Result<()> {
             },
             prepared.required_paths("/v1/context/parent")?,
             Default::default(),
+            None,
         );
         assert_eq!(
             invocation.invoke("/v1/context/parent", &json!(null))?,

@@ -89,6 +89,7 @@ fn prepare(source: &str) -> Result<(ScriptInvocation, mpsc::Receiver<()>)> {
             ScriptContext::default(),
             vec!["/v1/test/root".into(), "/v1/test/leaf".into()],
             Default::default(),
+            None,
         ),
         receiver,
     ))

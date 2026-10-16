@@ -129,6 +129,7 @@ impl ServerHandler for McpEnhancements {
             &self.0,
             session(&context)?,
             EnhancementRequest { path, input },
+            None,
         )
         .await
         {

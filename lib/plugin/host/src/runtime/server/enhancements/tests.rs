@@ -78,21 +78,29 @@ async fn enhancements_survive_restart_reject_stale_publish_and_rollback() -> Res
         )
         .await?;
     assert!(runtime.head(&tenant).await?.revision.is_none());
-    assert!(runtime.invoke(&scope(&tenant), request()).await.is_err());
+    assert!(
+        runtime
+            .invoke(&scope(&tenant), request(), None)
+            .await
+            .is_err()
+    );
     runtime
         .activate(&tenant, actor, Some(&first), 0, false)
         .await?
         .context("首次激活失败")?;
     assert_eq!(
-        runtime.invoke(&scope(&tenant), request()).await?.output,
+        runtime
+            .invoke(&scope(&tenant), request(), None)
+            .await?
+            .output,
         json!(14)
     );
     let mut ungranted = scope(&tenant);
     ungranted.grants.enhancements.clear();
-    assert!(runtime.invoke(&ungranted, request()).await.is_err());
+    assert!(runtime.invoke(&ungranted, request(), None).await.is_err());
     assert!(
         runtime
-            .invoke(&scope("other-tenant"), request())
+            .invoke(&scope("other-tenant"), request(), None)
             .await
             .is_err()
     );
@@ -142,7 +150,7 @@ async fn enhancements_survive_restart_reject_stale_publish_and_rollback() -> Res
     );
     let restored =
         Enhancements::open(pool, az_plugin_enhancement::default_runtime()?, None).await?;
-    let response = restored.invoke(&scope(&tenant), request()).await?;
+    let response = restored.invoke(&scope(&tenant), request(), None).await?;
     assert_eq!(response.revision, second);
     assert_eq!(response.output, json!(14));
     restored
@@ -150,7 +158,10 @@ async fn enhancements_survive_restart_reject_stale_publish_and_rollback() -> Res
         .await?
         .context("回滚失败")?;
     assert_eq!(
-        runtime.invoke(&scope(&tenant), request()).await?.revision,
+        runtime
+            .invoke(&scope(&tenant), request(), None)
+            .await?
+            .revision,
         first
     );
     assert!(
@@ -163,7 +174,12 @@ async fn enhancements_survive_restart_reject_stale_publish_and_rollback() -> Res
         .activate(&tenant, actor, None, 3, false)
         .await?
         .context("停用失败")?;
-    assert!(runtime.invoke(&scope(&tenant), request()).await.is_err());
+    assert!(
+        runtime
+            .invoke(&scope(&tenant), request(), None)
+            .await
+            .is_err()
+    );
     Ok(())
 }
 

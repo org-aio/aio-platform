@@ -78,7 +78,7 @@ async fn aborted_callers_cancel_workers_and_restore_execution_capacity() -> Resu
         let service = service.clone();
         let scope = scope(&tenant);
         tasks.push(tokio::spawn(async move {
-            service.invoke(&scope, super::request()).await
+            service.invoke(&scope, super::request(), None).await
         }));
     }
     for _ in 0..4 {
@@ -106,7 +106,7 @@ async fn aborted_callers_cancel_workers_and_restore_execution_capacity() -> Resu
     };
     let result = tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
-            match service.invoke(&scope(&tenant), request.clone()).await {
+            match service.invoke(&scope(&tenant), request.clone(), None).await {
                 Ok(response) => break Ok::<_, anyhow::Error>(response),
                 Err(error) if error.to_string().contains("并发已满") => {
                     tokio::task::yield_now().await

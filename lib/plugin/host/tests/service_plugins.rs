@@ -118,6 +118,7 @@ async fn external_plugin_replaces_builtin_service_without_replacing_authenticati
     ];
     let state = RuntimeState::initialize_with_plugins(
         HostConfig {
+            remote_capabilities: None,
             database_url: database,
             cache_root: root.path().join("cache"),
             public_origin: "http://127.0.0.1".into(),
