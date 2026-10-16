@@ -8,6 +8,7 @@ use std::{
 
 use az_plugin_core::PluginFuture;
 use az_plugin_runtime::Keyring;
+use dill::CatalogBuilder;
 use sqlx::PgPool;
 
 use super::*;
@@ -104,10 +105,8 @@ impl Plugin<RuntimeAssembly> for Consumer {
                     assembly.require_service::<u64>();
                 }
                 Failure::Panic => {
-                    assembly
-                        .services
-                        .add_value_lazy(|| -> u64 { panic!("测试服务构造失败") });
-                    assembly.require_service::<u64>();
+                    assembly.services.add::<PanickingService>();
+                    assembly.require_service::<PanickingService>();
                 }
                 _ => {}
             }
@@ -249,10 +248,12 @@ async fn missing_or_ambiguous_providers_fail_before_resource_initialization() ->
 
 #[test]
 fn resources_reject_duplicate_declarations_and_values() -> Result<()> {
-    let mut services = CatalogBuilder::new();
+    let mut services = ServiceBindings::new();
     resource::declare::<u64>(&mut services)?;
     assert!(resource::declare::<u64>(&mut services).is_err());
-    let catalog = services.build();
+    let mut builder = CatalogBuilder::new();
+    services.register(&mut builder)?;
+    let catalog = builder.build();
     assert!(catalog.get_one::<u64>().is_err());
     let slot = catalog.get_one::<Resource<u64>>()?;
     slot.provide(Arc::new(42))?;
@@ -292,4 +293,13 @@ async fn custom_database_provider_runs_real_storage_and_closes_on_shutdown() -> 
     state.shutdown().await?;
     assert!(providers.pool.is_closed());
     Ok(())
+}
+
+struct PanickingService;
+
+#[dill::component]
+impl PanickingService {
+    fn new() -> Self {
+        panic!("测试服务构造失败")
+    }
 }

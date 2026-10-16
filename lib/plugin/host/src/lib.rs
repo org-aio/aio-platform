@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+#![cfg_attr(feature = "server", feature(unsize))]
 
 #[cfg(feature = "server")]
 pub mod authorization;

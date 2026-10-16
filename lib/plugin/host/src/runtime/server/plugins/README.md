@@ -39,11 +39,11 @@ assembly.services.add_builder(provider.clone())
     .bind::<dyn MeteringProvider, ProductProvider>();
 ```
 
-三个接口可以分别由不同类型提供。它们必须使用 Dill `Singleton` 或预构造的 `Arc`，不能按请求生成新实例；这项约束在初始化前校验。认证相关路由、增强环境和演进控制声明各自必需的服务；缺失服务或同一接口多次绑定会在初始化前失败。HTTP、MCP、gRPC、增强调用和 Sidecar 从同一容器消费身份；发布与演进提交从同一容器消费授权。显式 `runtime:` 能力授予、租户绑定和清单权限衰减仍是统一执行链的约束，不因替换提供者而取消。这里实现的是原生插件装配替换，在线替换身份、迁移会话和故障恢复入口尚未实现。
+三个接口可以分别由不同类型提供。它们必须使用 Dill `Singleton` 或预构造的 `Arc`，不能按请求生成新实例；这项约束在初始化前校验。认证相关路由、增强环境和演进控制声明各自必需的服务；缺失服务或同一接口多次绑定会在初始化前失败。HTTP、MCP、gRPC、增强调用和 Sidecar 从同一容器消费身份；发布与演进提交从同一容器消费授权。显式 `runtime:` 能力授予、租户绑定和清单权限衰减仍是统一执行链的约束，不因替换提供者而取消。`RuntimeHost` 支持原生身份提供者在线重建；会话迁移、产品系统插件动态交付与独立恢复入口仍需产品实现。
 
 插件的 `build` 负责声明装配，不应启动后台任务或执行迁移。将资源初始化与迁移交给 `on_initialize::<Self>`，将异步恢复交给 `on_start::<Self>`，将后台工作交给 `on_ready::<Self>`，将资源清理交给 `on_stop::<Self>`。路由通过 `state.service::<dyn MyService>()?` 获取服务。长连接在升级前解析服务，并把同一个 `Arc` 传入会话；身份与撤权检查仍在会话期间持续执行。
 
-生命周期顺序来自内核的 `App::plugin_order()`，身份始终是具体类型的 `TypeId`。进入插件的初始化动作前登记停止动作，因此停止回调必须能处理部分初始化，也不能删除安装记录或已经提交的业务数据。所有启动动作成功后才执行就绪动作；失败、panic 或取消会先停止接收新任务、等待已有工作完成，再按依赖反序执行停止回调。一个回调失败不会跳过其他插件，错误会汇总返回；重复关闭不重复执行回调，并保留第一次的结果。
+生命周期顺序来自内核的 `App::plan_plugins()`，身份始终是具体类型的 `TypeId`。进入插件的初始化动作前登记停止动作，因此停止回调必须能处理部分初始化，也不能删除安装记录或已经提交的业务数据。所有启动动作成功后才执行就绪动作；失败、panic 或取消会先停止接收新任务、等待已有工作完成，再按依赖反序执行停止回调。一个回调失败不会跳过其他插件，错误会汇总返回；重复关闭不重复执行回调，并保留第一次的结果。
 
 ```rust,ignore
 assembly.on_ready::<Self>(|state, tasks| Box::pin(async move {
@@ -69,7 +69,7 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 
 停止只释放当前宿主拥有的 Sidecar、broker、数据库转发与 Wasm 内存实例，保留 PostgreSQL 中的安装状态、授权与活动版本。旧监督器报告为已存在的进程不会被当成本次创建的资源停止。开发 Sidecar 的进程由 CLI 所有，宿主只关闭自己的 broker 和转发。协作取消要求回调和任务最终返回；无限阻塞或忽略取消的原生插件仍需要外部监督器处理。关闭有错误时仍执行其余清理，下一次启动由现有恢复/孤立实例清理流程继续恢复。
 
-这是原生宿主插件的装配边界，还不包含在线卸载或单插件重启。HTTP 路由不能替代能力授权。数据库连接、密钥来源与执行器创建已由所选插件管理；组件执行契约已经接通，组件数据库与对象后端也已通过独立 Provider 接入，完整目标见 [一切皆插件验收清单](../../../../../../../docs/plugin/everything-as-plugin.md)。
+原生宿主的在线组合由 `RuntimeHost` 管理，详见下文。HTTP 路由不能替代能力授权。数据库连接、密钥来源与执行器创建已由所选插件管理；组件执行契约已经接通，组件数据库与对象后端也已通过独立 Provider 接入，完整目标见 [一切皆插件验收清单](../../../../../../../docs/plugin/everything-as-plugin.md)。
 
 动态宿主能力通过同一 Dill `CapabilityProvider` 提供者发布。实现 `snapshot()` 返回不可变的能力与执行对象，准备好完整候选后调用 `RuntimeCapabilities::publish::<Self>(snapshot, commit)`；目录先校验所有提供者的路径冲突和已使用契约，再同步执行内存提交。`commit` 不得执行 I/O、递归读目录或在失败前修改状态。新调用取得新快照，当前脚本及同包子调用继续持有原快照；停止标记与取消信号应由所有代共享。外部 MCP/gRPC 的 `RemoteCapabilitiesPlugin` 是此契约的实际实现，配置示例与故障边界见 [外部能力](../remote/README.md)。这不等于动态卸载原生插件类型。
 
@@ -87,7 +87,36 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 4. 正常宿主执行 `on_start` 恢复状态，再执行 `on_ready` 开启后台任务。开发宿主跳过这两个阶段。
 5. `shutdown` 关闭请求准入，等待插件任务，然后反序执行 `on_stop`。停止钩子必须允许部分初始化，且不能删除持久化安装和活动版本。
 
-应用必须在退出时调用 `state.shutdown().await`。初始化或停止的等待方被取消，不会中断独立清理任务。停止是协作式的；无响应的原生代码需要监督器处理。此机制尚不支持原生插件在线卸载或单插件重启。
+应用必须在退出时调用 `state.shutdown().await`。初始化或停止的等待方被取消，不会中断独立清理任务。停止是协作式的；无响应的原生代码需要监督器处理。在线变更同样遵守这些取消及清理边界。
+
+## 原生插件在线组合
+
+`RuntimeHost::initialize(config, plugins)` 持有唯一活动代数和串行变更锁。`host.router()` 是长期存在的分发入口，每个请求使用一份不可变的 `RuntimeState`；`host.reconfigure(plugins)` 安装、替换或移除组合，`host.restart::<MyPlugin>()` 按具体类型重启。不变的插件沿用原来的 `Arc<dyn Plugin<RuntimeAssembly>>`。变更可以安装当前二进制已经包含的原生类型；不负责加载任意 Rust 动态库或更新宿主二进制。
+
+```rust,ignore
+let plugins = default_plugins()?;
+let host = RuntimeHost::initialize(config, plugins.clone()).await?;
+let router = host.router();
+// 监听器继续使用这个 router；管理调用从请求/插件任务之外发起。
+host.restart::<RhaiPlugin>().await?;
+let selected = plugins.into_iter()
+    .filter(|plugin| plugin.as_ref().type_id() != TypeId::of::<McpPlugin>())
+    .collect();
+host.reconfigure(selected).await?;
+host.shutdown().await?;
+```
+
+`RuntimeHost::router()` 使用 fallback 分发。与业务路由或静态文件组合时，由应用给它分配独立路由空间；不能在 merge 后再覆盖它的 fallback。固定组合继续使用 `RuntimeState::initialize` 和 `server::router`。产品采用哪一个入口必须明确；仅升级依赖不会自动启用在线管理。
+
+`ServiceBindings` 记录每个插件的 Dill Builder、默认接口和显式绑定。组合校验后仍只有一个 Dill Catalog 解析、注入和缓存服务，不维护第二套 DI。未受影响的 Builder 保留单例缓存；变更集合由旧图、新图的具体插件依赖、`require_service` 和 Dill 注入依赖共同计算，包括 `Vec<Arc<dyn Trait>>` 聚合。插件不得替其他插件登记钩子或绑定它不拥有的实现。读取可选服务、保存整个运行时快照或在钩子中捕获容器的插件必须调用 `assembly.observe_catalog()`；Dill 注入的 `Catalog` / `CatalogWeakRef` 自动参与这一规则。
+
+变更先校验新组合及恢复配方，再关闭旧代数准入并等待已进入的请求。旧响应流会结束，切换窗口的新请求返回 503；当前实现不承诺零停顿。只取消受影响插件的后台任务，依赖反序释放资源，初始化新资源、恢复状态及构建路由，全部成功才发布新代数。无关单例和后台任务继续存活。无法满足依赖或重复绑定在停止旧资源前拒绝。
+
+候选启动或路由工厂失败时，先清理候选，再用旧配方创建全新资源恢复。旧的已关闭连接池、已排空任务作用域和一次性资源槽不能直接装回。每次 `build` 必须只声明装配，资源创建放在初始化钩子中；配方不得捕获即将在停止时关闭的池或进程实例。`build` 的 future 为 `Send`，可由异步管理任务调用。候选清理、旧资源停止或恢复失败时停止接收请求，并返回完整错误；不启动可能争用旧资源的新实例。已进入停用阶段的变更不会随调用方取消而中断。
+
+在线变更不执行任意 TypeId 的远程管理。应用负责提供有授权、可审计的管理入口；不要在被排空的请求、后台任务或生命周期回调中等待 `reconfigure`、`restart` 或 `shutdown`。脚本增强仍通过正式版本、契约、租户和权限流程交付，不能直接改变原生组合。进程外的强制终止和宿主二进制切换仍属于独立监督器。
+
+验证入口：`plugins::live_tests` 覆盖真实 HTTP 下的替换、重启、卸载、依赖重建、单例/任务保留、容器弱引用失效、取消、启动/panic/路由故障恢复、恢复失败和停止失败。`protocols::tests::lifecycle` 保持真实 MCP/gRPC 客户端连接，重启 Rhai、TypeScript 和数据库、卸载/恢复 MCP，并确认持久版本与实时撤权仍生效。
 
 ## 声明异步资源
 
@@ -128,7 +157,7 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 
 替换数据库连接方式时保留 `DatabasePlugin`，省略 `PostgresPlugin`，在自己的插件中使用 Dill 绑定 `dyn DatabaseProvider`；密钥同理。Provider 返回的连接池属于本次宿主，会在关闭或初始化失败时关闭，不应返回另一个宿主仍在使用的池。所有服务和 Sidecar 消费同一个容器提供的实例。
 
-该替换点允许外部连接管理与密钥来源；平台的数据模型仍使用 PostgreSQL，组件数据库 provisioner 与对象存储尚未抽象。旧 `WasmPlugin` / `ProcessPlugin` 管理 v1 资源，与 v2 整包执行器插件分开。
+该替换点允许外部连接管理与密钥来源；平台的数据模型仍使用 PostgreSQL；组件数据库与对象存储另有独立 Provider。旧 `WasmPlugin` / `ProcessPlugin` 管理 v1 资源，与 v2 整包执行器插件分开。
 
 ## 脚本执行器
 

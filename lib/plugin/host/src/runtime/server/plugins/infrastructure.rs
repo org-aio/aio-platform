@@ -294,6 +294,7 @@ impl Plugin<RuntimeAssembly> for ComponentResourcesPlugin {
             }
             assembly.require_service::<dyn super::ComponentDatabaseProvider>();
             assembly.require_service::<dyn super::ObjectStorageProvider>();
+            assembly.observe_catalog();
             assembly.declare_resource::<Components>()?;
             assembly.on_initialize::<Self>(|state, _| {
                 Box::pin(async move {

@@ -85,6 +85,7 @@ impl Plugin<RuntimeAssembly> for EnhancementServicePlugin {
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
             assembly.require_service::<dyn crate::identity::IdentityProvider>();
+            assembly.observe_catalog();
             assembly.declare_resource::<Enhancements>()?;
             assembly.on_initialize::<Self>(|state, _| {
                 Box::pin(async move {

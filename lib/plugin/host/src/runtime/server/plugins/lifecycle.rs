@@ -1,6 +1,6 @@
 //! 插件启动、失败补偿与关闭；异步清理由独立任务持有，调用方取消等待不会打断清理。
 
-use std::{any::TypeId, panic::AssertUnwindSafe, sync::Arc};
+use std::{any::TypeId, collections::HashSet, panic::AssertUnwindSafe, sync::Arc};
 
 use anyhow::{Context, Result, ensure};
 use futures_util::FutureExt;
@@ -9,6 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::{LifecycleHook, PluginTasks, RuntimeState};
 
+#[derive(Clone)]
 pub(super) struct HookPlan {
     pub owner: TypeId,
     pub initialize: Vec<LifecycleHook>,
@@ -23,7 +24,8 @@ struct Entry {
 }
 
 pub(super) struct Lifecycle {
-    entries: Vec<Entry>,
+    entries: Vec<Arc<Entry>>,
+    inherited: HashSet<TypeId>,
     pub cancellation: CancellationToken,
     pub requests: Arc<RwLock<()>>,
     state: Mutex<LifecycleState>,
@@ -34,21 +36,39 @@ struct LifecycleState {
     started: bool,
     entered: Vec<usize>,
     stopped: Option<Vec<String>>,
+    retired: HashSet<TypeId>,
 }
 
 impl Lifecycle {
-    pub fn new(plans: Vec<HookPlan>) -> Self {
-        let cancellation = CancellationToken::new();
+    pub fn compose(
+        plans: Vec<HookPlan>,
+        previous: Option<&Self>,
+        changed: &HashSet<TypeId>,
+    ) -> Self {
+        let mut inherited = HashSet::new();
         let entries = plans
             .into_iter()
-            .map(|plan| Entry {
-                plan,
-                tasks: Arc::new(PluginTasks::new(cancellation.child_token())),
+            .map(|plan| {
+                if !changed.contains(&plan.owner)
+                    && let Some(entry) = previous.and_then(|old| {
+                        old.entries
+                            .iter()
+                            .find(|entry| entry.plan.owner == plan.owner)
+                    })
+                {
+                    inherited.insert(plan.owner);
+                    return entry.clone();
+                }
+                Arc::new(Entry {
+                    plan,
+                    tasks: Arc::new(PluginTasks::new(CancellationToken::new())),
+                })
             })
             .collect();
         Self {
             entries,
-            cancellation,
+            inherited,
+            cancellation: CancellationToken::new(),
             requests: Arc::new(RwLock::new(())),
             state: Mutex::new(LifecycleState::default()),
         }
@@ -92,7 +112,10 @@ impl Lifecycle {
             .await
             .unwrap_or_else(|_| Err(anyhow::anyhow!("插件初始化服务时 panic")));
         if let Err(error) = result {
-            return match self.stop_locked(runtime, &mut state).await {
+            return match self
+                .stop_locked(runtime, &mut state, Some(&self.fresh()))
+                .await
+            {
                 Ok(()) => Err(error),
                 Err(cleanup) => Err(error.context(format!("启动失败且资源清理失败: {cleanup:#}"))),
             };
@@ -110,6 +133,9 @@ impl Lifecycle {
             self.check_cancelled()?;
             // 先登记补偿，即使当前插件只完成了一半，停止动作也会执行。
             state.entered.push(index);
+            if self.inherited.contains(&entry.plan.owner) {
+                continue;
+            }
             for hook in &entry.plan.initialize {
                 self.check_cancelled()?;
                 invoke(*hook, runtime, entry, "初始化").await?;
@@ -121,6 +147,9 @@ impl Lifecycle {
         }
         if run_hooks {
             for entry in &self.entries {
+                if self.inherited.contains(&entry.plan.owner) {
+                    continue;
+                }
                 for hook in &entry.plan.start {
                     self.check_cancelled()?;
                     invoke(*hook, runtime, entry, "启动").await?;
@@ -129,6 +158,9 @@ impl Lifecycle {
         }
         if run_hooks {
             for entry in &self.entries {
+                if self.inherited.contains(&entry.plan.owner) {
+                    continue;
+                }
                 for hook in &entry.plan.ready {
                     self.check_cancelled()?;
                     invoke(*hook, runtime, entry, "就绪").await?;
@@ -143,27 +175,76 @@ impl Lifecycle {
         Ok(())
     }
 
-    pub async fn stop(&self, runtime: &RuntimeState) -> Result<()> {
-        self.cancellation.cancel();
-        let mut state = self.state.lock().await;
-        self.stop_locked(runtime, &mut state).await
+    pub(super) fn fresh(&self) -> HashSet<TypeId> {
+        self.entries
+            .iter()
+            .filter(|entry| !self.inherited.contains(&entry.plan.owner))
+            .map(|entry| entry.plan.owner)
+            .collect()
     }
 
-    async fn stop_locked(&self, runtime: &RuntimeState, state: &mut LifecycleState) -> Result<()> {
-        if let Some(errors) = &state.stopped {
-            return cleanup_result(errors);
-        }
+    pub async fn stop(&self, runtime: &RuntimeState) -> Result<()> {
+        self.stop_selected(runtime, None).await
+    }
+
+    pub(super) async fn stop_selected(
+        &self,
+        runtime: &RuntimeState,
+        selected: Option<&HashSet<TypeId>>,
+    ) -> Result<()> {
         self.cancellation.cancel();
+        for entry in &self.entries {
+            if selected.is_none_or(|owners| owners.contains(&entry.plan.owner)) {
+                entry.tasks.cancellation().cancel();
+            }
+        }
+        let mut state = self.state.lock().await;
+        self.stop_locked(runtime, &mut state, selected).await
+    }
+
+    pub(super) async fn cleanup_succeeded(&self) -> bool {
+        self.state
+            .lock()
+            .await
+            .stopped
+            .as_ref()
+            .is_some_and(Vec::is_empty)
+    }
+
+    async fn stop_locked(
+        &self,
+        runtime: &RuntimeState,
+        state: &mut LifecycleState,
+        selected: Option<&HashSet<TypeId>>,
+    ) -> Result<()> {
+        self.cancellation.cancel();
+        let retired = state.retired.clone();
+        let selected_entry = |entry: &Arc<Entry>| {
+            !retired.contains(&entry.plan.owner)
+                && selected.is_none_or(|owners| owners.contains(&entry.plan.owner))
+        };
+        // 请求代数与后台任务分别取消，保留插件的任务不能被旧代数的退役连带停止。
+        for entry in self.entries.iter().filter(|entry| selected_entry(entry)) {
+            entry.tasks.cancellation().cancel();
+        }
         let _requests = self.requests.write().await;
-        let mut errors = Vec::new();
+        let mut errors = state.stopped.clone().unwrap_or_default();
         // 所有工作先完成，随后才能释放依赖资源；发布提交期间不会被强制 abort。
-        for entry in self.entries.iter().rev() {
+        for entry in self
+            .entries
+            .iter()
+            .rev()
+            .filter(|entry| selected_entry(entry))
+        {
             if let Err(error) = entry.tasks.drain().await {
                 errors.push(format!("{:?} 后台任务: {error:#}", entry.plan.owner));
             }
         }
         for index in state.entered.iter().rev() {
             let entry = &self.entries[*index];
+            if !selected_entry(entry) {
+                continue;
+            }
             for hook in entry.plan.stop.iter().rev() {
                 if let Err(error) = invoke(*hook, runtime, entry, "停止").await {
                     errors.push(format!("{error:#}"));
@@ -173,6 +254,12 @@ impl Lifecycle {
         if !errors.is_empty() {
             eprintln!("插件清理失败: {}", errors.join("; "));
         }
+        state.retired.extend(
+            self.entries
+                .iter()
+                .filter(|entry| selected_entry(entry))
+                .map(|entry| entry.plan.owner),
+        );
         let result = cleanup_result(&errors);
         state.stopped = Some(errors);
         result
@@ -215,7 +302,10 @@ impl Drop for StartupGuard {
         state.extensions.lifecycle.cancellation.cancel();
         // 调用方丢弃初始化 future 时，当前启动步骤在安全边界结束后仍会清理。
         tokio::spawn(async move {
-            let _ = state.extensions.lifecycle.stop(&state).await;
+            let lifecycle = &state.extensions.lifecycle;
+            let _ = lifecycle
+                .stop_selected(&state, Some(&lifecycle.fresh()))
+                .await;
         });
     }
 }

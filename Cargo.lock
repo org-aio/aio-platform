@@ -661,6 +661,7 @@ dependencies = [
  "toml 0.9.12+spec-1.1.0",
  "tonic",
  "tonic-prost",
+ "tower",
  "tower-http",
  "uuid",
  "wasmtime",

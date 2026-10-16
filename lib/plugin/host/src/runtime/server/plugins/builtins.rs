@@ -81,6 +81,8 @@ impl Plugin<RuntimeAssembly> for ManagementPlugin {
         Box::pin(async move {
             assembly.require_service::<dyn crate::identity::IdentityProvider>();
             assembly.require_service::<dyn crate::authorization::AuthorizationProvider>();
+            // 发布任务按安装包动态选择执行器，持有的运行时快照必须随组合更新。
+            assembly.observe_catalog();
             assembly.add_routes(|state| super::super::routes::management(state.clone()));
             assembly.on_start::<Self>(|state, _tasks| {
                 Box::pin(async move {

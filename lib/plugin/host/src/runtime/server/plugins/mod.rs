@@ -4,6 +4,7 @@ mod admission;
 mod builtins;
 mod component_execution;
 mod component_resources;
+mod composition;
 mod enhancement_execution;
 mod evolution;
 #[cfg(test)]
@@ -14,10 +15,14 @@ mod infrastructure_tests;
 mod lifecycle;
 #[cfg(test)]
 mod lifecycle_tests;
+mod live;
+#[cfg(test)]
+mod live_tests;
 pub(super) mod process_execution;
 #[cfg(feature = "remote")]
 mod remote_capabilities;
 mod resource;
+mod service_bindings;
 mod tasks;
 #[cfg(test)]
 mod tests;
@@ -28,8 +33,8 @@ use std::{any::TypeId, future::Future, pin::Pin, sync::Arc};
 
 use anyhow::{Context, Result};
 use axum::Router;
-use az_plugin_core::{App, DynPlugin, Plugin};
-use dill::{Catalog, CatalogBuilder};
+use az_plugin_core::{DynPlugin, Plugin};
+use dill::Catalog;
 
 use super::RuntimeState;
 
@@ -41,12 +46,14 @@ pub use enhancement_execution::*;
 pub use evolution::EvolutionPlugin;
 pub use infrastructure::*;
 use lifecycle::{HookPlan, Lifecycle};
+pub use live::RuntimeHost;
 pub use process_execution::{
     ProcessExecutor, ProcessInstance, ProcessResponse, StartProcessRequest,
 };
 #[cfg(feature = "remote")]
 pub use remote_capabilities::RemoteCapabilitiesPlugin;
 pub use resource::Resource;
+pub use service_bindings::ServiceBindings;
 pub use tasks::PluginTasks;
 pub use wasm_execution::{WasmActivation, WasmExecutor};
 pub use worker_capabilities::WorkerCapabilitiesPlugin;
@@ -59,12 +66,15 @@ pub type LifecycleHook =
     fn(RuntimeState, Arc<PluginTasks>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 
 /// 启动插件只向现有 Dill 容器和路由集合贡献能力，不创建第二套服务注册表。
+#[derive(Clone)]
 pub struct RuntimeAssembly {
-    pub services: CatalogBuilder,
+    pub services: ServiceBindings,
     pub config: Arc<crate::configuration::HostConfig>,
     routes: Vec<RouteFactory>,
     requirements: Vec<fn(&Catalog, bool) -> Result<()>>,
     lifecycle: Vec<HookPlan>,
+    required_services: std::collections::HashSet<TypeId>,
+    catalog_sensitive: bool,
 }
 
 impl RuntimeAssembly {
@@ -116,8 +126,14 @@ impl RuntimeAssembly {
         &mut self.lifecycle[index]
     }
 
+    /// 保存整个容器或其弱引用的服务必须声明此项；任何组合变更都重建该插件。
+    pub fn observe_catalog(&mut self) {
+        self.catalog_sensitive = true;
+    }
+
     /// 路由依赖接口而不是某个默认实现；所有插件注册完成后检查唯一绑定。
     pub fn require_service<I: ?Sized + Send + Sync + 'static>(&mut self) {
+        self.required_services.insert(TypeId::of::<I>());
         self.requirements.push(|catalog, resolve| {
             anyhow::ensure!(
                 catalog.builders_for::<I>().count() == 1,
@@ -138,6 +154,7 @@ pub(crate) struct RuntimeExtensions {
     pub routes: Vec<RouteFactory>,
     lifecycle: Lifecycle,
     requirements: Vec<fn(&Catalog, bool) -> Result<()>>,
+    contributions: Vec<composition::Contribution>,
 }
 
 impl RuntimeExtensions {
@@ -167,50 +184,23 @@ pub(super) async fn assemble(
     config: Arc<crate::configuration::HostConfig>,
     plugins: Vec<DynPlugin<RuntimeAssembly>>,
 ) -> Result<Arc<RuntimeExtensions>> {
+    validate_selection(&config, &plugins)?;
+    let contributions = composition::build(config, plugins, &[], &Default::default()).await?;
+    composition::assemble(contributions, None, &Default::default())
+}
+
+fn validate_selection(
+    config: &crate::configuration::HostConfig,
+    plugins: &[DynPlugin<RuntimeAssembly>],
+) -> Result<()> {
     if config.remote_capabilities.is_some() {
         #[cfg(not(feature = "remote"))]
         anyhow::bail!("远端能力配置需要启用 remote feature");
         #[cfg(feature = "remote")]
         anyhow::ensure!(plugins.iter().any(|plugin| plugin.as_ref().type_id() == TypeId::of::<RemoteCapabilitiesPlugin>()), "远端能力配置需要装配 RemoteCapabilitiesPlugin");
     }
-    let services = CatalogBuilder::new();
-    let mut app = App::new(RuntimeAssembly {
-        services,
-        config,
-        routes: Vec::new(),
-        requirements: Vec::new(),
-        lifecycle: Vec::new(),
-    });
-    app.add_plugins(plugins).await?;
-    let installed = app.plugin_order().to_vec();
-    let mut assembly = app.into_inner();
-    anyhow::ensure!(
-        assembly
-            .lifecycle
-            .iter()
-            .all(|plan| installed.contains(&plan.owner)),
-        "生命周期声明引用了未安装的插件类型"
-    );
-    assembly
-        .lifecycle
-        .sort_by_key(|plan| installed.iter().position(|owner| *owner == plan.owner));
-    assembly
-        .services
-        .validate()
-        .context("校验宿主能力依赖失败")?;
-    let services = assembly.services.build();
-    validate_security_provider::<dyn crate::identity::IdentityProvider>(&services)?;
-    validate_security_provider::<dyn crate::authorization::AuthorizationProvider>(&services)?;
-    validate_security_provider::<dyn crate::metering::MeteringProvider>(&services)?;
-    for validate in &assembly.requirements {
-        validate(&services, false)?;
-    }
-    Ok(Arc::new(RuntimeExtensions {
-        services,
-        routes: assembly.routes,
-        lifecycle: Lifecycle::new(assembly.lifecycle),
-        requirements: assembly.requirements,
-    }))
+    let _ = plugins;
+    Ok(())
 }
 
 // 身份相关服务必须在所有入口共享同一实例，不能每次解析生成新对象。

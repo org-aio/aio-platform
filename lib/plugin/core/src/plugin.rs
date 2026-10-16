@@ -13,7 +13,7 @@ use anyhow::{Context as _, Result, ensure};
 use dill::{AllOf, Catalog};
 
 /// 插件构建过程。
-pub type PluginFuture<'a> = Pin<Box<dyn Future<Output = Result<()>> + 'a>>;
+pub type PluginFuture<'a> = Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
 
 /// 指定应用状态的动态插件。
 pub type DynPlugin<T> = Arc<dyn Plugin<T>>;
@@ -74,7 +74,8 @@ impl<T: 'static> App<T> {
         Ok(())
     }
 
-    fn plan_plugins(&self, plugins: Vec<DynPlugin<T>>) -> Result<Vec<DynPlugin<T>>> {
+    /// 只验证完整依赖图并返回构建顺序，不调用插件；供宿主提前规划可恢复变更。
+    pub fn plan_plugins(&self, plugins: Vec<DynPlugin<T>>) -> Result<Vec<DynPlugin<T>>> {
         let mut pending_unique_types = HashSet::new();
         for plugin in &plugins {
             let type_id = plugin.as_ref().type_id();

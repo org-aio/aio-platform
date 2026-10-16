@@ -79,6 +79,13 @@ pub struct RuntimeState {
 }
 
 impl RuntimeState {
+    fn with_extensions(&self, extensions: Arc<plugins::RuntimeExtensions>) -> Self {
+        Self {
+            extensions,
+            ..self.clone()
+        }
+    }
+
     /// 按接口类型取得已安装插件贡献的服务；未安装的能力不会隐式创建默认实现。
     pub fn service<I: ?Sized + Send + Sync + 'static>(&self) -> Result<Arc<I>> {
         self.extensions

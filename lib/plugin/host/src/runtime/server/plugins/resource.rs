@@ -27,14 +27,12 @@ impl<T> Resource<T> {
     }
 }
 
-pub(super) fn declare<T: Send + Sync + 'static>(services: &mut CatalogBuilder) -> Result<()> {
+pub(super) fn declare<T: Send + Sync + 'static>(
+    services: &mut super::ServiceBindings,
+) -> Result<()> {
     // 在注册前检查具体类型，让重复资源声明返回错误而不是触发 Dill 的 panic。
-    let snapshot = services.clone().build();
-    ensure!(snapshot.builders_for::<T>().count() == 0, "资源类型已注册");
-    ensure!(
-        snapshot.builders_for::<Resource<T>>().count() == 0,
-        "资源槽已注册"
-    );
+    ensure!(!services.contains::<T>(), "资源类型已注册");
+    ensure!(!services.contains::<Resource<T>>(), "资源槽已注册");
     let resource = Arc::new(Resource::<T> {
         value: OnceLock::new(),
     });

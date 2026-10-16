@@ -272,31 +272,34 @@ impl Fixture {
     }
 
     pub async fn publish(&self, package: Package, generation: i64) -> Result<String> {
-        let client = reqwest::Client::new();
-        let response: Value = client
-            .post(format!("{}/api/runtime/enhancements/revisions", self.base))
-            .bearer_auth("manager")
-            .json(&package)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
-        let revision = response["revision"]
-            .as_str()
-            .context("缺少增强版本")?
-            .to_owned();
-        client
-            .put(format!("{}/api/runtime/enhancements/active", self.base))
-            .bearer_auth("manager")
-            .json(&json!({"revision": revision, "expected_generation":generation}))
-            .send()
-            .await?
-            .error_for_status()?;
-        Ok(revision)
+        publish(&self.base, package, generation).await
     }
 }
 
+pub(super) async fn publish(base: &str, package: Package, generation: i64) -> Result<String> {
+    let client = reqwest::Client::new();
+    let response: Value = client
+        .post(format!("{}/api/runtime/enhancements/revisions", base))
+        .bearer_auth("manager")
+        .json(&package)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let revision = response["revision"]
+        .as_str()
+        .context("缺少增强版本")?
+        .to_owned();
+    client
+        .put(format!("{}/api/runtime/enhancements/active", base))
+        .bearer_auth("manager")
+        .json(&json!({"revision": revision, "expected_generation":generation}))
+        .send()
+        .await?
+        .error_for_status()?;
+    Ok(revision)
+}
 pub(super) fn package(language: Language) -> Package {
     let source = match language {
         Language::Rhai => "fn invoke(input, context) { input * 2 }",

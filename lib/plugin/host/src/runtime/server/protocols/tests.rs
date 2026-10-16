@@ -19,6 +19,8 @@ mod capabilities;
 mod composition;
 #[path = "evolution_tests.rs"]
 mod evolution;
+#[path = "lifecycle_tests.rs"]
+mod lifecycle;
 #[cfg(feature = "remote")]
 #[path = "remote_tests.rs"]
 mod remote;
