@@ -7,8 +7,8 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
 use crate::{
-    Enhancement, Example, Language, Package, ScriptContext, ScriptExecutor, ScriptProgram,
-    ScriptRuntime,
+    Enhancement, Example, Language, Package, ScriptContext, ScriptExecutor, ScriptInvocation,
+    ScriptProgram, ScriptRuntime,
 };
 
 // 测试源码只包含倍率，故意不满足内置函数约定，证明执行来自注入的实现。
@@ -26,7 +26,7 @@ impl ScriptExecutor for ScalingExecutor {
 }
 
 impl ScriptProgram for ScalingProgram {
-    fn invoke(&self, input: &Value, _: &ScriptContext) -> Result<Value> {
+    fn invoke(&self, input: &Value, _: &ScriptInvocation) -> Result<Value> {
         Ok(json!(
             input.as_i64().context("测试输入必须为整数")? * self.0
         ))
@@ -47,6 +47,7 @@ fn candidate() -> Package {
     Package {
         schema_version: 1,
         enhancements: vec![Enhancement {
+            calls: vec![],
             path: "/v1/math/scale".into(),
             language: Language::Rhai,
             source: "3".into(),
@@ -74,7 +75,9 @@ fn replacement_compiles_validates_and_executes_without_builtin_engines() -> Resu
     let prepared = runtime.prepare(candidate())?;
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(
-        prepared.invoke("/v1/math/scale", &json!(7), &ScriptContext::default())?,
+        prepared
+            .invocation(ScriptContext::default(), vec!["/v1/math/scale".into()])
+            .invoke("/v1/math/scale", &json!(7))?,
         json!(21)
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -86,7 +89,8 @@ fn replacement_compiles_validates_and_executes_without_builtin_engines() -> Resu
     );
     let oversized = json!("x".repeat(crate::MAX_VALUE_BYTES));
     let error = prepared
-        .invoke("/v1/math/scale", &oversized, &ScriptContext::default())
+        .invocation(ScriptContext::default(), vec!["/v1/math/scale".into()])
+        .invoke("/v1/math/scale", &oversized)
         .err()
         .context("超额输入未被拒绝")?;
     assert!(error.to_string().contains("输入超过配额"));
@@ -121,5 +125,21 @@ fn duplicate_native_type_is_rejected() -> Result<()> {
     catalog.bind::<dyn ScriptExecutor, ScalingExecutor>();
     let runtime = catalog.build().get_one::<ScriptRuntime>()?;
     assert!(runtime.validate().is_err());
+    Ok(())
+}
+
+#[test]
+fn empty_dependencies_preserve_existing_persisted_revision_digest() -> Result<()> {
+    use sha2::{Digest, Sha256};
+    let encoded = r#"{"schema_version":1,"enhancements":[{"path":"/v1/math/scale","language":"rhai","source":"3","examples":[{"input":2,"output":6}]}]}"#;
+    let runtime = catalog(Arc::new(AtomicUsize::new(0)))
+        .build()
+        .get_one::<ScriptRuntime>()?;
+    let prepared = runtime.prepare(serde_json::from_str(encoded)?)?;
+    assert_eq!(
+        prepared.revision(),
+        format!("{:x}", Sha256::digest(encoded))
+    );
+    assert_eq!(serde_json::to_string(prepared.package())?, encoded);
     Ok(())
 }

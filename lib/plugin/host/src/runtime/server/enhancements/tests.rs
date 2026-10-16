@@ -6,10 +6,14 @@ use sqlx::PgPool;
 
 use super::Enhancements;
 
+#[path = "cancellation_tests.rs"]
+mod cancellation;
+
 fn package(language: Language, source: &str) -> Package {
     Package {
         schema_version: 1,
         enhancements: vec![Enhancement {
+            calls: vec![],
             path: "/v1/math/double".into(),
             language,
             source: source.into(),

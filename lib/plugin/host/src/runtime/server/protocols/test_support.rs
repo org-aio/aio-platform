@@ -46,6 +46,10 @@ impl IdentityProvider for Identity {
                 vec!["plugin:manage".into()]
             }
             "limited" => vec![format!("enhancement:{PATH}")],
+            "composed" => [PATH, "/v1/math/base", "/v1/math/pipeline"]
+                .into_iter()
+                .map(|path| format!("enhancement:{path}"))
+                .collect(),
             "denied" => vec![],
             _ => return Ok(None),
         };
@@ -67,7 +71,7 @@ impl IdentityProvider for Identity {
         Ok(true)
     }
     async fn session_active(&self, session: &str, _: &str, _: &str) -> Result<bool> {
-        Ok(session != "limited" || !self.revoked.load(Ordering::SeqCst))
+        Ok(!matches!(session, "limited" | "composed") || !self.revoked.load(Ordering::SeqCst))
     }
     async fn can_publish(&self, _: &SessionContext) -> Result<bool> {
         Ok(false)
@@ -199,8 +203,8 @@ pub(super) fn package(language: Language) -> Package {
         }
     };
     Package { schema_version: 1, enhancements: vec![
-        Enhancement { path: PATH.into(), language, source: source.into(), examples: vec![Example { input: json!(3), output: json!(6) }] },
-        Enhancement { path: "/v1/caller/scope".into(), language: Language::Rhai, source: "fn invoke(input, context) { #{tenant:context.tenant_id,source:context.source_id} }".into(), examples: vec![Example { input: json!({}), output: json!({"tenant":"validation","source":"validation"}) }] }
+        Enhancement { calls: vec![], path: PATH.into(), language, source: source.into(), examples: vec![Example { input: json!(3), output: json!(6) }] },
+        Enhancement { calls: vec![], path: "/v1/caller/scope".into(), language: Language::Rhai, source: "fn invoke(input, context) { #{tenant:context.tenant_id,source:context.source_id} }".into(), examples: vec![Example { input: json!({}), output: json!({"tenant":"validation","source":"validation"}) }] }
     ] }
 }
 

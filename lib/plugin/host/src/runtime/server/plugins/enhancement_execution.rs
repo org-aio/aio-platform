@@ -4,7 +4,7 @@ use std::{any::TypeId, sync::Arc};
 
 use az_plugin_core::{Plugin, PluginFuture};
 use az_plugin_enhancement::{RhaiExecutor, TypeScriptExecutor};
-pub use az_plugin_enhancement::{ScriptExecutor, ScriptProgram, ScriptRuntime};
+pub use az_plugin_enhancement::{ScriptExecutor, ScriptInvocation, ScriptProgram, ScriptRuntime};
 use sqlx::PgPool;
 
 use super::super::enhancements::Enhancements;

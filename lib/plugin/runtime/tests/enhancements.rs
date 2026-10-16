@@ -34,7 +34,9 @@ impl HostServices for Host {
             tenant_id: scope.context.tenant_id.clone().context("缺少租户")?,
             source_id: scope.source_id.clone(),
         };
-        let output = package.invoke(&request.path, &request.input, &context)?;
+        let output = package
+            .invocation(context, scope.grants.enhancements.clone())
+            .invoke(&request.path, &request.input)?;
         Ok(EnhancementResponse {
             revision: package.revision().into(),
             output,
@@ -46,6 +48,7 @@ fn package(language: Language, source: &str) -> Result<PreparedPackage> {
     az_plugin_enhancement::default_runtime()?.prepare(Package {
         schema_version: 1,
         enhancements: vec![Enhancement {
+            calls: vec![],
             path: "/v1/math/double".into(),
             language,
             source: source.into(),
@@ -86,7 +89,7 @@ async fn same_wasm_instance_receives_runtime_enhancements_without_recompilation(
         revision: "unchanged-plugin".into(),
         context: context.clone(),
         grants: CapabilityGrants {
-            enhancements: vec!["/v1/math/double".into()],
+            enhancements: vec!["/v1/math/double".into(), "/v1/math/base".into()],
             ..Default::default()
         },
     };
@@ -110,6 +113,33 @@ async fn same_wasm_instance_receives_runtime_enhancements_without_recompilation(
     let second: EnhancementResponse = serde_json::from_slice(&second.body)?;
     assert_eq!(second.output, json!(14));
     assert_ne!(first.revision, second.revision);
+    let composed = az_plugin_enhancement::default_runtime()?.prepare(serde_json::from_str(
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../enhancement/examples/composition.json"
+        )),
+    )?)?;
+    *host.0.write().map_err(|_| anyhow::anyhow!("增强锁损坏"))? = composed;
+    let composed = guest.handle(request(), context.clone()).await?;
+    assert_eq!(composed.status, 200);
+    let composed: EnhancementResponse = serde_json::from_slice(&composed.body)?;
+    assert_eq!(composed.output, json!(14));
+    assert_ne!(composed.revision, second.revision);
+    let mut missing_dependency = scope.clone();
+    missing_dependency
+        .grants
+        .enhancements
+        .retain(|path| path != "/v1/math/base");
+    let mut missing_dependency = engine
+        .instantiate(&compiled, missing_dependency, resources.clone())
+        .await?;
+    assert_eq!(
+        missing_dependency
+            .handle(request(), context.clone())
+            .await?
+            .status,
+        403
+    );
     let mut denied = scope;
     denied.grants.enhancements.clear();
     let mut denied = engine.instantiate(&compiled, denied, resources).await?;

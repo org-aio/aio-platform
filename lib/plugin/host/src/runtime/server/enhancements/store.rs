@@ -5,7 +5,9 @@ use std::{
 
 use anyhow::{Context, Result, ensure};
 use az_plugin_contract::{EnhancementRequest, EnhancementResponse, InvocationScope};
-use az_plugin_enhancement::{Package, PreparedPackage, ScriptContext, ScriptRuntime};
+use az_plugin_enhancement::{
+    Package, PreparedPackage, ScriptContext, ScriptInvocation, ScriptRuntime,
+};
 use serde::Serialize;
 use sqlx::PgPool;
 use tokio::sync::Semaphore;
@@ -16,6 +18,15 @@ pub(in crate::runtime::server) struct Enhancements {
     runtime: Arc<ScriptRuntime>,
     cache: Mutex<BTreeMap<(String, String), Arc<PreparedPackage>>>,
     execution: Arc<Semaphore>,
+}
+
+// 请求等待被取消时通知整条脚本调用链；并发配额仍由工作线程持有到真正退出。
+struct CancelInvocation(ScriptInvocation);
+
+impl Drop for CancelInvocation {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, sqlx::FromRow)]
@@ -36,17 +47,19 @@ impl Enhancements {
     pub(in crate::runtime::server) async fn catalog(
         &self,
         tenant: &str,
+        permitted: impl Fn(&str) -> bool,
     ) -> Result<(Option<String>, Vec<String>)> {
         let Some(revision) = self.head(tenant).await?.revision else {
             return Ok((None, Vec::new()));
         };
         let prepared = self.load(tenant, &revision).await?;
-        let mut paths = prepared
-            .package()
-            .enhancements
-            .iter()
-            .map(|item| item.path.clone())
-            .collect::<Vec<_>>();
+        let mut paths = Vec::new();
+        for item in &prepared.package().enhancements {
+            let required = prepared.required_paths(&item.path)?;
+            if required.iter().all(|path| permitted(path)) {
+                paths.push(item.path.clone());
+            }
+        }
         paths.sort();
         Ok((Some(revision), paths))
     }
@@ -223,10 +236,12 @@ impl Enhancements {
             .clone()
             .try_acquire_owned()
             .context("增强执行并发已满")?;
+        let invocation = prepared.invocation(context, scope.grants.enhancements.clone());
+        let _cancel = CancelInvocation(invocation.clone());
         // 将配额交给工作线程；取消 HTTP/WIT 等待不会提早释放仍在执行的配额。
         let output = tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            prepared.invoke(&request.path, &request.input, &context)
+            invocation.invoke(&request.path, &request.input)
         })
         .await
         .context("等待增强执行失败")??;

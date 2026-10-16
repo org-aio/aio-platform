@@ -111,7 +111,9 @@ async fn external_executor_uses_public_plugin_contract_without_database_or_compo
     let package = package()?;
     let prepared = runtime.prepare(package.clone())?;
     assert_eq!(
-        prepared.invoke("/v1/math/double", &json!(21), &ScriptContext::default())?,
+        prepared
+            .invocation(ScriptContext::default(), vec!["/v1/math/double".into()])
+            .invoke("/v1/math/double", &json!(21))?,
         json!(42)
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);

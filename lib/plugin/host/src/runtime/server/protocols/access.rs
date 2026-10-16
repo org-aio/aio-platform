@@ -37,11 +37,10 @@ pub(super) async fn catalog(
     state: &RuntimeState,
     session: &SessionContext,
 ) -> Result<(Option<String>, Vec<String>), RuntimeError> {
-    let (revision, mut paths) = state
+    let (revision, paths) = state
         .service::<Enhancements>()?
-        .catalog(&session.tenant_id)
+        .catalog(&session.tenant_id, |path| permitted(session, path))
         .await?;
-    paths.retain(|path| permitted(session, path));
     Ok((revision, paths))
 }
 
@@ -54,6 +53,10 @@ pub(super) async fn invoke(
     if !permitted(session, &request.path) {
         return Err(RuntimeError::forbidden("当前身份没有该增强能力权限"));
     }
+    let (revision, grants) = catalog(state, session).await?;
+    if revision.is_some() && !grants.contains(&request.path) {
+        return Err(RuntimeError::forbidden("当前身份缺少增强依赖权限"));
+    }
     // 外部用户调用明确标识为用户来源，不能伪装成已安装插件来借用包能力。
     let scope = InvocationScope {
         source_id: format!("user:{}", session.user_id),
@@ -65,7 +68,7 @@ pub(super) async fn invoke(
             request_id: uuid::Uuid::new_v4().to_string(),
         },
         grants: CapabilityGrants {
-            enhancements: vec![request.path.clone()],
+            enhancements: grants,
             ..Default::default()
         },
     };

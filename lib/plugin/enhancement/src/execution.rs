@@ -3,7 +3,7 @@ use std::{any::Any, collections::HashSet, sync::Arc};
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 
-use crate::{Language, ScriptContext};
+use crate::{Language, ScriptInvocation};
 
 /// 原生执行器扩展点；由 Dill 按具体类型注册，语言是输入格式而非插件身份。
 /// 实现必须隔离调用状态并限制执行资源，宿主仍统一校验包、授权与输入输出配额。
@@ -12,9 +12,9 @@ pub trait ScriptExecutor: Any + Send + Sync {
     fn compile(&self, source: &str) -> Result<Arc<dyn ScriptProgram>>;
 }
 
-/// 已编译的纯计算程序；可以并发调用，每次调用独立的输入和可信归属由宿主提供。
+/// 已编译程序；执行器通过调用上下文组合能力并检查共享预算，不得另建授权或版本状态。
 pub trait ScriptProgram: Any + Send + Sync {
-    fn invoke(&self, input: &Value, context: &ScriptContext) -> Result<Value>;
+    fn invoke(&self, input: &Value, invocation: &ScriptInvocation) -> Result<Value>;
 }
 
 /// 从同一个 Dill 容器解析执行器，所有候选验证、版本恢复与在线执行使用此实例。

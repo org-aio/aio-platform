@@ -10,7 +10,7 @@
 
 两种协议都从每次请求的认证头调用宿主 `IdentityProvider`，校验成员与会话有效性。租户、用户、来源由宿主确定，消息体不接受这些身份字段。外部调用的来源为 `user:<user_id>`，不会借用某个已安装插件的能力。账户权限中的 `enhancement:/v1/math/double` 只允许对应路径；`plugin:manage` 可执行本租户所有增强。路径没有通配授权，未授权能力不进入工具目录。
 
-Wasm 与 sidecar 继续使用已安装包的 `capabilities.enhancements`，同一 `Enhancements` 服务执行最终能力检查、活动版本选择、执行限额与结果编码。协议层不新增权限数据库。会话撤销在已有连接的下一次请求生效。
+Wasm 与 sidecar 继续使用已安装包的 `capabilities.enhancements`，同一 `Enhancements` 服务执行最终能力检查、活动版本选择、执行限额与结果编码。协议层不新增权限数据库。会话撤销在已有连接的下一次请求生效。组合增强要求入口和全部传递依赖均获授权；目录隐藏缺少依赖权限的入口，直接调用也被拒绝。`plugin:manage` 的权限仅来自当前用户会话，脚本不能借用它或篡改调用身份。
 
 ## MCP
 
@@ -33,7 +33,7 @@ Wasm 与 sidecar 继续使用已安装包的 `capabilities.enhancements`，同�
 
 跨语言契约位于 `lib/plugin/contract/proto/enhancements.proto`。Rust 客户端启用 `az-plugin-contract/grpc`，从生成的 `grpc::enhancements_client` 导入。认证信息放入请求 metadata；反向代理须转发 HTTP/2 gRPC 和认证头。远程访问由正式入口提供 TLS，本适配器不另开公网端口。
 
-消息最多 65 KiB，脚本输入输出沿用 64 KiB 限制。`grpc-timeout` 在整个请求期间生效，宿主等待上限 30 秒。取消等待不会提早释放仍在工作线程上执行的脚本配额；脚本自身继续受执行时限约束。当前是 unary 调用，不宣称实现流式 RPC。
+消息最多 65 KiB，脚本输入输出沿用 64 KiB 限制。`grpc-timeout` 在整个请求期间生效，宿主等待上限 30 秒。取消等待会通知整条脚本调用链，但不会提早释放仍在工作线程上执行的配额。嵌套调用共享一个 100 ms 截止时间、64 次调用与 1 MiB 累计 JSON 传输预算。当前是 unary 调用，不宣称实现流式 RPC。
 
 ## 验收与范围
 

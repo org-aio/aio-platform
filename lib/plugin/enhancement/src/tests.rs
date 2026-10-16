@@ -7,6 +7,7 @@ fn package(language: Language, source: &str) -> Package {
     Package {
         schema_version: 1,
         enhancements: vec![Enhancement {
+            calls: vec![],
             path: "/v1/math/double".into(),
             language,
             source: source.into(),
@@ -29,12 +30,15 @@ fn both_languages_execute_the_same_contract() -> Result<()> {
     ] {
         let prepared = default_runtime()?.prepare(package(language, source))?;
         assert_eq!(
-            prepared.invoke("/v1/math/double", &json!(9), &ScriptContext::default())?,
+            prepared
+                .invocation(ScriptContext::default(), vec!["/v1/math/double".into()])
+                .invoke("/v1/math/double", &json!(9))?,
             json!(18)
         );
         assert!(
             prepared
-                .invoke("/v2/math/double", &json!(9), &ScriptContext::default())
+                .invocation(ScriptContext::default(), vec!["/v2/math/double".into()])
+                .invoke("/v2/math/double", &json!(9))
                 .is_err()
         );
         assert_eq!(prepared.revision().len(), 64);
@@ -125,7 +129,9 @@ fn script_globals_and_context_do_not_leak_between_calls() -> Result<()> {
             source_id: "plugin".into(),
         };
         assert_eq!(
-            prepared.invoke("/v1/math/double", &json!(3), &context)?,
+            prepared
+                .invocation(context, vec!["/v1/math/double".into()])
+                .invoke("/v1/math/double", &json!(3))?,
             json!({"calls":1,"tenant":tenant})
         );
     }

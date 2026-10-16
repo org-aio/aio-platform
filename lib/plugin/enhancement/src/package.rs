@@ -2,16 +2,16 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use anyhow::{Context, Result, ensure};
 use az_plugin_contract::validate_enhancement_path;
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::{Enhancement, Package, ScriptContext, ScriptProgram, ScriptRuntime};
+use crate::{Enhancement, Package, ScriptContext, ScriptInvocation, ScriptProgram, ScriptRuntime};
 
 /// 已完成语法检查和样例执行的候选版本；发布者负责持久化和原子激活。
+#[derive(Clone)]
 pub struct PreparedPackage {
     revision: String,
-    package: Package,
-    compiled: BTreeMap<String, Arc<dyn ScriptProgram>>,
+    package: Arc<Package>,
+    pub(crate) compiled: Arc<BTreeMap<String, Arc<dyn ScriptProgram>>>,
 }
 
 impl ScriptRuntime {
@@ -38,9 +38,10 @@ impl ScriptRuntime {
         }
         let prepared = PreparedPackage {
             revision: format!("{:x}", Sha256::digest(&encoded)),
-            package,
-            compiled,
+            package: Arc::new(package),
+            compiled: Arc::new(compiled),
         };
+        prepared.validate_dependencies()?;
         prepared.check_examples(&prepared.package)?;
         Ok(prepared)
     }
@@ -55,24 +56,54 @@ impl PreparedPackage {
         &self.package
     }
 
-    /// 每次执行创建独立作用域，禁止在不同调用、插件或租户间共享脚本状态。
-    pub fn invoke(&self, path: &str, input: &Value, context: &ScriptContext) -> Result<Value> {
+    /// 固定版本和授权快照；每次外部请求创建一条独立的调用链。
+    pub fn invocation(&self, context: ScriptContext, grants: Vec<String>) -> ScriptInvocation {
+        ScriptInvocation::new(self.clone(), context, grants)
+    }
+
+    /// 返回整个依赖闭包，用于候选检查和调用前的权限校验。
+    pub fn required_paths(&self, path: &str) -> Result<Vec<String>> {
+        let mut result = Vec::new();
+        self.visit_dependencies(path, &mut Vec::new(), &mut result)?;
+        Ok(result)
+    }
+
+    fn validate_dependencies(&self) -> Result<()> {
+        for enhancement in &self.package.enhancements {
+            self.required_paths(&enhancement.path)?;
+        }
+        Ok(())
+    }
+
+    fn visit_dependencies(
+        &self,
+        path: &str,
+        stack: &mut Vec<String>,
+        result: &mut Vec<String>,
+    ) -> Result<()> {
         ensure!(
-            serde_json::to_vec(input)?.len() <= crate::MAX_VALUE_BYTES,
-            "增强输入超过配额"
+            !stack.iter().any(|entry| entry == path),
+            "增强依赖存在循环: {path}"
         );
-        let implementation = self
-            .compiled
-            .get(path)
-            .context("运行时尚未提供该增强能力")?;
-        let output = implementation
-            .invoke(input, context)
-            .with_context(|| format!("执行增强失败: {path}"))?;
         ensure!(
-            serde_json::to_vec(&output)?.len() <= crate::MAX_VALUE_BYTES,
-            "增强输出超过配额"
+            stack.len() < crate::invocation::MAX_DEPTH,
+            "增强依赖超过调用深度配额"
         );
-        Ok(output)
+        let enhancement = self
+            .package
+            .enhancements
+            .iter()
+            .find(|entry| entry.path == path)
+            .with_context(|| format!("增强依赖不存在: {path}"))?;
+        stack.push(path.into());
+        for target in &enhancement.calls {
+            self.visit_dependencies(target, stack, result)?;
+        }
+        stack.pop();
+        if !result.iter().any(|entry| entry == path) {
+            result.push(path.into());
+        }
+        Ok(())
     }
 
     /// 升级重放旧版契约样例，拒绝删除已有路径或悄悄改变已验证的结果。
@@ -97,7 +128,9 @@ impl PreparedPackage {
                 enhancement.path
             );
             for (index, example) in enhancement.examples.iter().enumerate() {
-                let output = self.invoke(&enhancement.path, &example.input, &context)?;
+                let grants = self.required_paths(&enhancement.path)?;
+                let invocation = self.invocation(context.clone(), grants);
+                let output = invocation.invoke(&enhancement.path, &example.input)?;
                 ensure!(
                     output == example.output,
                     "增强契约样例未通过: {} #{}",
@@ -112,6 +145,12 @@ impl PreparedPackage {
 
 fn validate(enhancement: &Enhancement) -> Result<()> {
     validate_enhancement_path(&enhancement.path)?;
+    let mut dependencies = std::collections::HashSet::new();
+    ensure!(enhancement.calls.len() <= 16, "增强依赖数量超过配额");
+    for path in &enhancement.calls {
+        validate_enhancement_path(path)?;
+        ensure!(dependencies.insert(path), "增强依赖重复: {path}");
+    }
     ensure!(
         !enhancement.source.trim().is_empty()
             && enhancement.source.len() <= crate::MAX_SOURCE_BYTES,

@@ -16,6 +16,9 @@ pub struct Enhancement {
     pub path: String,
     pub language: Language,
     pub source: String,
+    /// 可以组合的同版本增强路径；实际执行还需调用者逐项授权。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calls: Vec<String>,
     pub examples: Vec<Example>,
 }
 

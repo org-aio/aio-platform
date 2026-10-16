@@ -13,6 +13,9 @@ use tonic::Code;
 mod support;
 use support::*;
 
+#[path = "composition_tests.rs"]
+mod composition;
+
 #[tokio::test]
 #[ignore = "需要独立本机 PostgreSQL"]
 async fn real_protocol_clients_share_updates_permissions_and_revocation() -> Result<()> {
@@ -112,6 +115,7 @@ async fn exercise(fixture: &Fixture) -> Result<()> {
     upgraded
         .enhancements
         .push(az_plugin_enhancement::Enhancement {
+            calls: vec![],
             path: "/v1/math/triple".into(),
             language: Language::TypeScript,
             source: "export function invoke(input: number): number { return input * 3; }".into(),

@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "enhancements": [
+    {
+      "path": "/v1/math/base",
+      "language": "rhai",
+      "source": "fn invoke(input, context) { input * 2 }",
+      "examples": [{"input": 3, "output": 6}]
+    },
+    {
+      "path": "/v1/math/double",
+      "language": "typescript",
+      "source": "declare function call_enhancement(path: string, input: unknown): number; export function invoke(input: number) { return call_enhancement('/v1/math/base', input); }",
+      "calls": ["/v1/math/base"],
+      "examples": [{"input": 3, "output": 6}]
+    },
+    {
+      "path": "/v1/math/pipeline",
+      "language": "rhai",
+      "source": "fn invoke(input, context) { call_enhancement(\"/v1/math/double\", input) + 1 }",
+      "calls": ["/v1/math/double"],
+      "examples": [{"input": 3, "output": 7}]
+    }
+  ]
+}
