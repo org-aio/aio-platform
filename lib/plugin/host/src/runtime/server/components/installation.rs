@@ -103,8 +103,17 @@ impl Components {
     pub async fn change(&self, tenant: &str, source: Uuid, action: &str) -> Result<()> {
         let _guard = self.mutations.lock().await;
         if action == "enable" {
-            let git:String=sqlx::query_scalar("SELECT s.git FROM component_sources s JOIN component_installations i ON i.source_id=s.id WHERE s.id=$1 AND i.tenant_id=$2").bind(source).bind(tenant).fetch_one(&self.pool).await?;
-            return self.install_locked(tenant, &git, None, None).await;
+            // 重新启用只恢复租户选择的版本，不能撤销回滚或隐式升级。
+            let (git, digest, excluded) = sqlx::query_as::<_, (String, String, Option<String>)>(
+                "SELECT s.git,i.digest,i.excluded_digest FROM component_sources s JOIN component_installations i ON i.source_id=s.id WHERE s.id=$1 AND i.tenant_id=$2",
+            )
+            .bind(source)
+            .bind(tenant)
+            .fetch_one(&self.pool)
+            .await?;
+            return self
+                .install_locked(tenant, &git, Some(&digest), excluded.as_deref())
+                .await;
         }
         if action == "rollback" {
             let row=sqlx::query_as::<_,(String,String)>("SELECT s.git,v.digest FROM component_versions v JOIN component_sources s ON s.id=v.source_id JOIN component_installations i ON i.source_id=s.id AND i.tenant_id=$2 JOIN component_versions current ON current.digest=i.digest WHERE s.id=$1 AND v.created_at<current.created_at ORDER BY v.created_at DESC LIMIT 1").bind(source).bind(tenant).fetch_optional(&self.pool).await?.context("没有可回滚的发布版本")?;

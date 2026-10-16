@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 use std::{
     os::unix::fs::{FileTypeExt, PermissionsExt},
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use super::model::{Start, Stop};
@@ -95,8 +96,23 @@ pub(in crate::runtime::server) async fn stop(request: &Stop) -> Result<()> {
     let name = format!("{}{}", prefix()?, request.id);
     // 先发送 SIGTERM 等待请求排空，超时由 Docker 强制终止；仅忽略已经退出的容器。
     ignore_missing(docker_output(["stop", "--time", "15", &name]).await)?;
-    ignore_missing(docker_output(["rm", "--force", &name]).await)?;
-    Ok(())
+    // --rm 的自动清理可能仍在进行，等待删除完成后才允许同名版本重新启动。
+    let cleanup = async {
+        loop {
+            match ignore_missing(docker_output(["rm", "--force", &name]).await) {
+                Err(error)
+                    if error.to_string().contains("removal of container")
+                        && error.to_string().contains("is already in progress") =>
+                {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                result => return result,
+            }
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(15), cleanup)
+        .await
+        .context("等待 process 容器清理超时")?
 }
 
 async fn clear_stale_socket(socket: &Path) -> Result<()> {

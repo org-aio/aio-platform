@@ -522,6 +522,7 @@ where
 
 impl IntoResponse for SupervisorError {
     fn into_response(self) -> Response {
+        eprintln!("插件监督器操作失败: {:#}", self.0);
         (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": format!("{:#}", self.0) })),

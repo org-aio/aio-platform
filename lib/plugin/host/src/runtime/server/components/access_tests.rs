@@ -55,13 +55,10 @@ impl crate::authorization::AuthorizationProvider for Identity {
 #[ignore = "需要独立本机 PostgreSQL 和已构建 WIT Component"]
 async fn tenant_installation_grants_members_and_menu_visibility_preserves_runtime() -> Result<()> {
     let database = std::env::var("AIO_COMPONENT_TEST_DATABASE_URL")?;
+    let url = reqwest::Url::parse(&database)?;
     ensure!(
-        database.contains("localhost")
-            && database
-                .split('?')
-                .next()
-                .unwrap()
-                .ends_with("/component_market_test"),
+        matches!(url.host_str(), Some("localhost" | "127.0.0.1"))
+            && url.path() == "/component_market_test",
         "只接受本机独立测试库"
     );
     let root = tempfile::tempdir()?;
@@ -256,14 +253,17 @@ async fn tenant_installation_grants_members_and_menu_visibility_preserves_runtim
         "b".repeat(40),
         "2.0.0".into(),
     )?;
-    components.publish(second, "新版权限").await?;
+    components.publish(second.clone(), "新版权限").await?;
     components.install(&tenant, &git, None).await?;
     assert_eq!(
         components.permissions(&tenant).await?,
         vec![services::permission(source, "fixture.edit")]
     );
     components.change(&tenant, source, "rollback").await?;
-    assert_eq!(components.permissions(&tenant).await?, vec![permission]);
+    assert_eq!(
+        components.permissions(&tenant).await?,
+        vec![permission.clone()]
+    );
     for action in ["disable", "enable", "uninstall"] {
         components.change(&tenant, source, action).await?;
         let current = request_context::authenticate(&state, &headers)
@@ -276,6 +276,23 @@ async fn tenant_installation_grants_members_and_menu_visibility_preserves_runtim
                 .any(|p| p.starts_with("component:")),
             action == "enable"
         );
+        if action == "enable" {
+            assert_eq!(
+                components.permissions(&tenant).await?,
+                vec![permission.clone()]
+            );
+            let selected = sqlx::query_as::<_, (String, Option<String>)>(
+                "SELECT digest,excluded_digest FROM component_installations WHERE source_id=$1 AND tenant_id=$2",
+            )
+            .bind(source)
+            .bind(&tenant)
+            .fetch_one(&components.pool)
+            .await?;
+            assert_eq!(
+                selected,
+                (first.digest.clone(), Some(second.digest.clone()))
+            );
+        }
     }
     server.abort();
     Ok(())
