@@ -35,7 +35,7 @@ worker 配对复用 AIO 当前登录账号、工作区和成员有效性。设�
 
 部署者仍需显式配置 `AIO_PROCESS_WORKER_CAPABILITIES` 和插件清单授权，开通设备能力不会自动扩充宿主进程授权。
 
-聚焦回归：`AIO_TEST_DATABASE_URL=... cargo test -p az-plugin-host --features server process::workers -- --include-ignored`，覆盖设备开关、取消幂等、租户/用户/来源/能力隔离以及单设备领取约束。使用独立测试库，并按组件运行时要求先执行 `REVOKE ALL ON SCHEMA public FROM PUBLIC`；测试在随机独立 schema 中创建和清理业务表。
+聚焦回归：`AIO_TEST_DATABASE_URL=... cargo test -p az-plugin-host --features sidecar process::workers -- --include-ignored`，覆盖设备开关、取消幂等、租户/用户/来源/能力隔离以及单设备领取约束。使用独立测试库，并按组件运行时要求先执行 `REVOKE ALL ON SCHEMA public FROM PUBLIC`；测试在随机独立 schema 中创建和清理业务表。
 
 验证：宿主单元测试，以及隔离 PostgreSQL 的 `worker_pairing_tasks_archives_and_revocation_end_to_end`（环境变量 AIO_TEST_DATABASE_URL / AIO_SPACE_TEST_CLI）。后者验证长轮询等待和唤醒、重复领取、完成回执重传、归档恢复、跨用户拒绝和等待中撤权。真实 NAT / 防火墙证据由产品发布验收文档记录。
 

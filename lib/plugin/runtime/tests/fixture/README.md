@@ -7,4 +7,4 @@ cargo build --manifest-path lib/plugin/runtime/tests/fixture/Cargo.toml --releas
 cargo build --manifest-path lib/plugin/runtime/tests/fixture/Cargo.toml --release --target wasm32-wasip2 --features unhealthy --target-dir target/fixture/unhealthy
 ```
 
-`AIO_TEST_HEALTHY_COMPONENT`、`AIO_TEST_UNHEALTHY_COMPONENT` 指向对应 `wasm32-wasip2/release/release_fixture.wasm`，运行 `cargo test -p az-plugin-runtime --test release -- --ignored`。
+`AIO_TEST_HEALTHY_COMPONENT`、`AIO_TEST_UNHEALTHY_COMPONENT` 指向对应 `wasm32-wasip2/release/release_fixture.wasm`，运行 `cargo test -p az-plugin-runtime --features wasm --test release -- --ignored`。
