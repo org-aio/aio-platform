@@ -1,6 +1,11 @@
 //! 按插件归属保存装配配方；依赖信息只用于变更规划，服务解析始终由 Dill 完成。
 
-use std::{any::TypeId, collections::HashSet, panic::AssertUnwindSafe, sync::Arc};
+use std::{
+    any::TypeId,
+    collections::{HashMap, HashSet},
+    panic::AssertUnwindSafe,
+    sync::Arc,
+};
 
 use anyhow::{Context, Result, ensure};
 use az_plugin_core::{App, DynPlugin};
@@ -70,7 +75,7 @@ pub(super) async fn build(
     rebuild: &HashSet<TypeId>,
 ) -> Result<Vec<Contribution>> {
     let app = App::new(RuntimeAssembly::new(config.clone()));
-    let plugins = app.plan_plugins(plugins)?;
+    let plugins = app.plan_plugins(plugins, &HashMap::new())?;
     let mut contributions = Vec::new();
     for plugin in plugins {
         let owner = plugin.as_ref().type_id();
@@ -93,6 +98,36 @@ pub(super) async fn build(
         );
         contributions.push(Contribution { plugin, assembly });
     }
+    // require_service 可以指向异步资源，提供者初始化必须先于使用方的钩子。
+    // 聚合服务的完整 Dill 注入图只决定重建范围，不把延迟聚合误作初始化环。
+    let additional = contributions
+        .iter()
+        .map(|consumer| {
+            let providers = contributions
+                .iter()
+                .filter(|provider| {
+                    provider.owner() != consumer.owner()
+                        && !consumer
+                            .assembly
+                            .required_services
+                            .is_disjoint(&provider.assembly.services.interfaces)
+                })
+                .map(Contribution::owner)
+                .collect();
+            (consumer.owner(), providers)
+        })
+        .collect();
+    let plugins = contributions
+        .iter()
+        .map(|entry| entry.plugin.clone())
+        .collect();
+    let ordered = app.plan_plugins(plugins, &additional)?;
+    let positions = ordered
+        .iter()
+        .enumerate()
+        .map(|(index, plugin)| (plugin.as_ref().type_id(), index))
+        .collect::<HashMap<_, _>>();
+    contributions.sort_by_key(|entry| positions[&entry.owner()]);
     Ok(contributions)
 }
 

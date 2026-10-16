@@ -10,7 +10,7 @@ v1 页面分发使用 `WasmExecutor` / `ProcessExecutor` 的 Dill 绑定。内�
 
 宿主通过 `Plugin<RuntimeAssembly>` 复用 `az-plugin-core` 的 TypeId 身份和依赖排序，通过 Dill 提供服务。`RuntimeState` 不再拥有剪贴板、个人配置、设备、设备视图、数据库、包仓库和执行资源的固定字段；HTTP、组件 broker 和 sidecar 使用同一个服务容器。
 
-先看 `RuntimeAssembly`，再看 `builtins.rs` 中的默认平台组合。插件可以注册服务、贡献 HTTP 路由，以及注册恢复、就绪和停止动作。所有恢复动作成功后才执行就绪动作；省略交付插件也会省略它的后台启动动作。`require_service::<dyn Trait>()` 检查接口的唯一绑定，允许应用提供其他实现。`Plugin::dependencies()` 只声明必须先构建的具体插件类型，不能用它强制绑定某个默认服务实现。
+先看 `RuntimeAssembly`，再看 `builtins.rs` 中的默认平台组合。插件可以注册服务、贡献 HTTP 路由，以及注册恢复、就绪和停止动作。所有恢复动作成功后才执行就绪动作；省略交付插件也会省略它的后台启动动作。`require_service::<dyn Trait>()` 检查接口的唯一绑定，并把接口提供者加入初始化依赖，允许应用提供其他实现。`Plugin::dependencies()` 只声明必须先构建的具体插件类型，不能用它强制绑定某个默认服务实现。
 
 宿主统一使用 `RuntimeState::initialize(config, plugins)`。应用显式选择 `default_plugins()` 或自己的 Dill 插件组合，再加入产品提供者；运行时不再接收独立身份参数。纯自定义路由可以完全省略身份、授权和计费服务。
 
@@ -137,7 +137,7 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 }));
 ```
 
-业务服务直接注入 `Connection` 或 `Arc<Connection>`；`Resource<T>` 是 Dill 中的一次初始化槽，负责将异步资源交给正常的同步 DI，不是第二套注册表。重复声明和重复提供都失败。依赖该资源的初始化钩子必须声明对资源所有者插件的 TypeId 依赖。资源中需要保存自身所属容器时只保存 `CatalogWeakRef` 或所属运行时的 `Weak`，避免容器与单例相互持有。
+业务服务直接注入 `Connection` 或 `Arc<Connection>`；`Resource<T>` 是 Dill 中的一次初始化槽，负责将异步资源交给正常的同步 DI，不是第二套注册表。重复声明和重复提供都失败。依赖该资源的初始化钩子须用 `require_service::<T>()` 声明接口或资源依赖，或声明资源所有者插件的 TypeId 依赖。资源中需要保存自身所属容器时只保存 `CatalogWeakRef` 或所属运行时的 `Weak`，避免容器与单例相互持有。
 
 ## 默认基础设施与替换方式
 

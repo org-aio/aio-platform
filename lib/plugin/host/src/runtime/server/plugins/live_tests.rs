@@ -605,3 +605,47 @@ async fn concurrent_restarts_use_latest_generation_and_stop_each_task_once() -> 
     assert_eq!(fixture.trace.stable_tasks_stopped.load(Ordering::SeqCst), 2);
     Ok(())
 }
+
+struct EarlyConsumer;
+impl Plugin<RuntimeAssembly> for EarlyConsumer {
+    fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
+        Box::pin(async move {
+            assembly.require_service::<dyn ValueService>();
+            assembly.on_initialize::<Self>(|state, _| {
+                Box::pin(async move {
+                    state.service::<dyn ValueService>()?.read()?;
+                    Ok(())
+                })
+            });
+            assembly.on_stop::<Self>(|state, _| {
+                Box::pin(async move {
+                    state.service::<dyn ValueService>()?.read()?;
+                    Ok(())
+                })
+            });
+            Ok(())
+        })
+    }
+}
+
+#[tokio::test]
+async fn interface_requirements_order_resource_initialization_and_reverse_cleanup() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let trace = Arc::new(Trace::default());
+    let host = RuntimeHost::initialize(
+        config(root.path()),
+        vec![
+            Arc::new(EarlyConsumer),
+            Arc::new(ValuePlugin(Settings {
+                value: 1,
+                failure: Failure::None,
+                trace: trace.clone(),
+            })),
+        ],
+    )
+    .await?;
+    host.restart::<ValuePlugin>().await?;
+    host.shutdown().await?;
+    assert_eq!(trace.stopped.load(Ordering::SeqCst), 2);
+    Ok(())
+}

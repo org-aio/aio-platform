@@ -56,7 +56,7 @@ impl<T: 'static> App<T> {
         plugins: impl IntoIterator<Item = DynPlugin<T>>,
     ) -> Result<()> {
         let plugins = plugins.into_iter().collect::<Vec<_>>();
-        let plugins = self.plan_plugins(plugins)?;
+        let plugins = self.plan_plugins(plugins, &HashMap::new())?;
 
         for plugin in plugins {
             let type_id = plugin.as_ref().type_id();
@@ -74,8 +74,12 @@ impl<T: 'static> App<T> {
         Ok(())
     }
 
-    /// 只验证完整依赖图并返回构建顺序，不调用插件；供宿主提前规划可恢复变更。
-    pub fn plan_plugins(&self, plugins: Vec<DynPlugin<T>>) -> Result<Vec<DynPlugin<T>>> {
+    /// 验证完整依赖图并返回顺序；宿主可补充由接口声明导出的 TypeId 依赖。
+    pub fn plan_plugins(
+        &self,
+        plugins: Vec<DynPlugin<T>>,
+        additional: &HashMap<TypeId, Vec<TypeId>>,
+    ) -> Result<Vec<DynPlugin<T>>> {
         let mut pending_unique_types = HashSet::new();
         for plugin in &plugins {
             let type_id = plugin.as_ref().type_id();
@@ -95,7 +99,10 @@ impl<T: 'static> App<T> {
             .collect::<HashSet<_>>();
         let mut pending = Vec::new();
         for plugin in plugins {
-            let dependencies = plugin.dependencies();
+            let mut dependencies = plugin.dependencies();
+            if let Some(extra) = additional.get(&plugin.as_ref().type_id()) {
+                dependencies.extend(extra);
+            }
             for dependency in &dependencies {
                 ensure!(
                     available.contains(dependency),
@@ -314,6 +321,28 @@ mod tests {
         app.add_plugins(vec![Arc::new(Dependent) as DynPlugin<TestState>])
             .await?;
         assert_eq!(app.into_inner().builds, ["first", "dependent"]);
+        Ok(())
+    }
+
+    #[test]
+    fn additional_dependencies_order_plugins_and_reject_cycles_before_build() -> Result<()> {
+        let app = App::new(TestState::default());
+        let plugins = vec![Arc::new(First) as DynPlugin<TestState>, Arc::new(Second)];
+        let mut dependencies =
+            HashMap::from([(TypeId::of::<First>(), vec![TypeId::of::<Second>()])]);
+        let planned = app.plan_plugins(plugins.clone(), &dependencies)?;
+        assert_eq!(
+            planned
+                .iter()
+                .map(|plugin| plugin.as_ref().type_id())
+                .collect::<Vec<_>>(),
+            [TypeId::of::<Second>(), TypeId::of::<First>()]
+        );
+        dependencies.insert(TypeId::of::<Second>(), vec![TypeId::of::<First>()]);
+        assert!(app.plan_plugins(plugins.clone(), &dependencies).is_err());
+        dependencies.insert(TypeId::of::<Second>(), vec![TypeId::of::<u64>()]);
+        assert!(app.plan_plugins(plugins, &dependencies).is_err());
+        assert!(app.into_inner().builds.is_empty());
         Ok(())
     }
 
