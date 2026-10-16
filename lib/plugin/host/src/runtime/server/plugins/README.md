@@ -108,6 +108,10 @@ host.shutdown().await?;
 
 `RuntimeHost::router()` 使用 fallback 分发。与业务路由或静态文件组合时，由应用给它分配独立路由空间；不能在 merge 后再覆盖它的 fallback。固定组合继续使用 `RuntimeState::initialize` 和 `server::router`。产品采用哪一个入口必须明确；仅升级依赖不会自动启用在线管理。
 
+产品需要把业务路由和首页快照一起切换时，使用 `RuntimeHost::initialize_with_router(config, plugins, |state, runtime| ...)`。回调收到当前代数及尚未添加准入层的运行时路由，返回与系统 API、静态资源及中间件组合后的完整 Router。宿主在全部路由外添加一次准入层；产品请求同样被排空，避免关闭连接池时仍有旧首页快照在执行。回调每次提交和恢复都会执行，返回错误或 panic 都进入相同的资源清理与旧配方恢复流程。不要在回调中再次调用 `server::router`，否则会重复获取准入锁；不要把当前 state 保存到代数之外。
+
+`host.is_available()` 在切换窗口、停止或恢复失败时返回 false。应用若在组合变更返回错误后仍不可用，应结束监听并交给外部监督器处理。部署配置观察和管理请求必须运行在此宿主的排空范围之外。
+
 `ServiceBindings` 记录每个插件的 Dill Builder、默认接口和显式绑定。组合校验后仍只有一个 Dill Catalog 解析、注入和缓存服务，不维护第二套 DI。未受影响的 Builder 保留单例缓存；变更集合由旧图、新图的具体插件依赖、`require_service` 和 Dill 注入依赖共同计算，包括 `Vec<Arc<dyn Trait>>` 聚合。插件不得替其他插件登记钩子或绑定它不拥有的实现。读取可选服务、保存整个运行时快照或在钩子中捕获容器的插件必须调用 `assembly.observe_catalog()`；Dill 注入的 `Catalog` / `CatalogWeakRef` 自动参与这一规则。
 
 变更先校验新组合及恢复配方，再关闭旧代数准入并等待已进入的请求。旧响应流会结束，切换窗口的新请求返回 503；当前实现不承诺零停顿。只取消受影响插件的后台任务，依赖反序释放资源，初始化新资源、恢复状态及构建路由，全部成功才发布新代数。无关单例和后台任务继续存活。无法满足依赖或重复绑定在停止旧资源前拒绝。

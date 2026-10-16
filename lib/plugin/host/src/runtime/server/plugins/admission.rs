@@ -7,6 +7,7 @@ use std::{
 };
 
 use axum::{
+    Router,
     body::{Body, Bytes, HttpBody},
     extract::{Request, State},
     http::StatusCode,
@@ -17,6 +18,10 @@ use http_body::{Frame, SizeHint};
 use tokio::sync::OwnedRwLockReadGuard;
 
 use super::RuntimeState;
+
+pub(in crate::runtime::server) fn admit_router(state: RuntimeState, router: Router) -> Router {
+    router.layer(axum::middleware::from_fn_with_state(state, admit))
+}
 
 pub(in crate::runtime::server) async fn admit(
     State(state): State<RuntimeState>,

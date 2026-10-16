@@ -38,7 +38,7 @@ use dill::Catalog;
 
 use super::RuntimeState;
 
-pub(super) use admission::admit;
+pub(super) use admission::{admit, admit_router};
 pub use builtins::*;
 pub use component_execution::*;
 pub use component_resources::*;

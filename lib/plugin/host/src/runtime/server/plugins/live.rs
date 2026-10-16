@@ -30,7 +30,10 @@ struct Generation {
 struct HostState {
     generation: RwLock<Generation>,
     operation: Arc<Mutex<()>>,
+    compose: ApplicationRoutes,
 }
+
+type ApplicationRoutes = Arc<dyn Fn(&RuntimeState, Router) -> Result<Router> + Send + Sync>;
 
 /// 管理同一宿主内的原生插件；不提供跨进程 TypeId 或任意管理 HTTP 入口。
 #[derive(Clone)]
@@ -41,8 +44,22 @@ impl RuntimeHost {
         config: HostConfig,
         plugins: Vec<DynPlugin<RuntimeAssembly>>,
     ) -> Result<Self> {
+        Self::initialize_with_router(config, plugins, |_, router| Ok(router)).await
+    }
+
+    /// 每代重新装配产品路由、首页及中间件，全部请求共享该代的准入和排空边界。
+    /// 回调收到尚未添加准入层的运行时路由；不要重新调用 server::router 或保留旧代状态。
+    pub async fn initialize_with_router<F>(
+        config: HostConfig,
+        plugins: Vec<DynPlugin<RuntimeAssembly>>,
+        compose: F,
+    ) -> Result<Self>
+    where
+        F: Fn(&RuntimeState, Router) -> Result<Router> + Send + Sync + 'static,
+    {
+        let compose: ApplicationRoutes = Arc::new(compose);
         let state = RuntimeState::initialize(config, plugins).await?;
-        let generation = match Generation::new(state.clone()) {
+        let generation = match Generation::new(state.clone(), &compose) {
             Ok(generation) => generation,
             Err(error) => {
                 return match state.shutdown().await {
@@ -56,6 +73,7 @@ impl RuntimeHost {
         Ok(Self(Arc::new(HostState {
             generation: RwLock::new(generation),
             operation: Arc::new(Mutex::new(())),
+            compose,
         })))
     }
 
@@ -67,6 +85,18 @@ impl RuntimeHost {
             let host = host.clone();
             async move { Ok::<_, std::convert::Infallible>(host.dispatch(request).await) }
         }))
+    }
+
+    /// 是否正在接受请求；切换窗口或恢复失败时为 false，供产品健康检查和监督流程使用。
+    pub fn is_available(&self) -> bool {
+        self.current().is_ok_and(|generation| {
+            !generation
+                .state
+                .extensions
+                .lifecycle
+                .cancellation
+                .is_cancelled()
+        })
     }
 
     async fn dispatch(&self, request: Request) -> Response {
@@ -205,7 +235,7 @@ impl RuntimeHost {
             )));
         }
         let run_hooks = old.state.config.development.is_none();
-        match Generation::start(candidate.clone(), run_hooks).await {
+        match Generation::start(candidate.clone(), run_hooks, &self.0.compose).await {
             Ok(generation) => self.publish(generation),
             Err(error) => {
                 if !candidate.extensions.lifecycle.cleanup_succeeded().await {
@@ -214,7 +244,7 @@ impl RuntimeHost {
                         "新插件清理失败，停止恢复以防资源重叠；剩余清理: {cleanup:?}"
                     )));
                 }
-                match Generation::start(recovery, run_hooks).await {
+                match Generation::start(recovery, run_hooks, &self.0.compose).await {
                     Ok(generation) => {
                         self.publish(generation)?;
                         Err(error.context("新插件启动失败，已用旧配方重建并恢复服务"))
@@ -258,10 +288,14 @@ impl RuntimeHost {
 }
 
 impl Generation {
-    async fn start(state: RuntimeState, run_hooks: bool) -> Result<Self> {
+    async fn start(
+        state: RuntimeState,
+        run_hooks: bool,
+        compose: &ApplicationRoutes,
+    ) -> Result<Self> {
         let lifecycle = &state.extensions.lifecycle;
         state.extensions.start(&state, run_hooks).await?;
-        match Self::new(state.clone()) {
+        match Self::new(state.clone(), compose) {
             Ok(generation) => Ok(generation),
             Err(error) => {
                 let cleanup = lifecycle
@@ -272,10 +306,13 @@ impl Generation {
         }
     }
 
-    fn new(state: RuntimeState) -> Result<Self> {
-        let router =
-            std::panic::catch_unwind(AssertUnwindSafe(|| super::super::router(state.clone())))
-                .map_err(|_| anyhow::anyhow!("插件路由冲突或路由工厂 panic"))?;
+    fn new(state: RuntimeState, compose: &ApplicationRoutes) -> Result<Self> {
+        let router = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            let runtime = super::super::routes::assemble(state.clone());
+            compose(&state, runtime)
+        }))
+        .map_err(|_| anyhow::anyhow!("插件或应用路由冲突、装配回调 panic"))??;
+        let router = super::admit_router(state.clone(), router);
         Ok(Self { state, router })
     }
 }

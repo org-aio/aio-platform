@@ -18,6 +18,9 @@ use tokio::sync::Notify;
 use super::{Resource, RuntimeAssembly, RuntimeHost, RuntimeState, tests::config};
 use crate::runtime::server::http_error::RuntimeError;
 
+#[path = "live_application_tests.rs"]
+mod application;
+
 #[derive(Default)]
 struct Trace {
     next: AtomicUsize,

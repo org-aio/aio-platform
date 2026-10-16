@@ -31,6 +31,10 @@ use crate::runtime::{
 };
 
 pub fn router(state: RuntimeState) -> Router {
+    super::plugins::admit_router(state.clone(), assemble(state))
+}
+
+pub(super) fn assemble(state: RuntimeState) -> Router {
     let mut router = Router::new().route(
         "/api/runtime/{*unknown}",
         any(|| async { StatusCode::NOT_FOUND }),
@@ -38,12 +42,7 @@ pub fn router(state: RuntimeState) -> Router {
     for factory in &state.extensions.routes {
         router = router.merge(factory(&state));
     }
-    router
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            super::plugins::admit,
-        ))
-        .with_state(state)
+    router.with_state(state)
 }
 
 pub(super) fn frontend() -> Router<RuntimeState> {
