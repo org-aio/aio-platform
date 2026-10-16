@@ -127,6 +127,24 @@ impl Components {
         );
         let (current, _, _) = self.description(tenant, source).await?;
         ensure!(digest == current, "插件活动版本已变化");
+        let required = self.required_permissions(tenant, source, digest).await?;
+        if !required.is_empty() {
+            // 所有执行器共用此门槛；仅伪造会话字段或后台用户标识不能获得交互授权。
+            let registered =
+                self.services
+                    .interactive(&context.request_id, tenant, &source.to_string())?;
+            ensure!(registered == context, "交互请求归属不匹配");
+            ensure!(
+                self.host_permissions(
+                    tenant,
+                    context.user_id.as_deref().unwrap_or_default(),
+                    context.session_id.as_deref().unwrap_or_default(),
+                    &required,
+                )
+                .await?,
+                "当前用户无插件所需的宿主权限"
+            );
+        }
         let executor = self.active_executor(source, tenant, digest).await?;
         executor
             .handle(source, tenant, digest, request, context)

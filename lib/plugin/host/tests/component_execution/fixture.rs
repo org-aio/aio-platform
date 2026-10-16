@@ -241,6 +241,7 @@ pub fn plugins(probes: [Arc<Probe>; 2], surfaces: bool) -> Vec<DynPlugin<Runtime
         // 管理与页面路由只依赖公共执行契约，替代执行器不引入内置引擎。
         plugins.extend([
             Arc::new(ManagementPlugin) as DynPlugin<RuntimeAssembly>,
+            Arc::new(BootstrapPlugin),
             Arc::new(FrontendPlugin),
             Arc::new(RepositoryPlugin),
         ]);
@@ -299,14 +300,22 @@ impl Host {
         tenant: &str,
         probes: [Arc<Probe>; 2],
     ) -> Result<Self> {
+        Self::start_with_identity(root, database, Arc::new(Identity(tenant.into())), probes).await
+    }
+    pub async fn start_with_identity<P>(
+        root: &Path,
+        database: &str,
+        identity: Arc<P>,
+        probes: [Arc<Probe>; 2],
+    ) -> Result<Self>
+    where
+        P: IdentityProvider + az_plugin_host::authorization::AuthorizationProvider,
+    {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let base = format!("http://{}", listener.local_addr()?);
         let state = RuntimeState::initialize(
             config(root, database, &base),
-            super::identity_support::with_identity(
-                Arc::new(Identity(tenant.into())),
-                plugins(probes, true),
-            ),
+            super::identity_support::with_identity(identity, plugins(probes, true)),
         )
         .await?;
         let router = az_plugin_host::runtime::server::router(state.clone())?;

@@ -102,6 +102,7 @@ jobs:
           export AIO_PLUGIN_SUPERVISOR_SOCKET="$AIO_PROCESS_ROOT/combined-supervisor.sock"
           cargo test -p az-plugin-host --lib --no-default-features --features wasm,sidecar publication_preserves_running_singleton_process -- --ignored
           cargo test -p az-plugin-host --lib --features server,wasm,sidecar development_switch_preserves_cli_ownership_and_refreshes_frontend -- --ignored
+          cargo test -p az-plugin-host --lib --features server,wasm,sidecar protected_wasm_and_sidecar_require_live_interaction_through_the_broker -- --ignored
         env:
           AIO_TEST_HEALTHY_COMPONENT: ${{ github.workspace }}/target/fixture/healthy/wasm32-wasip2/release/release_fixture.wasm
           AIO_PLUGIN_SUPERVISOR_SOCKET: /tmp/aio-component-executor-absent.sock

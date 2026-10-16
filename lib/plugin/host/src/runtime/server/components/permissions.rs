@@ -1,13 +1,13 @@
 use super::{Components, services};
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use az_plugin_bundle::Bundle;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-// 已发布包只迁移一次权限索引，鉴权请求不读取整包或依赖角色表。
+// 权限索引仅由已验证的不可变整包派生；宿主权限要求不进入安装授权集合。
 pub(super) async fn backfill(pool: &PgPool) -> Result<()> {
     let digests = sqlx::query_scalar::<_, String>(
-        "SELECT digest FROM component_versions WHERE permissions IS NULL",
+        "SELECT digest FROM component_versions WHERE permissions IS NULL OR required_permissions IS NULL",
     )
     .fetch_all(pool)
     .await?;
@@ -18,11 +18,13 @@ pub(super) async fn backfill(pool: &PgPool) -> Result<()> {
                 .fetch_one(pool)
                 .await?;
         let bundle = Bundle::decode(&archive)?.verify()?;
+        ensure!(bundle.digest() == digest, "权限索引与整包摘要不匹配");
         sqlx::query(
-            "UPDATE component_versions SET permissions=$2 WHERE digest=$1 AND permissions IS NULL",
+            "UPDATE component_versions SET permissions=$2,required_permissions=$3 WHERE digest=$1 AND (permissions IS NULL OR required_permissions IS NULL)",
         )
         .bind(&digest)
         .bind(&bundle.manifest().plugin.permissions)
+        .bind(&bundle.manifest().plugin.required_permissions)
         .execute(pool)
         .await?;
     }

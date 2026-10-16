@@ -5,6 +5,7 @@ use az_plugin_development::DevArtifact;
 use std::sync::Arc;
 use uuid::Uuid;
 
+#[derive(Clone)]
 pub(super) struct Instance {
     pub source: String,
     pub repository: String,

@@ -1,4 +1,5 @@
 use super::{Components, model::Description};
+use crate::identity::SessionContext;
 use crate::runtime::{
     CapabilityManifest, InstalledPluginView, MarketplaceEntry, PageBody, PageDefinition,
     PluginRuntime, PluginState, RuntimeAccountItem, RuntimeCatalog,
@@ -54,9 +55,20 @@ impl Components {
             .collect()
     }
 
-    pub async fn append_catalog(&self, tenant: &str, catalog: &mut RuntimeCatalog) -> Result<()> {
-        let rows=sqlx::query("SELECT s.id,s.git,coalesce(parent.id,s.id) AS menu_source,i.digest,i.enabled,i.generation::TEXT,v.description,v.capabilities,v.metadata->>'title' AS title FROM component_sources s LEFT JOIN component_sources parent ON parent.git=s.parent_git JOIN component_installations i ON i.source_id=s.id JOIN component_versions v ON v.digest=i.digest WHERE i.tenant_id=$1").bind(tenant).fetch_all(&self.pool).await?;
+    pub async fn append_catalog(
+        &self,
+        session: &SessionContext,
+        catalog: &mut RuntimeCatalog,
+    ) -> Result<()> {
+        let tenant = &session.tenant_id;
+        let rows=sqlx::query("SELECT s.id,s.git,coalesce(parent.id,s.id) AS menu_source,i.digest,i.enabled,i.generation::TEXT,v.description,v.required_permissions,v.capabilities,v.metadata->>'title' AS title FROM component_sources s LEFT JOIN component_sources parent ON parent.git=s.parent_git JOIN component_installations i ON i.source_id=s.id JOIN component_versions v ON v.digest=i.digest WHERE i.tenant_id=$1").bind(tenant).fetch_all(&self.pool).await?;
         for row in rows {
+            let enabled = row.try_get("enabled")?;
+            let required: Vec<String> = row.try_get("required_permissions")?;
+            let accessible = enabled
+                && self
+                    .host_permissions(tenant, &session.user_id, &session.session_id, &required)
+                    .await?;
             append(
                 catalog,
                 row.try_get("id")?,
@@ -64,7 +76,8 @@ impl Components {
                 row.try_get("git")?,
                 row.try_get("digest")?,
                 row.try_get("generation")?,
-                row.try_get("enabled")?,
+                enabled,
+                accessible,
                 row.try_get("title")?,
                 serde_json::from_value(row.try_get("description")?)?,
                 row.try_get::<serde_json::Value, _>("capabilities")?["database"]
@@ -73,7 +86,8 @@ impl Components {
             );
         }
         if tenant == "development" {
-            let development = self.development.read().await;
+            // 释放开发装配锁后再查询外部授权提供者。
+            let development = self.development.read().await.clone();
             for (source, instance) in development.iter() {
                 let parent = instance
                     .bundle
@@ -87,6 +101,14 @@ impl Components {
                     .find(|(_, candidate)| parent == Some(&candidate.repository))
                     .map(|(id, _)| *id)
                     .unwrap_or(*source);
+                let accessible = self
+                    .host_permissions(
+                        tenant,
+                        &session.user_id,
+                        &session.session_id,
+                        &instance.bundle.manifest().plugin.required_permissions,
+                    )
+                    .await?;
                 append(
                     catalog,
                     *source,
@@ -95,6 +117,7 @@ impl Components {
                     instance.bundle.digest().into(),
                     instance.generation.clone(),
                     true,
+                    accessible,
                     instance
                         .bundle
                         .manifest()
@@ -122,6 +145,7 @@ fn append(
     digest: String,
     generation: String,
     enabled: bool,
+    accessible: bool,
     title: String,
     description: Description,
     database: bool,
@@ -145,7 +169,7 @@ fn append(
             ..Default::default()
         },
     });
-    if !enabled {
+    if !enabled || !accessible {
         return;
     }
     for p in description.pages {
@@ -224,6 +248,7 @@ mod tests {
             "revision".into(),
             "generation".into(),
             true,
+            true,
             "用户看到的插件标题".into(),
             description,
             false,
@@ -254,6 +279,7 @@ mod tests {
                 "plugin.git".into(),
                 "revision".into(),
                 "generation".into(),
+                true,
                 true,
                 label.into(),
                 description,

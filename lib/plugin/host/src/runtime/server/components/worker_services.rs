@@ -75,6 +75,9 @@ async fn services(
     let mut result = Vec::new();
     for source in sources {
         let bundle = components.bundle(source, &identity.tenant).await?;
+        if !bundle.manifest().plugin.required_permissions.is_empty() {
+            continue;
+        }
         if bundle
             .manifest()
             .plugin

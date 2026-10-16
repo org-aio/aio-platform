@@ -604,7 +604,7 @@ async fn verify_bridge(state: &RuntimeState, worker: &str) -> Result<()> {
         .bind(format!("https://example.invalid/{source}"))
         .execute(pool)
         .await?;
-    sqlx::query("INSERT INTO component_versions(digest,source_id,archive,version,source_commit,description,metadata) VALUES('workspace-test',$1,$2,'1.0.0','test','{}','{}')").bind(source).bind(Vec::<u8>::new()).execute(pool).await?;
+    sqlx::query("INSERT INTO component_versions(digest,source_id,archive,version,source_commit,description,metadata,permissions,required_permissions) VALUES('workspace-test',$1,$2,'1.0.0','test','{}','{}','{}','{}')").bind(source).bind(Vec::<u8>::new()).execute(pool).await?;
     sqlx::query("INSERT INTO component_installations(tenant_id,source_id,digest,generation) VALUES('test',$1,'workspace-test',$2)").bind(source).bind(Uuid::new_v4()).execute(pool).await?;
     sqlx::query("INSERT INTO component_process_actors(source_id,tenant_id,user_id) VALUES($1,'test','owner'),($1,'test','disabled')").bind(source).execute(pool).await?;
     let mut gateway = Gateway {

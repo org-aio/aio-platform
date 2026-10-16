@@ -19,6 +19,45 @@ migrations = "backend/migrations"
 "#;
 
 #[test]
+fn host_permission_requirements_are_exact_and_do_not_grant_plugin_permissions() -> Result<()> {
+    let manifest = |required: &str| {
+        MANIFEST.replace(
+            "[plugin.runtime]",
+            &format!("[plugin]\nrequired_permissions=[{required}]\n[plugin.runtime]"),
+        )
+    };
+    let parsed = BundleManifest::parse(&manifest("'dictionary:manage','tenant:manage'"))?;
+    assert!(parsed.plugin.permissions.is_empty());
+    assert_eq!(
+        parsed.plugin.required_permissions,
+        ["dictionary:manage", "tenant:manage"]
+    );
+    assert!(
+        BundleManifest::parse(MANIFEST)?
+            .plugin
+            .required_permissions
+            .is_empty()
+    );
+    for invalid in [
+        "''",
+        "'*'",
+        "'dictionary:*'",
+        "'component:source:manage'",
+        "'manage','manage'",
+        "'with space'",
+    ] {
+        assert!(BundleManifest::parse(&manifest(invalid)).is_err());
+    }
+    let too_many = (0..65)
+        .map(|index| format!("'domain:action{index}'"))
+        .collect::<Vec<_>>()
+        .join(",");
+    assert!(BundleManifest::parse(&manifest(&too_many)).is_err());
+    assert!(BundleManifest::parse(&manifest(&format!("'{}'", "x".repeat(129)))).is_err());
+    Ok(())
+}
+
+#[test]
 fn validates_marketplace_parent_and_permissions() -> Result<()> {
     let metadata = "\n[plugin.marketplace]\ntitle='Screen'\nsummary='Workspace'\nlicense='MIT'\nparent='https://github.com/example/parent.git'\nparent_title='父插件'\n";
     let mut package = bundle();

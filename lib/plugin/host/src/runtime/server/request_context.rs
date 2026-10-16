@@ -164,9 +164,7 @@ pub(super) async fn catalog_value(
         )
         .await?;
     if let Some(components) = state.optional_components()? {
-        components
-            .append_catalog(&session.tenant_id, &mut catalog)
-            .await?;
+        components.append_catalog(session, &mut catalog).await?;
     }
     catalog
         .pages

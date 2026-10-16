@@ -1,3 +1,4 @@
+mod access;
 #[cfg(test)]
 mod access_tests;
 mod backends;
@@ -13,6 +14,8 @@ mod dispatch;
 pub(in crate::runtime::server) mod execution;
 pub(in crate::runtime::server) mod executors;
 mod frontend;
+#[cfg(all(test, feature = "wasm", feature = "sidecar"))]
+mod host_access_tests;
 mod installation;
 mod model;
 mod permissions;

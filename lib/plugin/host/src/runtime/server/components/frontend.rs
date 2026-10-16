@@ -38,6 +38,21 @@ async fn page(
         .components()?
         .description(&session.tenant_id, source)
         .await?;
+    let components = state.components()?;
+    let required = components
+        .required_permissions(&session.tenant_id, source, &digest)
+        .await?;
+    ensure!(
+        components
+            .host_permissions(
+                &session.tenant_id,
+                &session.user_id,
+                &session.session_id,
+                &required
+            )
+            .await?,
+        "当前用户无插件所需的宿主权限"
+    );
     let page = description
         .pages
         .into_iter()

@@ -54,7 +54,6 @@ impl Services {
         }
     }
 
-    #[cfg(any(test, feature = "sidecar"))]
     pub(super) fn interactive(
         &self,
         id: &str,

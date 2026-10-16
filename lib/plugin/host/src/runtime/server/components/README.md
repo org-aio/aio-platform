@@ -8,6 +8,8 @@
 
 派生权限使用 `component:<source-id>:<permission>`，组件内仍调用原始权限名，宿主按当前执行来源映射。不同插件声明同名权限不会互相授权，也不能覆盖宿主权限。
 
+系统包另用 `plugin.required_permissions = ["dictionary:manage"]` 声明访问门槛。`access.rs` 按安装摘要读取由不可变清单派生的索引，再通过同一 Dill 容器中的身份和授权 Provider 查询当前会话、成员与角色；该字段不参与 `permissions()` 的成员授权。目录隐藏受保护页面及账户、设置入口，保留安装管理条目。挂载、资源和续期复核同一门槛，`dispatch.rs` 在任何执行器之前要求仍有效的交互上下文；跨插件派生链保留原始用户，后台及设备请求不能借用管理权限。开发装配直接读取当前清单，和持久安装保持一致。
+
 前端挂载只返回当前已验证整包的静态资源摘要和大小，不返回后端或迁移文件。入口通过 HTML 解析器注入宿主资源桥和固定模块加载器，让 Compose 的模块、Wasm 与包内 fetch 复用会话缓存；HTML 与模块加载器继续经过实时授权，资源桥不开放额外网络能力。后台预热由宿主目录统一编排。
 
 ## 开发装配
@@ -19,6 +21,8 @@ Component 前端单独变化时保留同一执行实例；本地服务由 CLI �
 ## 权限与菜单验证
 
 `tenant_installation_grants_members_and_menu_visibility_preserves_runtime` 在独立 `component_market_test` PostgreSQL 与真实 WIT 测试组件上验证成员自动授权、跨租户与已移除成员拒绝、旧权限索引回填、升级回退、启停卸载，以及隐藏菜单不改变运行实例和授权。设置 `AIO_COMPONENT_TEST_DATABASE_URL` 与 `AIO_TEST_HEALTHY_COMPONENT` 后运行 `cargo test -p az-plugin-host --features server,wasm,sidecar --lib components:: -- --include-ignored`。
+
+`tests/component_execution/access.rs` 用真实 HTTP 和替代执行器覆盖宿主权限隔离、旧会话快照撤权、资源及续期拒绝、身份头伪造、跨租户、提供者查询失败、升级回滚、重启回填和默认拒绝。运行 `cargo test -p az-plugin-host --no-default-features --features server --test component_executors access:: -- --ignored`。`protected_wasm_and_sidecar_require_live_interaction_through_the_broker` 使用真实 Wasm、开发态 Sidecar 和 Unix socket broker，覆盖受保护目标跨执行器替换、后台拒绝、派生上下文归属与失效、菜单和设置权限；需要 `wasm,sidecar` feature 和上述两个测试环境变量。这些用例不依赖浏览器或真实容器监督器，不能作为容器隔离或产品系统包迁移完成的证据。
 
 `installation` 统一安装事务、启停卸载与回滚；`delivery` 在同一变更锁内再次检查启用状态、市场版本及排除摘要，自动更新既有安装。回滚仅排除当前市场版本，不永久固定插件；失败沿用安装路径的旧实例恢复。
 

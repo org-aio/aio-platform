@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS component_process_actors (
 );
 
 ALTER TABLE component_versions ADD COLUMN IF NOT EXISTS permissions TEXT[];
+ALTER TABLE component_versions ADD COLUMN IF NOT EXISTS required_permissions TEXT[];
 
 ALTER TABLE component_installations ADD COLUMN IF NOT EXISTS excluded_digest TEXT;
 CREATE TABLE IF NOT EXISTS component_rollouts (

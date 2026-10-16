@@ -8,7 +8,7 @@ use crate::identity::SessionContext;
 pub trait AuthorizationProvider: Any + Send + Sync {
     async fn can_publish(&self, session: &SessionContext) -> anyhow::Result<bool>;
 
-    /// 高权限能力提交前查询当前角色；未实现实时查询时拒绝提交。
+    /// 访问受保护整包或提交高权限能力前查询当前角色；未实现实时查询时拒绝。
     /// 调用者身份由宿主绑定，permissions 是业务权限而非插件身份。
     async fn session_has_permissions(
         &self,

@@ -20,6 +20,9 @@ pub struct ComponentManifest {
     pub dependencies: Vec<az_plugin_manifest::RepositoryDependency>,
     #[serde(default)]
     pub permissions: Vec<String>,
+    /// 访问整包所需的宿主权限；安装不会授予这些权限，调用时由宿主实时校验。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_permissions: Vec<String>,
     pub marketplace: Option<MarketplaceManifest>,
     pub runtime: RuntimeManifest,
     pub frontend: FrontendManifest,
@@ -118,6 +121,20 @@ impl BundleManifest {
                     && p.bytes()
                         .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))),
             "插件权限声明无效"
+        );
+        let mut required = std::collections::HashSet::new();
+        ensure!(
+            plugin.required_permissions.len() <= 64
+                && plugin.required_permissions.iter().all(|permission| {
+                    !permission.is_empty()
+                        && permission.len() <= 128
+                        && !permission.starts_with("component:")
+                        && permission
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
+                        && required.insert(permission)
+                }),
+            "宿主权限要求无效，必须为不重复的明确权限且不能使用 component 命名空间"
         );
         if let Some(marketplace) = &plugin.marketplace {
             ensure!(
