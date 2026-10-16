@@ -1,6 +1,6 @@
 [package]
 name = "aio-host"
-version = "2026.10.15"
+version = "2026.10.16"
 edition.workspace = true
 license.workspace = true
 
