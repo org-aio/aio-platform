@@ -22,10 +22,10 @@ pub(super) async fn install(
     request: &InstallPluginRequest,
 ) -> Result<ActivatedPlugin> {
     anyhow::ensure!(
-        !super::marketplace_removal::is_removed(&state.store.pool, &request.git).await?,
+        !super::marketplace_removal::is_removed(&state.store()?.pool, &request.git).await?,
         "插件已从市场删除，无法安装"
     );
-    if let Some(components) = &state.components
+    if let Some(components) = state.optional_components()?
         && let Some((source, bundle)) = components
             .published(&request.git, request.rev.as_deref())
             .await?
@@ -40,7 +40,7 @@ pub(super) async fn install(
         });
     }
     let publication = state
-        .store
+        .store()?
         .published_marketplace_entry(&request.git, request.rev.as_deref())
         .await
         .context("查找数据库已发布插件失败")?;
@@ -48,7 +48,8 @@ pub(super) async fn install(
         state.restore_package_cache(&publication.rev).await?;
     }
     let (discovered, validation_detail) =
-        resolve_install_candidate(&state.repository, request, publication.as_ref()).await?;
+        resolve_install_candidate(state.repository()?.as_ref(), request, publication.as_ref())
+            .await?;
     activate(state, tenant_id, discovered, validation_detail, None).await
 }
 
@@ -98,13 +99,14 @@ pub(super) async fn install_followed(
     request: &InstallPluginRequest,
 ) -> Result<ActivatedPlugin> {
     let publication = state
-        .store
+        .store()?
         .published_marketplace_entry(&request.git, request.rev.as_deref())
         .await?
         .context("自动更新版本尚未发布")?;
     state.restore_package_cache(&publication.rev).await?;
     let (discovered, detail) =
-        resolve_install_candidate(&state.repository, request, Some(&publication)).await?;
+        resolve_install_candidate(state.repository()?.as_ref(), request, Some(&publication))
+            .await?;
     activate_inner(state, tenant_id, discovered, detail, None, true).await
 }
 
@@ -116,25 +118,25 @@ async fn activate_inner(
     publication: Option<&MarketplaceEntry>,
     following: bool,
 ) -> Result<ActivatedPlugin> {
-    if let Some(source_id) = state.store.source_id(&discovered.git).await? {
+    if let Some(source_id) = state.store()?.source_id(&discovered.git).await? {
         discovered.source_id = source_id;
     }
     let activation_lock = state.activation_lock(tenant_id, &discovered.source_id)?;
     let _activation_guard = activation_lock.lock().await;
     if following {
         let eligible: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM tenant_plugin_bindings b JOIN plugin_sources s ON s.id=b.source_id JOIN marketplace_entries m ON m.git=s.git AND m.source='aio://published' LEFT JOIN delivery_installations i ON i.tenant_id=b.tenant_id AND i.source_id=b.source_id WHERE b.tenant_id=$1 AND b.source_id=$2 AND b.enabled AND m.rev=$3 AND i.excluded_revision IS DISTINCT FROM $3)")
-            .bind(tenant_id).bind(&discovered.source_id).bind(&discovered.revision).fetch_one(&state.store.pool).await?;
+            .bind(tenant_id).bind(&discovered.source_id).bind(&discovered.revision).fetch_one(&state.store()?.pool).await?;
         anyhow::ensure!(eligible, "安装状态或目标版本已改变，取消自动升级");
     }
     let publish_only = if publication.is_some() {
         sqlx::query_scalar::<_,bool>("SELECT EXISTS(SELECT 1 FROM delivery_jobs WHERE package_revision=$3) AND EXISTS(SELECT 1 FROM delivery_installations WHERE tenant_id=$1 AND source_id=$2) AND NOT EXISTS(SELECT 1 FROM tenant_plugin_bindings WHERE tenant_id=$1 AND source_id=$2 AND enabled)")
-            .bind(tenant_id).bind(&discovered.source_id).bind(&discovered.revision).fetch_one(&state.store.pool).await?
+            .bind(tenant_id).bind(&discovered.source_id).bind(&discovered.revision).fetch_one(&state.store()?.pool).await?
     } else {
         false
     };
     let current_revision = discovered.revision.clone();
     state
-        .store
+        .store()?
         .record_lifecycle_event(
             tenant_id,
             &discovered.source_id,
@@ -144,13 +146,13 @@ async fn activate_inner(
         )
         .await?;
     let previous = state
-        .store
+        .store()?
         .active_process(tenant_id, &discovered.source_id)
         .await?;
     let previous_target = if previous.is_some() {
         Some(
             state
-                .store
+                .store()?
                 .bound_runtime(tenant_id, &discovered.source_id)
                 .await?,
         )
@@ -158,7 +160,7 @@ async fn activate_inner(
         None
     };
     let previous_wasm = state
-        .store
+        .store()?
         .active_wasm_revision(tenant_id, &discovered.source_id)
         .await?;
     let instance = if discovered.runtime == PluginRuntime::Process {
@@ -173,7 +175,7 @@ async fn activate_inner(
     };
     if (instance.is_some() || wasm.is_some())
         && let Err(error) = state
-            .store
+            .store()?
             .record_lifecycle_event(
                 tenant_id,
                 &discovered.source_id,
@@ -200,7 +202,7 @@ async fn activate_inner(
     };
     if publish_only {
         let result = state
-            .store
+            .store()?
             .publish_only(tenant_id, discovered, publication.expect("发布元数据"))
             .await;
         let _ = cleanup_new_process(state, instance.as_ref()).await;
@@ -215,7 +217,7 @@ async fn activate_inner(
         return Ok(activated);
     }
     if let Err(error) = state
-        .store
+        .store()?
         .activate(tenant_id, discovered, instance.as_ref(), publication)
         .await
     {

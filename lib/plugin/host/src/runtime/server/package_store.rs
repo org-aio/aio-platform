@@ -19,8 +19,7 @@ CREATE TABLE IF NOT EXISTS plugin_packages (
 "#;
 
 pub(super) async fn migrate(pool: &PgPool) -> Result<()> {
-    sqlx::raw_sql(SCHEMA)
-        .execute(pool)
+    sqlx::Executor::execute(pool, sqlx::raw_sql(SCHEMA))
         .await
         .context("创建二进制插件包表失败")?;
     Ok(())
@@ -139,7 +138,7 @@ impl RuntimeState {
             return Ok(());
         }
         let archive = self
-            .store
+            .store()?
             .package_archive(revision)
             .await?
             .context("插件中心没有保存该内容版本的二进制包")?;
@@ -150,7 +149,7 @@ impl RuntimeState {
             package.rev == revision,
             "数据库插件包与请求的内容版本不一致"
         );
-        self.repository.stage_publish(&package).await?;
+        self.repository()?.stage_publish(&package).await?;
         Ok(())
     }
 }

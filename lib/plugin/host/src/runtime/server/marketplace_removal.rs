@@ -21,17 +21,17 @@ pub(super) async fn remove(
     authenticate_publish_manager(&state, &headers).await?;
     let mut exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM marketplace_entries WHERE git=$1) OR EXISTS(SELECT 1 FROM plugin_sources WHERE git=$1)",
-    ).bind(&request.git).fetch_one(&state.store.pool).await?;
-    if !exists && state.components.is_some() {
+    ).bind(&request.git).fetch_one(&state.store()?.pool).await?;
+    if !exists && state.optional_components()?.is_some() {
         exists = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM component_sources WHERE git=$1)")
             .bind(&request.git)
-            .fetch_one(&state.store.pool)
+            .fetch_one(&state.store()?.pool)
             .await?;
     }
     if !exists {
         return Err(RuntimeError::not_found("插件市场条目不存在"));
     }
-    mark_removed(&state.store.pool, &request.git).await?;
+    mark_removed(&state.store()?.pool, &request.git).await?;
     Ok(Json(RuntimeResponse { data: () }))
 }
 

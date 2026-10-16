@@ -77,7 +77,7 @@ async fn machine_identity_pairing_and_deletion() -> Result<()> {
     assert_eq!(devices[0].id, second.device_id);
     assert!(workers.identity(&first.token).await.is_err());
     let cancelled: i64 = sqlx::query_scalar("SELECT count(*) FROM worker_tasks WHERE worker_id=$1 AND state='cancelled' AND lease IS NULL AND lease_until IS NULL")
-        .bind(&first.device_id).fetch_one(&state.store.pool).await?;
+        .bind(&first.device_id).fetch_one(&state.store()?.pool).await?;
     assert_eq!(cancelled, 2);
 
     // 主机名相同、标识不同的机器互不覆盖；没有标识的历史设备也不猜测合并。
@@ -121,7 +121,7 @@ async fn machine_identity_pairing_and_deletion() -> Result<()> {
 
     // 填满 32 台后，替换已有标识仍然成功；新增机器被拒绝。
     sqlx::query("INSERT INTO worker_devices(id,token_hash,label,platform,capabilities,tenant_id,user_id,state) SELECT 'filler-'||n,'filler-'||n,'filler','darwin','[\"space.scan\"]'::jsonb,$1,$2,'active' FROM generate_series(1,29) n")
-        .bind(&session.tenant_id).bind(&session.user_id).execute(&state.store.pool).await?;
+        .bind(&session.tenant_id).bind(&session.user_id).execute(&state.store()?.pool).await?;
     let replacement = workers.pair(request.clone()).await?;
     workers.approve(&session, &replacement.code).await?;
     assert_eq!(workers.list(&session).await?.len(), 32);
@@ -143,7 +143,7 @@ async fn machine_identity_pairing_and_deletion() -> Result<()> {
     );
     assert!(workers.identity(&replacement.token).await.is_err());
 
-    state.store.pool.close().await;
+    state.store()?.pool.close().await;
     sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
         .execute(&admin)
         .await?;
@@ -315,7 +315,7 @@ async fn worker_pairing_tasks_archives_and_revocation_end_to_end() -> Result<()>
     }
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM worker_tasks WHERE id=$1")
         .bind(&app_id)
-        .fetch_one(&state.store.pool)
+        .fetch_one(&state.store()?.pool)
         .await?;
     assert_eq!(count, 1);
     let claim_id = uuid::Uuid::new_v4().to_string();
@@ -467,7 +467,7 @@ async fn worker_pairing_tasks_archives_and_revocation_end_to_end() -> Result<()>
         .context("缺少自动归档密钥")?;
     let encrypted: Vec<u8> =
         sqlx::query_scalar("SELECT ciphertext FROM worker_vaults WHERE user_id='owner'")
-            .fetch_one(&state.store.pool)
+            .fetch_one(&state.store()?.pool)
             .await?;
     assert!(
         !encrypted
@@ -558,7 +558,7 @@ async fn worker_pairing_tasks_archives_and_revocation_end_to_end() -> Result<()>
     );
     sqlx::query("UPDATE worker_tasks SET lease_until=now()-interval '1 second' WHERE id=$1")
         .bind(&id)
-        .execute(&state.store.pool)
+        .execute(&state.store()?.pool)
         .await?;
     assert!(
         post(
@@ -673,7 +673,7 @@ async fn worker_pairing_tasks_archives_and_revocation_end_to_end() -> Result<()>
         401
     );
     server.abort();
-    state.store.pool.close().await;
+    state.store()?.pool.close().await;
     sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
         .execute(&admin)
         .await?;

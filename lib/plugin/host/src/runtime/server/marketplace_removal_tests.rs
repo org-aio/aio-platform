@@ -55,7 +55,7 @@ async fn removal_http_authorization_not_found_and_install_rejection() -> Result<
     .await?;
     let git = format!("https://example.com/{}.git", uuid::Uuid::new_v4());
     sqlx::query("INSERT INTO marketplace_entries(source,git,rev,title,summary,license,tags,capabilities) VALUES('aio://published',$1,'old','Removal test','','MIT','[]','{}')")
-        .bind(&git).execute(&state.store.pool).await?;
+        .bind(&git).execute(&state.store()?.pool).await?;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let base = format!("http://{}", listener.local_addr()?);
     let server = tokio::spawn(
@@ -65,11 +65,11 @@ async fn removal_http_authorization_not_found_and_install_rejection() -> Result<
     server.abort();
     sqlx::query("DELETE FROM marketplace_plugin_removals WHERE git=$1")
         .bind(&git)
-        .execute(&state.store.pool)
+        .execute(&state.store()?.pool)
         .await?;
     sqlx::query("DELETE FROM marketplace_entries WHERE git=$1")
         .bind(&git)
-        .execute(&state.store.pool)
+        .execute(&state.store()?.pool)
         .await?;
     result
 }

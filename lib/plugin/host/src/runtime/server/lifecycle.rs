@@ -34,9 +34,12 @@ async fn prepare_wasm_revision(
     let activation = state
         .activate_wasm(tenant_id, source_id, revision, artifact)
         .await?;
-    if let Err(error) = state.repository.validate_pages(revision, &activation.pages) {
+    if let Err(error) = state
+        .repository()?
+        .validate_pages(revision, &activation.pages)
+    {
         if activation.created {
-            let _ = state.wasm.deactivate(tenant_id, source_id, revision);
+            let _ = state.wasm()?.deactivate(tenant_id, source_id, revision);
         }
         return Err(error);
     }
@@ -58,7 +61,7 @@ pub(super) async fn prepare_bound_wasm(
     )
     .await?;
     if let Err(error) = state
-        .store
+        .store()?
         .verify_revision_pages(&target.revision_id, &activation.pages)
         .await
     {
@@ -82,7 +85,7 @@ pub(super) fn cleanup_new_wasm(
     activation: Option<&WasmActivation>,
 ) -> anyhow::Result<()> {
     if activation.is_some_and(|activation| activation.created) {
-        state.wasm.deactivate(tenant_id, source_id, revision)?;
+        state.wasm()?.deactivate(tenant_id, source_id, revision)?;
     }
     Ok(())
 }
@@ -98,7 +101,7 @@ pub(super) fn deactivate_previous_wasm(
         && current_revision != Some(previous_revision)
     {
         state
-            .wasm
+            .wasm()?
             .deactivate(tenant_id, source_id, previous_revision)?;
     }
     Ok(())
@@ -112,7 +115,7 @@ pub(super) fn deactivate_bound_wasm(
 ) -> anyhow::Result<()> {
     if target.runtime == PluginRuntime::WasmComponent {
         state
-            .wasm
+            .wasm()?
             .deactivate(tenant_id, source_id, &target.revision)?;
     }
     Ok(())
@@ -136,11 +139,14 @@ pub(super) async fn prepare_process_revision(
     revision: &str,
 ) -> anyhow::Result<(ProcessInstance, Vec<az_plugin_manifest::PageDefinition>)> {
     state.restore_package_cache(revision).await?;
-    state.process.health().await?;
-    let instance = state.process.start(tenant_id, source_id, revision).await?;
+    state.process()?.health().await?;
+    let instance = state
+        .process()?
+        .start(tenant_id, source_id, revision)
+        .await?;
     let validation = async {
-        let pages = state.process.load_pages(&instance.endpoint).await?;
-        state.repository.validate_pages(revision, &pages)?;
+        let pages = state.process()?.load_pages(&instance.endpoint).await?;
+        state.repository()?.validate_pages(revision, &pages)?;
         Ok::<_, anyhow::Error>(pages)
     }
     .await;
@@ -148,7 +154,7 @@ pub(super) async fn prepare_process_revision(
         Ok(pages) => Ok((instance, pages)),
         Err(error) => {
             if instance.created {
-                let _ = state.process.stop(&instance.instance_id).await;
+                let _ = state.process()?.stop(&instance.instance_id).await;
             }
             Err(error)
         }
@@ -163,7 +169,7 @@ pub(super) async fn stop_previous_process(
     if let Some(previous) = previous
         && current.is_none_or(|current| current.instance_id != previous.instance_id)
     {
-        state.process.stop(&previous.instance_id).await?;
+        state.process()?.stop(&previous.instance_id).await?;
     }
     Ok(())
 }
@@ -175,7 +181,7 @@ pub(super) async fn cleanup_new_process(
     if let Some(instance) = instance
         && instance.created
     {
-        state.process.stop(&instance.instance_id).await?;
+        state.process()?.stop(&instance.instance_id).await?;
     }
     Ok(())
 }
@@ -194,16 +200,16 @@ pub(super) async fn restore_process_binding(
         return Ok(());
     }
     let instance = state
-        .process
+        .process()?
         .start(tenant_id, source_id, &target.revision)
         .await?;
     if let Err(error) = state
-        .store
+        .store()?
         .restore_process_instance(tenant_id, source_id, target, &instance)
         .await
     {
         if instance.created {
-            let _ = state.process.stop(&instance.instance_id).await;
+            let _ = state.process()?.stop(&instance.instance_id).await;
         }
         return Err(error);
     }

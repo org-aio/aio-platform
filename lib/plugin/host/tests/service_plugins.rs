@@ -11,7 +11,10 @@ use az_plugin_host::{
     runtime::server::{
         RuntimeState,
         http_error::RuntimeError,
-        plugins::{ClipboardPlugin, RuntimeAssembly, WorkerServicePlugin},
+        plugins::{
+            ClipboardPlugin, DatabasePlugin, PostgresPlugin, RuntimeAssembly, StorePlugin,
+            WorkerServicePlugin,
+        },
     },
 };
 
@@ -108,6 +111,9 @@ async fn external_plugin_replaces_builtin_service_without_replacing_authenticati
     let plugins: Vec<DynPlugin<RuntimeAssembly>> = vec![
         Arc::new(ClipboardPlugin),
         Arc::new(WorkerServicePlugin),
+        Arc::new(StorePlugin),
+        Arc::new(DatabasePlugin),
+        Arc::new(PostgresPlugin),
         Arc::new(ReplacementPlugin),
     ];
     let state = RuntimeState::initialize_with_plugins(
@@ -129,7 +135,7 @@ async fn external_plugin_replaces_builtin_service_without_replacing_authenticati
         "http://{}/api/runtime/clipboard/head",
         listener.local_addr()?
     );
-    let router = az_plugin_host::runtime::server::router(state);
+    let router = az_plugin_host::runtime::server::router(state.clone());
     let server = tokio::spawn(async move { axum::serve(listener, router).await });
     let client = reqwest::Client::builder().no_proxy().build()?;
     let outcome = async {
@@ -146,6 +152,7 @@ async fn external_plugin_replaces_builtin_service_without_replacing_authenticati
         Ok::<_, anyhow::Error>(())
     }
     .await;
+    state.shutdown().await?;
     server.abort();
     outcome
 }

@@ -72,11 +72,15 @@ mod tests {
         let root = tempfile::tempdir()?;
         let components = Components::open(
             pool.clone(),
-            &database,
-            &root.path().join("keys.json"),
-            root.path().join("objects"),
+            &crate::configuration::ComponentStorage {
+                database_url: database.clone(),
+                root: root.path().into(),
+            },
+            Arc::new(crate::runtime::server::components::load_keyring(
+                &root.path().join("keys.json"),
+            )?),
             Arc::new(TestIdentity),
-            dill::Catalog::builder().build(),
+            dill::Catalog::builder().build().weak_ref(),
         )
         .await?;
         let tenant = uuid::Uuid::new_v4().to_string();

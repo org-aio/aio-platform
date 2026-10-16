@@ -19,8 +19,7 @@ CREATE TABLE IF NOT EXISTS plugin_page_states (
 "#;
 
 pub(super) async fn migrate(pool: &PgPool) -> Result<()> {
-    sqlx::raw_sql(SCHEMA)
-        .execute(pool)
+    sqlx::Executor::execute(pool, sqlx::raw_sql(SCHEMA))
         .await
         .context("创建插件页面状态表失败")?;
     Ok(())

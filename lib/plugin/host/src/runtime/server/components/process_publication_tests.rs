@@ -125,11 +125,13 @@ async fn publication_preserves_running_singleton_process() -> Result<()> {
     sqlx::raw_sql("CREATE TABLE IF NOT EXISTS plugin_sources(id TEXT PRIMARY KEY,git TEXT); CREATE TABLE IF NOT EXISTS tenant_plugin_bindings(tenant_id TEXT,source_id TEXT,enabled BOOLEAN);").execute(&pool).await?;
     let components = Components::open(
         pool,
-        &database,
-        &root.path().join("keys.json"),
-        root.path().join("objects"),
+        &crate::configuration::ComponentStorage {
+            database_url: database.clone(),
+            root: root.path().into(),
+        },
+        Arc::new(super::load_keyring(&root.path().join("keys.json"))?),
         Arc::new(super::tests::TestIdentity),
-        dill::Catalog::builder().build(),
+        dill::Catalog::builder().build().weak_ref(),
     )
     .await?;
     let git = format!(

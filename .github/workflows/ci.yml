@@ -43,7 +43,8 @@ jobs:
         run: |
           psql "$AIO_ENHANCEMENT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'REVOKE ALL ON SCHEMA public FROM PUBLIC;'
           cargo test -p az-plugin-host --features server enhancements::tests -- --ignored --test-threads=1
-          cargo test -p az-plugin-host --features server plugins::tests -- --ignored --test-threads=1
+          cargo test -p az-plugin-host --features server plugins::tests -- --test-threads=1
+          cargo test -p az-plugin-host --features server plugins::infrastructure_tests -- --include-ignored --test-threads=1
           cargo test -p az-plugin-host --features server plugins::lifecycle_tests -- --ignored --test-threads=1
           cargo test -p az-plugin-host --features server --test service_plugins -- --ignored
           cargo test -p az-plugin-host --features server protocols::tests -- --ignored

@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     net::SocketAddr,
     sync::{Arc, Mutex},
     time::Duration,
@@ -15,10 +14,6 @@ use az_plugin_core::{Plugin, PluginFuture};
 use futures_util::StreamExt;
 use tokio::{net::TcpListener, sync::Notify};
 
-use super::super::{
-    frontend_access::FrontendAccess, process::ProcessManager, repository::RepositoryInstaller,
-    store::PluginStore, wasm::WasmManager,
-};
 use super::*;
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -197,39 +192,12 @@ async fn runtime(mode: Mode) -> Result<(tempfile::TempDir, RuntimeState, Trace)>
         ..Trace::default()
     };
     // 故意按反序提交插件，验证停止顺序来自内核已排序的构建过程。
-    let extensions = tests::extensions(vec![
-        Arc::new(Dependent),
-        Arc::new(Foundation(trace.clone())),
-    ])
+    let state = RuntimeState::assemble(
+        tests::config(root.path()),
+        Arc::new(tests::NoIdentity),
+        vec![Arc::new(Dependent), Arc::new(Foundation(trace.clone()))],
+    )
     .await?;
-    let pool = extensions
-        .services
-        .get_one::<sqlx::PgPool>()?
-        .as_ref()
-        .clone();
-    let state = RuntimeState {
-        config: Arc::new(crate::configuration::HostConfig {
-            database_url: "postgresql://test@127.0.0.1/kernel_test".into(),
-            cache_root: root.path().into(),
-            public_origin: "http://127.0.0.1".into(),
-            component_storage: None,
-            default_plugins: vec![],
-            delivery: None,
-            development: None,
-        }),
-        transport: super::super::transport::TransportOrigins::from_env("http://127.0.0.1")?,
-        development: Arc::default(),
-        store: Arc::new(PluginStore::new(pool)),
-        repository: Arc::new(RepositoryInstaller::new(root.path().into())),
-        identity: Arc::new(tests::NoIdentity),
-        extensions,
-        activation_locks: Arc::new(Mutex::new(HashMap::new())),
-        publication_slots: Arc::new(tokio::sync::Semaphore::new(2)),
-        frontend: Arc::new(FrontendAccess::new("http://127.0.0.1")?),
-        process: Arc::new(ProcessManager::local()?),
-        wasm: Arc::new(WasmManager::new()?),
-        components: None,
-    };
     Ok((root, state, trace))
 }
 
@@ -430,10 +398,9 @@ async fn shutdown_leaves_unclaimed_publications_durable() -> Result<()> {
         root.path(),
     )
     .await?;
-    state.extensions.start(&state, false).await?;
     let tenant = uuid::Uuid::new_v4().to_string();
     let job = state
-        .store
+        .store()?
         .queue_publish_job(
             &tenant,
             "fixture",
@@ -450,7 +417,7 @@ async fn shutdown_leaves_unclaimed_publications_durable() -> Result<()> {
         .await?;
     state.start_publish_job(job.clone())?;
     tokio::time::timeout(Duration::from_secs(5), state.shutdown()).await??;
-    assert!(state.store.pool.is_closed());
+    assert!(state.store()?.pool.is_closed());
     let pool = sqlx::PgPool::connect(&database).await?;
     let status: String = sqlx::query_scalar("SELECT state FROM plugin_publish_jobs WHERE id=$1")
         .bind(&job.id)

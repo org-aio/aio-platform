@@ -63,7 +63,7 @@ pub(super) async fn report(
 ) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
     let device = device(&state, &headers).await?;
     validate_inventory(&inventory)?;
-    let mut tx = state.store.pool.begin().await?;
+    let mut tx = state.store()?.pool.begin().await?;
     // 设备只能回报自己的记录；撤销配对后不能重新添加安装能力。
     let updated = sqlx::query("UPDATE worker_devices SET capabilities=(SELECT coalesce(jsonb_agg(value),'[]'::jsonb) FROM jsonb_array_elements(capabilities) WHERE value<>'\"tools.install\"'::jsonb) || CASE WHEN $2 THEN '[\"tools.install\"]'::jsonb ELSE '[]'::jsonb END WHERE id=$1 AND state='active'")
         .bind(&device.id).bind(inventory.can_install).execute(&mut *tx).await?;
@@ -107,7 +107,7 @@ async fn inventories(
     session: &SessionContext,
 ) -> Result<BTreeMap<String, (Inventory, i64, bool)>> {
     let rows: Vec<(String, serde_json::Value, i64, bool)> = sqlx::query_as("SELECT i.device_id,i.inventory,(extract(epoch FROM i.updated_at)*1000)::bigint,i.updated_at>now()-interval '2 minutes' FROM worker_tool_inventory i JOIN worker_devices d ON d.id=i.device_id WHERE d.tenant_id=$1 AND d.user_id=$2 AND d.state='active'")
-        .bind(&session.tenant_id).bind(&session.user_id).fetch_all(&state.store.pool).await?;
+        .bind(&session.tenant_id).bind(&session.user_id).fetch_all(&state.store()?.pool).await?;
     rows.into_iter()
         .map(|(id, value, at, fresh)| Ok((id, (serde_json::from_value(value)?, at, fresh))))
         .collect()
@@ -204,7 +204,7 @@ pub(super) async fn list(
     Path(id): Path<String>,
 ) -> Result<Json<RuntimeResponse<Vec<DeviceTool>>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
-    let manifest = storage::entries(&state.store.pool)
+    let manifest = storage::entries(&state.store()?.pool)
         .await?
         .into_iter()
         .find_map(|entry| match entry {
@@ -224,7 +224,7 @@ pub(super) async fn install(
     Json(request): Json<InstallRequest>,
 ) -> Result<Json<RuntimeResponse<Task>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
-    let manifest = storage::get(&state.store.pool, &id, &request.version)
+    let manifest = storage::get(&state.store()?.pool, &id, &request.version)
         .await?
         .ok_or_else(|| RuntimeError::not_found("CLI 条目不存在或已删除"))?;
     let devices = device_tools(&state, &session, &manifest).await?;

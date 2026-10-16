@@ -127,24 +127,13 @@ async fn workspace_access_cancel_and_bridge_isolation() -> Result<()> {
         .query_pairs_mut()
         .append_pair("options", &format!("-c search_path={schema}"));
     let root = tempfile::tempdir()?;
-    let mut state = RuntimeState::isolated_admin_test(
+    let state = RuntimeState::isolated_component_test(
         Arc::new(Identity),
         database.as_str(),
         "http://127.0.0.1:1",
         root.path(),
     )
     .await?;
-    state.components = Some(
-        crate::runtime::server::components::Components::open(
-            state.store.pool.clone(),
-            database.as_str(),
-            &root.path().join("components-keyring.json"),
-            root.path().join("objects"),
-            state.identity.clone(),
-            state.extensions.services.clone(),
-        )
-        .await?,
-    );
     let host_workers = state.service::<dyn RuntimeWorkerService>()?;
     let sidecar_workers = state
         .components()?
@@ -158,7 +147,7 @@ async fn workspace_access_cancel_and_bridge_isolation() -> Result<()> {
     );
     let result = verify_workspace(&state, &base).await;
     server.abort();
-    state.store.pool.close().await;
+    state.store()?.pool.close().await;
     sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
         .execute(&admin)
         .await?;
@@ -381,7 +370,7 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
         "SELECT lease IS NULL AND lease_until IS NULL FROM worker_tasks WHERE id=$1",
     )
     .bind(&running.id)
-    .fetch_one(&state.store.pool)
+    .fetch_one(&state.store()?.pool)
     .await?;
     assert!(cleared);
     // 完成、失败和中断等终态的取消均保持现有结果。
@@ -395,7 +384,7 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
             .bind(terminal)
             .bind(json!({"saved":true}))
             .bind("saved error")
-            .execute(&state.store.pool)
+            .execute(&state.store()?.pool)
             .await?;
         let before = state
             .service::<dyn RuntimeWorkerService>()?
@@ -457,7 +446,7 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
             "SELECT state,lease,lease_until IS NULL AS cleared FROM worker_tasks WHERE id=$1",
         )
         .bind(id)
-        .fetch_one(&state.store.pool)
+        .fetch_one(&state.store()?.pool)
         .await?;
         assert_eq!(row.try_get::<String, _>("state")?, "cancelled");
         assert!(row.try_get::<Option<String>, _>("lease")?.is_none());
@@ -602,9 +591,9 @@ fn desktop_actions_need_an_observation_and_explicit_process_grant() -> Result<()
 }
 
 async fn verify_bridge(state: &RuntimeState, worker: &str) -> Result<()> {
-    let components = state.components.as_ref().context("缺少组件运行时")?;
+    let components = state.components()?;
     let source = Uuid::new_v4();
-    let pool = &state.store.pool;
+    let pool = &state.store()?.pool;
     sqlx::query("INSERT INTO component_sources(id,git) VALUES($1,$2)")
         .bind(source)
         .bind(format!("https://example.invalid/{source}"))
@@ -615,7 +604,7 @@ async fn verify_bridge(state: &RuntimeState, worker: &str) -> Result<()> {
     sqlx::query("INSERT INTO component_process_actors(source_id,tenant_id,user_id) VALUES($1,'test','owner'),($1,'test','disabled')").bind(source).execute(pool).await?;
     let mut gateway = Gateway {
         enhancements: vec![],
-        components: Arc::downgrade(components),
+        components: Arc::downgrade(&components),
         start: super::super::model::Start {
             source,
             tenant: "test".into(),

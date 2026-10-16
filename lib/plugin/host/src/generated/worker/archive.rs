@@ -47,7 +47,7 @@ async fn configuration(
 ) -> Result<Response, RuntimeError> {
     let identity = device(&state, &headers).await?;
     allowed(&identity)?;
-    let mut tx = state.store.pool.begin().await?;
+    let mut tx = state.store()?.pool.begin().await?;
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('worker-vault',0))")
         .execute(&mut *tx)
         .await?;

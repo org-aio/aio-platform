@@ -112,8 +112,7 @@ impl PluginStore {
     }
 
     pub async fn migrate(&self) -> Result<()> {
-        sqlx::raw_sql(SCHEMA)
-            .execute(&self.pool)
+        sqlx::Executor::execute(&self.pool, sqlx::raw_sql(SCHEMA))
             .await
             .context("创建插件运行时表失败")?;
         super::marketplace_store::migrate(&self.pool).await?;
@@ -123,18 +122,26 @@ impl PluginStore {
         super::delivery::migrate(&self.pool).await?;
         page_state::migrate(&self.pool).await?;
         super::navigation::migrate(&self.pool).await?;
-        sqlx::raw_sql(include_str!("../../generated/worker/schema.sql"))
-            .execute(&self.pool)
-            .await?;
-        sqlx::raw_sql(include_str!("../../generated/personal_config/schema.sql"))
-            .execute(&self.pool)
-            .await?;
-        sqlx::raw_sql(include_str!("../../generated/worker_webview/schema.sql"))
-            .execute(&self.pool)
-            .await?;
-        sqlx::raw_sql(include_str!("../../generated/clipboard/schema.sql"))
-            .execute(&self.pool)
-            .await?;
+        sqlx::Executor::execute(
+            &self.pool,
+            sqlx::raw_sql(include_str!("../../generated/worker/schema.sql")),
+        )
+        .await?;
+        sqlx::Executor::execute(
+            &self.pool,
+            sqlx::raw_sql(include_str!("../../generated/personal_config/schema.sql")),
+        )
+        .await?;
+        sqlx::Executor::execute(
+            &self.pool,
+            sqlx::raw_sql(include_str!("../../generated/worker_webview/schema.sql")),
+        )
+        .await?;
+        sqlx::Executor::execute(
+            &self.pool,
+            sqlx::raw_sql(include_str!("../../generated/clipboard/schema.sql")),
+        )
+        .await?;
         self.migrate_published_source_ids().await?;
         Ok(())
     }

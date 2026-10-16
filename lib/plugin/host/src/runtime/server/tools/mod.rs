@@ -49,7 +49,7 @@ async fn manifest(
         }
         .to_string(),
     )?;
-    let value = storage::get(&state.store.pool, &id, &version)
+    let value = storage::get(&state.store()?.pool, &id, &version)
         .await?
         .ok_or_else(|| RuntimeError::not_found("该工具版本尚未收录于插件市场"))?;
     Ok(Json(value))

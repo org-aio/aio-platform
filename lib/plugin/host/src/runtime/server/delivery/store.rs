@@ -3,9 +3,7 @@ use az_plugin_delivery::{BuildJob, BuildRecipe};
 use sqlx::{PgPool, Row};
 
 pub(in crate::runtime::server) async fn migrate(pool: &PgPool) -> Result<()> {
-    sqlx::raw_sql(include_str!("schema.sql"))
-        .execute(pool)
-        .await?;
+    sqlx::Executor::execute(pool, sqlx::raw_sql(include_str!("schema.sql"))).await?;
     Ok(())
 }
 

@@ -28,8 +28,7 @@ CREATE TABLE IF NOT EXISTS marketplace_plugin_removals (
 pub(super) const PUBLISHED_REGISTRY_SOURCE: &str = "aio://published";
 
 pub(super) async fn migrate(pool: &PgPool) -> Result<()> {
-    sqlx::raw_sql(SCHEMA)
-        .execute(pool)
+    sqlx::Executor::execute(pool, sqlx::raw_sql(SCHEMA))
         .await
         .context("创建市场缓存表失败")?;
     super::official_market::migrate(pool).await?;

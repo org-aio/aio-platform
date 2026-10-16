@@ -19,18 +19,10 @@ async fn delivery_publishes_bundles_and_respects_tenant_choices() -> Result<()> 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let base = format!("http://{}", listener.local_addr()?);
     let identity = Arc::new(super::tests::TestIdentity);
-    let mut state =
-        RuntimeState::isolated_admin_test(identity.clone(), &database, &base, root.path()).await?;
-    let components = Components::open(
-        state.store.pool.clone(),
-        &database,
-        &root.path().join("key.json"),
-        root.path().join("objects"),
-        identity,
-        state.extensions.services.clone(),
-    )
-    .await?;
-    state.components = Some(components.clone());
+    let state =
+        RuntimeState::isolated_component_test(identity.clone(), &database, &base, root.path())
+            .await?;
+    let components = state.components()?;
     let router = crate::runtime::server::routes::router(state.clone());
     let server = tokio::spawn(async move { axum::serve(listener, router).await });
     let client = Client::new();
@@ -182,7 +174,7 @@ async fn delivery_publishes_bundles_and_respects_tenant_choices() -> Result<()> 
     .await?;
     let failed: String = sqlx::query_scalar("SELECT state FROM delivery_jobs WHERE id=$1")
         .bind(failed_job.id)
-        .fetch_one(&state.store.pool)
+        .fetch_one(&state.store()?.pool)
         .await?;
     assert_eq!(failed, "failed");
     let generation: Uuid = sqlx::query_scalar(
@@ -212,7 +204,7 @@ async fn target(state: &RuntimeState, git: &str, sequence: u32) -> Result<BuildJ
     let sha = format!("{sequence:040x}");
     let lease = Uuid::new_v4().to_string();
     let recipe = json!({"environment":"fullstack","command":["sh","scripts/build.sh"]});
-    let mut tx = state.store.pool.begin().await?;
+    let mut tx = state.store()?.pool.begin().await?;
     sqlx::query("INSERT INTO delivery_sources(git,branch,desired_sha) VALUES($1,'main',$2) ON CONFLICT(git) DO UPDATE SET desired_sha=$2").bind(git).bind(&sha).execute(&mut *tx).await?;
     sqlx::query("UPDATE delivery_jobs SET state='superseded' WHERE git=$1 AND state IN ('building','uploaded','publishing')").bind(git).execute(&mut *tx).await?;
     let id: i64 = sqlx::query_scalar("INSERT INTO delivery_jobs(git,source_revision,recipe,state,lease,lease_until) VALUES($1,$2,$3,'building',$4,now()+interval '5 minutes') RETURNING id")

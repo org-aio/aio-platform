@@ -10,15 +10,15 @@ pub use super::supervisor::ProcessInstance;
 
 impl RuntimeState {
     pub async fn cache_test_package(&self, package: &PluginPackage) -> Result<()> {
-        self.store.save_package(package).await?;
-        self.repository.stage_publish(package).await?;
+        self.store()?.save_package(package).await?;
+        self.repository()?.stage_publish(package).await?;
         Ok(())
     }
     pub async fn has_test_package(&self, revision: &str) -> Result<bool> {
-        Ok(self.store.package_archive(revision).await?.is_some())
+        Ok(self.store()?.package_archive(revision).await?.is_some())
     }
-    pub fn database(&self) -> &sqlx::PgPool {
-        &self.store.pool
+    pub fn database(&self) -> Result<sqlx::PgPool> {
+        Ok(self.service::<sqlx::PgPool>()?.as_ref().clone())
     }
     pub async fn hold_publications(&self) -> Result<tokio::sync::OwnedSemaphorePermit> {
         Ok(self.publication_slots.clone().acquire_many_owned(2).await?)

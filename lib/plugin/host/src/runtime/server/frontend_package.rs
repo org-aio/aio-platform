@@ -17,7 +17,7 @@ pub(super) async fn prepare(
     let mut cache = state.frontend.packages.lock().await;
     if let Some(package) = cache.get(revision)
         && state
-            .repository
+            .repository()?
             .artifact(revision, &format!("{}/{entry}", package.path))
             .is_ok()
     {
@@ -32,7 +32,7 @@ pub(super) async fn prepare(
         return Ok(package);
     }
     let archive = state
-        .store
+        .store()?
         .package_archive(revision)
         .await?
         .context("前端挂载要求完整二进制包")?;
@@ -51,7 +51,7 @@ pub(super) async fn prepare(
         .frontend
         .context("插件未声明前端产物")?
         .path;
-    state.repository.stage_publish(&package).await?;
+    state.repository()?.stage_publish(&package).await?;
     let metadata = Arc::new(FrontendPackage {
         path,
         asset_sizes: verified

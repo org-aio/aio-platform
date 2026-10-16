@@ -58,7 +58,7 @@ pub(in crate::runtime::server) async fn exercise_rollouts(
         .error_for_status()?;
     sqlx::query("UPDATE delivery_jobs SET next_attempt_at=now() WHERE id=$1")
         .bind(first_job.id)
-        .execute(&state.store.pool)
+        .execute(&state.store()?.pool)
         .await?;
     let resumed = client
         .post(format!("{base}/api/internal/delivery/claim"))
@@ -74,7 +74,7 @@ pub(in crate::runtime::server) async fn exercise_rollouts(
     let first_job = resumed;
     let first = publish(state, &client, base, &token, &first_job, manifest, pages).await?;
     let source = state
-        .store
+        .store()?
         .source_id(&git)
         .await?
         .context("首次发布必须自动安装")?;
@@ -94,14 +94,14 @@ pub(in crate::runtime::server) async fn exercise_rollouts(
         .await?;
     }
     state
-        .store
+        .store()?
         .set_enabled("default", &source, false, None)
         .await?;
     state
-        .store
+        .store()?
         .set_enabled(&tenants[1], &source, false, None)
         .await?;
-    state.store.uninstall(&tenants[2], &source).await?;
+    state.store()?.uninstall(&tenants[2], &source).await?;
 
     let failed = target(state, &client, base, &token, &git, 2).await?;
     client
@@ -121,28 +121,28 @@ pub(in crate::runtime::server) async fn exercise_rollouts(
     assert_binding(state, &tenants[0], &source, Some((&first, true))).await?;
     let status: String = sqlx::query_scalar("SELECT state FROM delivery_jobs WHERE id=$1")
         .bind(failed.id)
-        .fetch_one(&state.store.pool)
+        .fetch_one(&state.store()?.pool)
         .await?;
     assert_eq!(status, "failed");
 
     let second_job = target(state, &client, base, &token, &git, 3).await?;
     let second = publish(state, &client, base, &token, &second_job, manifest, pages).await?;
     sqlx::query("INSERT INTO delivery_rollouts(tenant_id,source_id,revision,state,error) VALUES($1,$2,$3,'failed','租户暂时不可用')")
-        .bind(&tenants[0]).bind(&source).bind(&second).execute(&state.store.pool).await?;
+        .bind(&tenants[0]).bind(&source).bind(&second).execute(&state.store()?.pool).await?;
     super::rollout::tick(state).await?;
     assert_binding(state, &tenants[0], &source, Some((&first, true))).await?;
     assert_binding(state, &tenants[3], &source, Some((&second, true))).await?;
     sqlx::query("UPDATE delivery_rollouts SET updated_at=now()-interval '2 minutes' WHERE tenant_id=$1 AND source_id=$2")
-        .bind(&tenants[0]).bind(&source).execute(&state.store.pool).await?;
+        .bind(&tenants[0]).bind(&source).execute(&state.store()?.pool).await?;
     super::rollout::tick(state).await?;
     assert_binding(state, "default", &source, Some((&first, false))).await?;
     assert_binding(state, &tenants[0], &source, Some((&second, true))).await?;
     assert_binding(state, &tenants[1], &source, Some((&first, false))).await?;
     assert_binding(state, &tenants[2], &source, None).await?;
-    let previous = state.store.rollback_target(&tenants[0], &source).await?;
+    let previous = state.store()?.rollback_target(&tenants[0], &source).await?;
     assert_eq!(previous.revision, first);
     state
-        .store
+        .store()?
         .rollback_to(&tenants[0], &source, &previous, None)
         .await?;
     super::rollout::tick(state).await?;
@@ -180,14 +180,14 @@ pub(in crate::runtime::server) async fn exercise_rollouts(
         "SELECT count(*) FROM plugin_lifecycle_events WHERE source_id=$1 AND lifecycle='activate'",
     )
     .bind(&source)
-    .fetch_one(&state.store.pool)
+    .fetch_one(&state.store()?.pool)
     .await?;
     super::rollout::tick(state).await?;
     let after: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM plugin_lifecycle_events WHERE source_id=$1 AND lifecycle='activate'",
     )
     .bind(&source)
-    .fetch_one(&state.store.pool)
+    .fetch_one(&state.store()?.pool)
     .await?;
     assert_eq!(before, after, "无变化轮询不得再次激活");
     println!(
@@ -205,7 +205,7 @@ async fn target(
     sequence: u32,
 ) -> Result<BuildJob> {
     let sha = format!("{sequence:040x}");
-    let mut tx = state.store.pool.begin().await?;
+    let mut tx = state.store()?.pool.begin().await?;
     sqlx::query("INSERT INTO delivery_sources(git,branch,desired_sha) VALUES($1,'main',$2) ON CONFLICT(git) DO UPDATE SET desired_sha=$2")
         .bind(git).bind(&sha).execute(&mut *tx).await?;
     sqlx::query("UPDATE delivery_jobs SET state='superseded',lease_until=NULL WHERE git=$1 AND state IN ('queued','building','uploaded','publishing')")
@@ -276,7 +276,7 @@ async fn publish(
         .error_for_status()?;
     for _ in 0..100 {
         if state
-            .store
+            .store()?
             .published_marketplace_entry(&job.git, None)
             .await?
             .is_some_and(|entry| entry.rev == package.rev)
@@ -295,7 +295,7 @@ async fn assert_binding(
     expected: Option<(&str, bool)>,
 ) -> Result<()> {
     let binding: Option<(String,bool)> = sqlx::query_as("SELECT r.revision,b.enabled FROM tenant_plugin_bindings b JOIN plugin_revisions r ON r.id=b.revision_id WHERE b.tenant_id=$1 AND b.source_id=$2")
-        .bind(tenant).bind(source).fetch_optional(&state.store.pool).await?;
+        .bind(tenant).bind(source).fetch_optional(&state.store()?.pool).await?;
     ensure!(
         binding
             .as_ref()

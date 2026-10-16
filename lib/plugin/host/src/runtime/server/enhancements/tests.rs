@@ -197,29 +197,18 @@ impl crate::identity::IdentityProvider for Identity {
 #[tokio::test]
 #[ignore = "需要独立本机 PostgreSQL"]
 async fn enhancement_http_requires_manager_and_reports_generation_conflicts() -> Result<()> {
-    use crate::runtime::server::{RuntimeState, components::Components};
+    use crate::runtime::server::RuntimeState;
     use std::sync::Arc;
     let database = database()?;
     let root = tempfile::tempdir()?;
     let identity = Arc::new(Identity);
-    let mut state = RuntimeState::isolated_admin_test(
+    let state = RuntimeState::isolated_component_test(
         identity.clone(),
         &database,
         "http://127.0.0.1",
         root.path(),
     )
     .await?;
-    state.components = Some(
-        Components::open(
-            state.store.pool.clone(),
-            &database,
-            &root.path().join("keyring.json"),
-            root.path().join("objects"),
-            identity,
-            state.extensions.services.clone(),
-        )
-        .await?,
-    );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let base = format!("http://{}/api/runtime/enhancements", listener.local_addr()?);
     let router = super::router().with_state(state);

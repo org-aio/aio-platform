@@ -18,7 +18,7 @@ pub(super) async fn create_publish_credential(
     let session = authenticate_publish_manager(&state, &headers).await?;
     validate_git(&request.git)?;
     let credential = state
-        .store
+        .store()?
         .create_publish_credential(&session.tenant_id, &request.git)
         .await?;
     Ok(Json(RuntimeResponse { data: credential }))
@@ -31,7 +31,7 @@ pub(super) async fn revoke_publish_credential(
 ) -> Result<StatusCode, RuntimeError> {
     let session = authenticate_publish_manager(&state, &headers).await?;
     state
-        .store
+        .store()?
         .revoke_publish_credential(&session.tenant_id, &credential_id)
         .await?;
     Ok(StatusCode::NO_CONTENT)

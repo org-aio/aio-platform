@@ -4,8 +4,7 @@ use anyhow::Result;
 use sqlx::PgPool;
 
 pub(in crate::runtime::server) async fn migrate(pool: &PgPool) -> Result<()> {
-    sqlx::raw_sql("CREATE TABLE IF NOT EXISTS tenant_hidden_plugin_menus (tenant_id TEXT NOT NULL, source_id TEXT NOT NULL, PRIMARY KEY(tenant_id,source_id))")
-        .execute(pool).await?;
+    sqlx::Executor::execute(pool, sqlx::raw_sql("CREATE TABLE IF NOT EXISTS tenant_hidden_plugin_menus (tenant_id TEXT NOT NULL, source_id TEXT NOT NULL, PRIMARY KEY(tenant_id,source_id))")).await?;
     Ok(())
 }
 
@@ -57,7 +56,7 @@ pub(in crate::runtime::server) async fn apply(
     tenant: &str,
     catalog: &mut RuntimeCatalog,
 ) -> Result<()> {
-    let hidden = hidden_sources(&state.store.pool, tenant).await?;
+    let hidden = hidden_sources(&state.store()?.pool, tenant).await?;
     if hidden.is_empty() {
         return Ok(());
     }
@@ -73,7 +72,7 @@ pub(in crate::runtime::server) async fn apply(
         );
     }
     let pages = sqlx::query_scalar::<_, serde_json::Value>("SELECT r.pages FROM tenant_plugin_bindings b JOIN plugin_revisions r ON r.id=b.revision_id WHERE b.tenant_id=$1 AND b.enabled AND b.source_id=ANY($2)")
-        .bind(tenant).bind(&hidden).fetch_all(&state.store.pool).await?;
+        .bind(tenant).bind(&hidden).fetch_all(&state.store()?.pool).await?;
     for pages in pages {
         catalog.hidden_pages.extend(
             serde_json::from_value::<Vec<PageDefinition>>(pages)?

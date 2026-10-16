@@ -52,9 +52,12 @@ pub(super) fn prepare(state: &RuntimeState, artifact: &DevArtifact) -> Result<st
         az_plugin_development::backend_digest(&artifact.backend)? == artifact.backend_digest,
         "后端产物摘要不匹配"
     );
-    let root = state.repository.cache_root.join(&artifact.content_digest);
+    let root = state
+        .repository()?
+        .cache_root
+        .join(&artifact.content_digest);
     let staging = state
-        .repository
+        .repository()?
         .cache_root
         .join(format!(".development-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&staging)?;

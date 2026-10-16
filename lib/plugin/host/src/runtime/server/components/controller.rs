@@ -105,12 +105,12 @@ async fn documentation(
     body: String,
 ) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
     let publisher = authenticate_publisher(&state, &headers).await?;
-    let git:String=sqlx::query_scalar("SELECT s.git FROM component_sources s JOIN component_versions v ON v.source_id=s.id WHERE v.digest=$1").bind(&revision).fetch_optional(&state.store.pool).await?.context("发布版本不存在")?;
+    let git:String=sqlx::query_scalar("SELECT s.git FROM component_sources s JOIN component_versions v ON v.source_id=s.id WHERE v.digest=$1").bind(&revision).fetch_optional(&state.store()?.pool).await?.context("发布版本不存在")?;
     authorize_publish_target(publisher, &git, None)?;
     sqlx::query("UPDATE component_versions SET readme=$2 WHERE digest=$1 AND readme=''")
         .bind(revision)
         .bind(body)
-        .execute(&state.store.pool)
+        .execute(&state.store()?.pool)
         .await?;
     Ok(Json(RuntimeResponse { data: () }))
 }

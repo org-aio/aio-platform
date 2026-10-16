@@ -50,7 +50,7 @@ pub(super) struct Components {
     objects: PathBuf,
     services: Arc<services::Services>,
     identity: Arc<dyn crate::identity::IdentityProvider>,
-    runtime_services: dill::Catalog,
+    runtime_services: dill::CatalogWeakRef,
     slots: Mutex<HashMap<(Uuid, String), Arc<PersistentComponentSlot>>>,
     pub mutations: Mutex<()>,
     processes: process::Processes,
@@ -59,29 +59,20 @@ pub(super) struct Components {
 impl Components {
     pub async fn open(
         pool: PgPool,
-        database: &str,
-        key_path: &Path,
-        objects: PathBuf,
+        storage: &crate::configuration::ComponentStorage,
+        keyring: Arc<Keyring>,
         identity: Arc<dyn crate::identity::IdentityProvider>,
-        runtime_services: dill::Catalog,
+        runtime_services: dill::CatalogWeakRef,
     ) -> Result<Arc<Self>> {
         sqlx::raw_sql(include_str!("schema.sql"))
             .execute(&pool)
             .await?;
         permissions::backfill(&pool).await?;
-        let provisioner = DatabaseProvisioner::connect(database).await?;
-        let keyring = Arc::new(load_keyring(key_path)?);
-        let engine = ComponentEngine::with_cache(
-            &key_path.parent().unwrap_or(Path::new(".")).join("compiled"),
-        )?;
+        let provisioner = DatabaseProvisioner::connect(&storage.database_url).await?;
+        let engine = ComponentEngine::with_cache(&storage.root.join("compiled"))?;
         let root = std::env::var_os("AIO_PROCESS_ROOT")
             .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                key_path
-                    .parent()
-                    .unwrap_or(Path::new("."))
-                    .join("processes")
-            });
+            .unwrap_or_else(|| storage.root.join("processes"));
         let supervisor = process::Processes::client()?;
         let enhancements = Arc::new(super::enhancements::Enhancements::open(pool.clone()).await?);
         let services = Arc::new(services::Services::with_enhancements(enhancements.clone()));
@@ -92,7 +83,7 @@ impl Components {
             provisioner,
             engine,
             keyring,
-            objects,
+            objects: storage.root.join("objects"),
             services,
             identity,
             runtime_services,

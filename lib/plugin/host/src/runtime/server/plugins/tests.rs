@@ -90,11 +90,19 @@ async fn probe(
 pub(super) async fn extensions(
     plugins: Vec<DynPlugin<RuntimeAssembly>>,
 ) -> Result<Arc<RuntimeExtensions>> {
-    let root = tempfile::tempdir()?;
-    let keyring = super::super::components::load_keyring(&root.path().join("keyring.json"))?;
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .connect_lazy("postgresql://test@127.0.0.1/kernel_test")?;
-    assemble(pool, keyring, plugins).await
+    assemble(Arc::new(config(std::path::Path::new("/unused"))), plugins).await
+}
+
+pub(super) fn config(root: &std::path::Path) -> crate::configuration::HostConfig {
+    crate::configuration::HostConfig {
+        database_url: "deliberately invalid: no database".into(),
+        cache_root: root.join("cache"),
+        public_origin: "http://127.0.0.1".into(),
+        component_storage: None,
+        default_plugins: Vec::new(),
+        delivery: None,
+        development: None,
+    }
 }
 
 #[tokio::test]
@@ -106,20 +114,17 @@ async fn empty_profile_has_no_implicit_services_or_routes() -> Result<()> {
 }
 
 #[tokio::test]
-async fn default_profile_resolves_shared_services_and_rejects_missing_requirements() -> Result<()> {
+async fn default_profile_declares_services_and_rejects_missing_requirements() -> Result<()> {
     let extensions = extensions(default_plugins()?).await?;
-    let first = extensions.services.get_one::<dyn WorkerService>()?;
-    let second = extensions.services.get_one::<dyn WorkerService>()?;
-    assert!(Arc::ptr_eq(&first, &second));
-    extensions
-        .services
-        .get_one::<dyn crate::generated::clipboard::ClipboardService>()?;
-    extensions
-        .services
-        .get_one::<dyn crate::generated::personal_config::PersonalConfigService>()?;
-    extensions
-        .services
-        .get_one::<dyn crate::generated::worker_webview::WorkerWebviewService>()?;
+    // 声明阶段只校验绑定，不会提前创建尚未初始化的数据库服务。
+    assert_eq!(
+        extensions
+            .services
+            .builders_for::<dyn WorkerService>()
+            .count(),
+        1
+    );
+    assert!(extensions.services.get_one::<sqlx::PgPool>().is_err());
     assert!(
         self::extensions(vec![Arc::new(ClipboardPlugin)])
             .await
@@ -145,28 +150,18 @@ async fn application_can_install_its_own_service_and_route_provider() -> Result<
 }
 
 #[tokio::test]
-#[ignore = "需要独立本机 PostgreSQL"]
 async fn selected_plugins_control_real_http_routes() -> Result<()> {
-    let database = std::env::var("AIO_ENHANCEMENT_TEST_DATABASE_URL")?;
-    anyhow::ensure!(
-        database.contains("127.0.0.1") && database.contains("_test"),
-        "只接受本机独立测试库"
-    );
     let root = tempfile::tempdir()?;
     let state = RuntimeState::initialize_with_plugins(
-        crate::configuration::HostConfig {
-            database_url: database,
-            cache_root: root.path().join("cache"),
-            public_origin: "http://127.0.0.1".into(),
-            component_storage: None,
-            default_plugins: Vec::new(),
-            delivery: None,
-            development: None,
-        },
+        config(root.path()),
         Arc::new(NoIdentity),
         vec![Arc::new(ProbePlugin)],
     )
     .await?;
+    assert!(state.service::<sqlx::PgPool>().is_err());
+    assert!(state.service::<az_plugin_runtime::Keyring>().is_err());
+    assert!(state.service::<super::super::wasm::WasmManager>().is_err());
+    assert!(!root.path().join("cache").exists());
     let trace = state.service::<Trace>()?;
     assert_eq!(
         *trace
@@ -177,7 +172,7 @@ async fn selected_plugins_control_real_http_routes() -> Result<()> {
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let origin = format!("http://{}", listener.local_addr()?);
-    let router = super::super::router(state);
+    let router = super::super::router(state.clone());
     let server = tokio::spawn(async move { axum::serve(listener, router).await });
     let client = reqwest::Client::builder().no_proxy().build()?;
     let outcome = async {
@@ -205,6 +200,7 @@ async fn selected_plugins_control_real_http_routes() -> Result<()> {
         Ok::<_, anyhow::Error>(())
     }
     .await;
+    state.shutdown().await?;
     server.abort();
     outcome
 }

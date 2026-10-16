@@ -56,10 +56,6 @@ pub struct WasmManager {
 }
 
 impl WasmManager {
-    pub fn new() -> Result<Self> {
-        Self::with_cache(None)
-    }
-
     pub(super) fn with_cache(directory: Option<&Path>) -> Result<Self> {
         let mut config = Config::new();
         config
@@ -307,7 +303,7 @@ mod tests {
 
     #[test]
     fn starts_without_active_instances() -> Result<()> {
-        let manager = WasmManager::new()?;
+        let manager = WasmManager::with_cache(None)?;
         assert_eq!(manager.active_instances()?, 0);
         Ok(())
     }
@@ -316,7 +312,7 @@ mod tests {
     #[ignore = "需要 AIO_TEST_WASM_COMPONENT 指向真实插件产物"]
     fn activates_reuses_and_destroys_tenant_instances() -> Result<()> {
         let artifact = std::env::var("AIO_TEST_WASM_COMPONENT")?;
-        let manager = WasmManager::new()?;
+        let manager = WasmManager::with_cache(None)?;
         let revision = "a".repeat(40);
         let first = manager.activate("tenant-a", "source-a", &revision, Path::new(&artifact))?;
         assert!(first.created);

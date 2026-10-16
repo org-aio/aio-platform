@@ -1,6 +1,6 @@
 # 宿主能力插件
 
-宿主通过 `Plugin<RuntimeAssembly>` 复用 `az-plugin-core` 的 TypeId 身份和依赖排序，通过 Dill 提供服务。`RuntimeState` 不再拥有剪贴板、个人配置、设备和设备视图的固定服务字段；HTTP、组件 broker 和 sidecar 使用同一个服务容器。
+宿主通过 `Plugin<RuntimeAssembly>` 复用 `az-plugin-core` 的 TypeId 身份和依赖排序，通过 Dill 提供服务。`RuntimeState` 不再拥有剪贴板、个人配置、设备、设备视图、数据库、包仓库和执行资源的固定字段；HTTP、组件 broker 和 sidecar 使用同一个服务容器。
 
 先看 `RuntimeAssembly`，再看 `builtins.rs` 中的默认平台组合。插件可以注册服务、贡献 HTTP 路由，以及注册恢复、就绪和停止动作。所有恢复动作成功后才执行就绪动作；省略交付插件也会省略它的后台启动动作。`require_service::<dyn Trait>()` 检查接口的唯一绑定，允许应用提供其他实现。`Plugin::dependencies()` 只声明必须先构建的具体插件类型，不能用它强制绑定某个默认服务实现。
 
@@ -20,9 +20,9 @@ let plugins = az_plugin_core::PluginGroupBuilder::default()
 let state = RuntimeState::initialize_with_plugins(config, identity, plugins).await?;
 ```
 
-插件的 `build` 负责声明装配，不应启动后台任务或执行迁移。将异步恢复交给 `on_start::<Self>`，将后台工作交给 `on_ready::<Self>`，将资源清理交给 `on_stop::<Self>`。路由通过 `state.service::<dyn MyService>()?` 获取服务。长连接在升级前解析服务，并把同一个 `Arc` 传入会话；身份与撤权检查仍在会话期间持续执行。
+插件的 `build` 负责声明装配，不应启动后台任务或执行迁移。将资源初始化与迁移交给 `on_initialize::<Self>`，将异步恢复交给 `on_start::<Self>`，将后台工作交给 `on_ready::<Self>`，将资源清理交给 `on_stop::<Self>`。路由通过 `state.service::<dyn MyService>()?` 获取服务。长连接在升级前解析服务，并把同一个 `Arc` 传入会话；身份与撤权检查仍在会话期间持续执行。
 
-生命周期顺序来自内核的 `App::plugin_order()`，身份始终是具体类型的 `TypeId`。进入插件的启动动作前登记停止动作，因此停止回调必须能处理部分初始化，也不能删除安装记录或已经提交的业务数据。所有启动动作成功后才执行就绪动作；失败、panic 或取消会先停止接收新任务、等待已有工作完成，再按依赖反序执行停止回调。一个回调失败不会跳过其他插件，错误会汇总返回；重复关闭不重复执行回调，并保留第一次的结果。
+生命周期顺序来自内核的 `App::plugin_order()`，身份始终是具体类型的 `TypeId`。进入插件的初始化动作前登记停止动作，因此停止回调必须能处理部分初始化，也不能删除安装记录或已经提交的业务数据。所有启动动作成功后才执行就绪动作；失败、panic 或取消会先停止接收新任务、等待已有工作完成，再按依赖反序执行停止回调。一个回调失败不会跳过其他插件，错误会汇总返回；重复关闭不重复执行回调，并保留第一次的结果。
 
 ```rust,ignore
 assembly.on_ready::<Self>(|state, tasks| Box::pin(async move {
@@ -48,8 +48,60 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 
 停止只释放当前宿主拥有的 Sidecar、broker、数据库转发与 Wasm 内存实例，保留 PostgreSQL 中的安装状态、授权与活动版本。旧监督器报告为已存在的进程不会被当成本次创建的资源停止。开发 Sidecar 的进程由 CLI 所有，宿主只关闭自己的 broker 和转发。协作取消要求回调和任务最终返回；无限阻塞或忽略取消的原生插件仍需要外部监督器处理。关闭有错误时仍执行其余清理，下一次启动由现有恢复/孤立实例清理流程继续恢复。
 
-这是原生宿主插件的装配边界，还不包含在线卸载、单插件重启或脚本服务代理。HTTP 路由不能替代能力授权。数据库连接、执行器创建与部分组件内部装配仍待迁移，完整目标见 [一切皆插件验收清单](../../../../../../../docs/plugin/everything-as-plugin.md)。
+这是原生宿主插件的装配边界，还不包含在线卸载、单插件重启或脚本服务代理。HTTP 路由不能替代能力授权。数据库连接、密钥来源与执行器创建已由所选插件管理；组件内部具体执行器、存储及分发契约仍待迁移，完整目标见 [一切皆插件验收清单](../../../../../../../docs/plugin/everything-as-plugin.md)。
 
-验证：`cargo test -p az-plugin-host --features server plugins::tests`。真实 HTTP 组合验收还需要设置 `AIO_ENHANCEMENT_TEST_DATABASE_URL` 后添加 `-- --ignored`。
+验证：`cargo test -p az-plugin-host --features server plugins::tests`。真实 HTTP 精简组合验收使用无效数据库地址，无需数据库即可运行。
 
 故障验收：`cargo test -p az-plugin-host --features server lifecycle_tests` 覆盖真实端口释放、启动/就绪失败、取消等待、回调 panic、后台工作提交与 HTTP 收尾。`process::shutdown_tests` 使用真实 Unix socket 监督器协议验证只停止本次创建的进程；Component 的持久化停止验收复用 `publication_preserves_running_singleton_process`。
+
+空组合或只有自定义路由的组合不连接 PostgreSQL、不读取密钥、不创建 Wasm 或 Sidecar 资源。配置值只由实际安装的插件消费。
+
+## 初始化与停止顺序
+
+1. 检查插件重复、依赖缺失和循环，构建服务声明与路由，检查服务绑定唯一性；此时不解析需要异步资源的服务。
+2. 按插件依赖顺序执行 `on_initialize`；开发宿主也执行这一阶段。
+3. 解析 `require_service` 声明的服务；未提供的资源、构造失败或 panic 都触发反序补偿。
+4. 正常宿主执行 `on_start` 恢复状态，再执行 `on_ready` 开启后台任务。开发宿主跳过这两个阶段。
+5. `shutdown` 关闭请求准入，等待插件任务，然后反序执行 `on_stop`。停止钩子必须允许部分初始化，且不能删除持久化安装和活动版本。
+
+应用必须在退出时调用 `state.shutdown().await`。初始化或停止的等待方被取消，不会中断独立清理任务。停止是协作式的；无响应的原生代码需要监督器处理。此机制尚不支持原生插件在线卸载或单插件重启。
+
+## 声明异步资源
+
+在插件的 `build` 中声明资源与钩子，类型依赖仍写在 `Plugin::dependencies` 中：
+
+```rust,ignore
+assembly.declare_resource::<Connection>()?;
+assembly.on_initialize::<Self>(|state, _tasks| Box::pin(async move {
+    let provider = state.service::<dyn ConnectionProvider>()?;
+    let connection = provider.connect().await?;
+    state.service::<Resource<Connection>>()?.provide(Arc::new(connection))
+}));
+assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
+    if let Some(connection) = state.service::<Resource<Connection>>()?.initialized() {
+        connection.close().await?;
+    }
+    Ok(())
+}));
+```
+
+业务服务直接注入 `Connection` 或 `Arc<Connection>`；`Resource<T>` 是 Dill 中的一次初始化槽，负责将异步资源交给正常的同步 DI，不是第二套注册表。重复声明和重复提供都失败。依赖该资源的初始化钩子必须声明对资源所有者插件的 TypeId 依赖。资源中需要保存自身所属容器时只保存 `CatalogWeakRef`，避免容器与单例相互持有。
+
+## 默认基础设施与替换方式
+
+| 插件 | 所有权与依赖 |
+| --- | --- |
+| `DatabasePlugin` | 从唯一 `DatabaseProvider` 取得宿主拥有的 `PgPool`，停止时关闭；默认 `PostgresPlugin` 提供连接实现 |
+| `KeyringPlugin` | 从唯一 `KeyringProvider` 加载共享密钥；默认 `FileKeyringPlugin` 读取文件 |
+| `StorePlugin` | 依赖数据库，迁移平台表及清理开发会话的旧绑定 |
+| `RepositoryPlugin` | 提供包缓存与仓库能力 |
+| `ProcessPlugin` / `WasmPlugin` | 持有旧进程 / Wasm 执行资源，并负责停止 |
+| `ComponentResourcesPlugin` | 依赖存储与密钥，配置组件存储时创建组件执行环境，停止时卸载实例并关闭组件连接 |
+
+替换数据库连接方式时保留 `DatabasePlugin`，省略 `PostgresPlugin`，在自己的插件中使用 Dill 绑定 `dyn DatabaseProvider`；密钥同理。Provider 返回的连接池属于本次宿主，会在关闭或初始化失败时关闭，不应返回另一个宿主仍在使用的池。所有服务和 Sidecar 消费同一个容器提供的实例。
+
+该替换点允许外部连接管理与密钥来源；平台的数据模型仍使用 PostgreSQL，组件数据库 provisioner、对象存储和执行器分发尚未全部抽象。选择是否安装 Wasm 资源不等于已经具备任意执行器替换契约。
+
+## 验证
+
+`plugins::tests` 使用无效数据库地址启动真实 HTTP 入口，验证仅安装自定义路由时没有隐式资源；`plugins::infrastructure_tests` 验证注入共享、初始化顺序、无业务恢复时资源仍就绪、失败与 panic 后补偿、重复资源及歧义 Provider 拒绝。独立 PostgreSQL 测试验证替换 Provider 后的迁移、查询和连接池关闭。协议与 Sidecar 测试复用正式装配，验证所有调用通道继续共享增强版本和授权。

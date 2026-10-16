@@ -53,8 +53,7 @@ pub(super) struct PublisherBinding {
 }
 
 pub(super) async fn migrate(pool: &PgPool) -> Result<()> {
-    sqlx::raw_sql(SCHEMA)
-        .execute(pool)
+    sqlx::Executor::execute(pool, sqlx::raw_sql(SCHEMA))
         .await
         .context("创建插件发布凭据表失败")?;
     Ok(())

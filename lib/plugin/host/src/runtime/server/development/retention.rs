@@ -14,7 +14,7 @@ pub(super) async fn collect(state: &RuntimeState) -> Result<()> {
             .map(|(_, revision)| revision.clone()),
     );
     let mut snapshots = Vec::new();
-    for entry in std::fs::read_dir(&state.repository.cache_root)? {
+    for entry in std::fs::read_dir(&state.repository()?.cache_root)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
         if name.len() == 64

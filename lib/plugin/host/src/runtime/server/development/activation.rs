@@ -111,7 +111,7 @@ pub(super) async fn activate(state: &RuntimeState, artifact: DevArtifact) -> Res
     let (pages, process) = match runtime.kind {
         PluginRuntime::Process => {
             let endpoint = artifact.endpoint.as_deref().context("开发进程尚未启动")?;
-            let pages = state.process.load_pages(endpoint).await?;
+            let pages = state.process()?.load_pages(endpoint).await?;
             (
                 pages,
                 Some(ProcessInstance {
@@ -124,7 +124,7 @@ pub(super) async fn activate(state: &RuntimeState, artifact: DevArtifact) -> Res
         PluginRuntime::WasmComponent => {
             // 只有前端变化时复用同一后端 Store，保留内存状态。
             let pages = state
-                .wasm
+                .wasm()?
                 .activate(
                     "development",
                     &source_id,
@@ -132,7 +132,7 @@ pub(super) async fn activate(state: &RuntimeState, artifact: DevArtifact) -> Res
                     &root.join(&runtime.artifact),
                 )?
                 .pages;
-            state.wasm.bind_revision(
+            state.wasm()?.bind_revision(
                 "development",
                 &source_id,
                 &artifact.backend_digest,
@@ -148,7 +148,7 @@ pub(super) async fn activate(state: &RuntimeState, artifact: DevArtifact) -> Res
         ),
         PluginRuntime::RustSource => anyhow::bail!("系统源码插件不属于运行时开发沙箱"),
     };
-    state.repository.validate_pages(&revision, &pages)?;
+    state.repository()?.validate_pages(&revision, &pages)?;
     let files = az_plugin_manifest::frontend_files(&root, &manifest)?;
     let mut assets = BTreeMap::new();
     let mut asset_sizes = BTreeMap::new();
@@ -166,7 +166,7 @@ pub(super) async fn activate(state: &RuntimeState, artifact: DevArtifact) -> Res
         }),
     );
     state
-        .store
+        .store()?
         .activate(
             "development",
             DiscoveredPlugin {
@@ -183,7 +183,7 @@ pub(super) async fn activate(state: &RuntimeState, artifact: DevArtifact) -> Res
         )
         .await?;
     if runtime.kind == PluginRuntime::WasmComponent {
-        state.wasm.retain_development_revisions(
+        state.wasm()?.retain_development_revisions(
             "development",
             &uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, artifact.source.as_bytes()).to_string(),
             &artifact.backend_digest,

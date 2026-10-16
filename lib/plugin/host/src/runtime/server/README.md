@@ -1,6 +1,6 @@
 # 服务端插件生命周期
 
-`mod.rs` 装配状态；`repository.rs` 负责 Git 发现与版本缓存，`package_repository.rs` 负责二进制包缓存，`package_store.rs` 保存 PostgreSQL 包与不可变版本，`activation_store.rs` 负责激活事务，`store.rs` 管理其余生命周期状态，`marketplace_store.rs` 管理市场索引，`publication.rs` 和 `routes.rs` 提供 HTTP 边界。
+`mod.rs` 装配状态；能力组合与资源初始化见 [插件装配](plugins/README.md)。`repository.rs` 负责 Git 发现与版本缓存，`package_repository.rs` 负责二进制包缓存，`package_store.rs` 保存 PostgreSQL 包与不可变版本，`activation_store.rs` 负责激活事务，`store.rs` 管理其余生命周期状态，`marketplace_store.rs` 管理市场索引，`publication.rs` 和 `routes.rs` 提供 HTTP 边界。
 
 市场请求只从 PostgreSQL 缓存读取。远程 HTTPS/Git registry 在启动和请求后异步刷新；刷新失败只保留最近成功索引并写入同步状态，不影响市场页面、已安装插件或租户组合。
 

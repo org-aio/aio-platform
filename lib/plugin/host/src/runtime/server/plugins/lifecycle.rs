@@ -11,6 +11,7 @@ use super::{LifecycleHook, PluginTasks, RuntimeState};
 
 pub(super) struct HookPlan {
     pub owner: TypeId,
+    pub initialize: Vec<LifecycleHook>,
     pub start: Vec<LifecycleHook>,
     pub ready: Vec<LifecycleHook>,
     pub stop: Vec<LifecycleHook>,
@@ -85,7 +86,11 @@ impl Lifecycle {
             "运行时不能重复启动"
         );
         state.started = true;
-        let result = self.start_hooks(runtime, run_hooks, &mut state).await;
+        // 服务工厂也可能 panic；把它与钩子失败一样处理，返回前完成资源补偿。
+        let result = AssertUnwindSafe(self.start_hooks(runtime, run_hooks, &mut state))
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("插件初始化服务时 panic")));
         if let Err(error) = result {
             return match self.stop_locked(runtime, &mut state).await {
                 Ok(()) => Err(error),
@@ -105,7 +110,17 @@ impl Lifecycle {
             self.check_cancelled()?;
             // 先登记补偿，即使当前插件只完成了一半，停止动作也会执行。
             state.entered.push(index);
-            if run_hooks {
+            for hook in &entry.plan.initialize {
+                self.check_cancelled()?;
+                invoke(*hook, runtime, entry, "初始化").await?;
+            }
+        }
+        for resolve in &runtime.extensions.requirements {
+            self.check_cancelled()?;
+            resolve(&runtime.extensions.services, true)?;
+        }
+        if run_hooks {
+            for entry in &self.entries {
                 for hook in &entry.plan.start {
                     self.check_cancelled()?;
                     invoke(*hook, runtime, entry, "启动").await?;
@@ -155,7 +170,6 @@ impl Lifecycle {
                 }
             }
         }
-        runtime.store.pool.close().await;
         if !errors.is_empty() {
             eprintln!("插件清理失败: {}", errors.join("; "));
         }

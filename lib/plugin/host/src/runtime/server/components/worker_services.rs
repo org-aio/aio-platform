@@ -44,7 +44,7 @@ async fn configure(
 ) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
     let identity = device(&state, &headers).await?;
     sqlx::query("UPDATE worker_devices SET capabilities=(SELECT coalesce(jsonb_agg(value),'[]'::jsonb) FROM jsonb_array_elements(capabilities) WHERE value<>to_jsonb($2::text)) || CASE WHEN $3 THEN jsonb_build_array($2::text) ELSE '[]'::jsonb END WHERE id=$1 AND state='active'")
-        .bind(identity.id).bind(CAPABILITY).bind(access.enabled).execute(&state.store.pool).await?;
+        .bind(identity.id).bind(CAPABILITY).bind(access.enabled).execute(&state.store()?.pool).await?;
     Ok(Json(RuntimeResponse { data: () }))
 }
 

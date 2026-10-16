@@ -64,13 +64,13 @@ async fn pairing_same_machine_revokes_previous_active_device() -> Result<()> {
     assert_eq!(devices[0].id, second.device_id);
     let stale_state: String = sqlx::query_scalar("SELECT state FROM worker_devices WHERE id=$1")
         .bind(&first.device_id)
-        .fetch_one(&state.store.pool)
+        .fetch_one(&state.store()?.pool)
         .await?;
     assert_eq!(stale_state, "revoked");
     let task_state: String =
         sqlx::query_scalar("SELECT state FROM worker_tasks WHERE worker_id=$1")
             .bind(&first.device_id)
-            .fetch_one(&state.store.pool)
+            .fetch_one(&state.store()?.pool)
             .await?;
     assert_eq!(task_state, "cancelled");
 
@@ -93,7 +93,7 @@ async fn pairing_same_machine_revokes_previous_active_device() -> Result<()> {
         2
     );
 
-    state.store.pool.close().await;
+    state.store()?.pool.close().await;
     sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
         .execute(&admin)
         .await?;
@@ -160,7 +160,7 @@ async fn terminal_sessions_single_owner_and_replacement() -> Result<()> {
     let first_state: String =
         sqlx::query_scalar("SELECT state FROM worker_terminal_sessions WHERE id=$1")
             .bind(&first.id)
-            .fetch_one(&state.store.pool)
+            .fetch_one(&state.store()?.pool)
             .await?;
     assert_eq!(first_state, "closing");
     assert_eq!(second.state, "waiting");
@@ -172,7 +172,7 @@ async fn terminal_sessions_single_owner_and_replacement() -> Result<()> {
     assert_eq!(replacement.id, second.id);
     assert!(workers.terminal_claim(&device, 0).await?.is_none());
 
-    state.store.pool.close().await;
+    state.store()?.pool.close().await;
     sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
         .execute(&admin)
         .await?;

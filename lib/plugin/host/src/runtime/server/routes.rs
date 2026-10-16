@@ -129,7 +129,7 @@ async fn page_action(
 ) -> Result<Json<RuntimeResponse<PageActionResult>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
     let binding = state
-        .store
+        .store()?
         .active_page_binding(&session.tenant_id, &request.page_id)
         .await?
         .ok_or_else(|| RuntimeError::not_found("当前租户没有提供该页面的活动插件"))?;
@@ -144,7 +144,7 @@ async fn page_action(
     .context("序列化页面动作请求失败")?;
     let result = match binding.service.runtime {
         crate::runtime::PluginRuntime::WasmComponent => {
-            let manager = state.wasm.clone();
+            let manager = state.wasm()?;
             let tenant_id = session.tenant_id.clone();
             let source_id = binding.source_id.clone();
             let revision = binding.service.revision.clone();
@@ -171,7 +171,7 @@ async fn page_action(
                 .as_deref()
                 .context("process 页面插件缺少活动 endpoint")?;
             let output = state
-                .process
+                .process()?
                 .request(
                     endpoint,
                     "POST",
@@ -196,7 +196,7 @@ async fn page_action(
     };
     validate_page_action_result(&binding.page, &result)?;
     state
-        .store
+        .store()?
         .save_page_state(
             &session.tenant_id,
             &binding.source_id,
@@ -272,7 +272,7 @@ async fn publish_job(
 ) -> Result<Json<RuntimeResponse<PublishedPluginView>>, RuntimeError> {
     let publisher = authenticate_publisher(&state, &headers).await?;
     let job = state
-        .store
+        .store()?
         .publish_job(&publisher.tenant_id, &job_id)
         .await?
         .ok_or_else(|| RuntimeError::not_found("发布任务不存在"))?;
@@ -297,7 +297,7 @@ async fn enable(
     Path(source_id): Path<String>,
 ) -> Result<Json<RuntimeResponse<RuntimeCatalog>>, RuntimeError> {
     let session = authenticate_manager(&state, &headers).await?;
-    if let Some(components) = &state.components
+    if let Some(components) = state.optional_components()?
         && components.contains_source(&source_id).await?
     {
         components
@@ -310,16 +310,19 @@ async fn enable(
         return catalog_for(&state, &session).await;
     }
     state
-        .store
+        .store()?
         .bound_runtime(&session.tenant_id, &source_id)
         .await?;
     let git: Option<String> = sqlx::query_scalar("SELECT git FROM plugin_sources WHERE id=$1")
         .bind(&source_id)
-        .fetch_optional(&state.store.pool)
+        .fetch_optional(&state.store()?.pool)
         .await
         .map_err(anyhow::Error::from)?;
     if let Some(git) = git
-        && let Some(latest) = state.store.published_marketplace_entry(&git, None).await?
+        && let Some(latest) = state
+            .store()?
+            .published_marketplace_entry(&git, None)
+            .await?
     {
         super::installation::install(
             &state,
@@ -335,7 +338,7 @@ async fn enable(
     let lifecycle_lock = state.activation_lock(&session.tenant_id, &source_id)?;
     let _lifecycle_guard = lifecycle_lock.lock().await;
     let target = state
-        .store
+        .store()?
         .bound_runtime(&session.tenant_id, &source_id)
         .await?;
     let instance = if target.runtime == crate::runtime::PluginRuntime::Process {
@@ -353,7 +356,7 @@ async fn enable(
         None
     };
     if let Err(error) = state
-        .store
+        .store()?
         .set_enabled(&session.tenant_id, &source_id, true, instance.as_ref())
         .await
     {
@@ -376,7 +379,7 @@ async fn disable(
     Path(source_id): Path<String>,
 ) -> Result<Json<RuntimeResponse<RuntimeCatalog>>, RuntimeError> {
     let session = authenticate_manager(&state, &headers).await?;
-    if let Some(components) = &state.components {
+    if let Some(components) = state.optional_components()? {
         if components.contains_source(&source_id).await? {
             components
                 .change(
@@ -396,18 +399,18 @@ async fn disable(
     let lifecycle_lock = state.activation_lock(&session.tenant_id, &source_id)?;
     let _lifecycle_guard = lifecycle_lock.lock().await;
     let previous = state
-        .store
+        .store()?
         .active_process(&session.tenant_id, &source_id)
         .await?;
     let target = state
-        .store
+        .store()?
         .bound_runtime(&session.tenant_id, &source_id)
         .await?;
     if let Err(error) = stop_previous_process(&state, previous, None).await {
         return Err(error.into());
     }
     if let Err(error) = state
-        .store
+        .store()?
         .set_enabled(&session.tenant_id, &source_id, false, None)
         .await
     {
@@ -431,7 +434,7 @@ async fn uninstall(
     Path(source_id): Path<String>,
 ) -> Result<Json<RuntimeResponse<RuntimeCatalog>>, RuntimeError> {
     let session = authenticate_manager(&state, &headers).await?;
-    if let Some(components) = &state.components {
+    if let Some(components) = state.optional_components()? {
         if components.contains_source(&source_id).await? {
             components
                 .change(
@@ -451,17 +454,21 @@ async fn uninstall(
     let lifecycle_lock = state.activation_lock(&session.tenant_id, &source_id)?;
     let _lifecycle_guard = lifecycle_lock.lock().await;
     let previous = state
-        .store
+        .store()?
         .active_process(&session.tenant_id, &source_id)
         .await?;
     let target = state
-        .store
+        .store()?
         .bound_runtime(&session.tenant_id, &source_id)
         .await?;
     if let Err(error) = stop_previous_process(&state, previous, None).await {
         return Err(error.into());
     }
-    if let Err(error) = state.store.uninstall(&session.tenant_id, &source_id).await {
+    if let Err(error) = state
+        .store()?
+        .uninstall(&session.tenant_id, &source_id)
+        .await
+    {
         if let Err(recovery) =
             restore_process_binding(&state, &session.tenant_id, &source_id, Some(&target)).await
         {
@@ -482,7 +489,7 @@ async fn rollback(
     Path(source_id): Path<String>,
 ) -> Result<Json<RuntimeResponse<RuntimeCatalog>>, RuntimeError> {
     let session = authenticate_manager(&state, &headers).await?;
-    if let Some(components) = &state.components
+    if let Some(components) = state.optional_components()?
         && components.contains_source(&source_id).await?
     {
         components
@@ -497,13 +504,13 @@ async fn rollback(
     let lifecycle_lock = state.activation_lock(&session.tenant_id, &source_id)?;
     let _lifecycle_guard = lifecycle_lock.lock().await;
     let previous = state
-        .store
+        .store()?
         .active_process(&session.tenant_id, &source_id)
         .await?;
     let previous_target = if previous.is_some() {
         Some(
             state
-                .store
+                .store()?
                 .bound_runtime(&session.tenant_id, &source_id)
                 .await?,
         )
@@ -511,11 +518,11 @@ async fn rollback(
         None
     };
     let previous_wasm = state
-        .store
+        .store()?
         .active_wasm_revision(&session.tenant_id, &source_id)
         .await?;
     let target = state
-        .store
+        .store()?
         .rollback_target(&session.tenant_id, &source_id)
         .await?;
     let instance = if target.runtime == crate::runtime::PluginRuntime::Process {
@@ -544,7 +551,7 @@ async fn rollback(
         return Err(error.into());
     }
     if let Err(error) = state
-        .store
+        .store()?
         .rollback_to(&session.tenant_id, &source_id, &target, instance.as_ref())
         .await
     {
@@ -587,14 +594,14 @@ async fn marketplace(
 ) -> Result<Json<RuntimeResponse<Vec<super::tools::MarketplaceItem>>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
     let catalog = catalog_value(&state, &session).await?;
-    let mut entries = if let Some(components) = &state.components {
+    let mut entries = if let Some(components) = state.optional_components()? {
         components.entries(&session.tenant_id).await?
     } else {
         Vec::new()
     };
     {
         for mut entry in state
-            .store
+            .store()?
             .marketplace_entries(PUBLISHED_REGISTRY_SOURCE)
             .await?
         {
@@ -621,13 +628,14 @@ async fn marketplace(
             entries.push(unlisted_entry(plugin));
         }
     }
-    super::marketplace_removal::retain_listed(&state.store.pool, &mut entries).await?;
-    super::navigation::enrich_entries(&state.store.pool, &session.tenant_id, &mut entries).await?;
+    super::marketplace_removal::retain_listed(&state.store()?.pool, &mut entries).await?;
+    super::navigation::enrich_entries(&state.store()?.pool, &session.tenant_id, &mut entries)
+        .await?;
     let mut items = entries
         .into_iter()
         .map(super::tools::MarketplaceItem::Plugin)
         .collect::<Vec<_>>();
-    items.extend(super::tools::entries(&state.store.pool).await?);
+    items.extend(super::tools::entries(&state.store()?.pool).await?);
     Ok(Json(RuntimeResponse { data: items }))
 }
 
@@ -650,7 +658,7 @@ async fn lifecycle_events(
 ) -> Result<Json<RuntimeResponse<Vec<crate::runtime::PluginLifecycleEvent>>>, RuntimeError> {
     let session = authenticate_manager(&state, &headers).await?;
     let events = state
-        .store
+        .store()?
         .lifecycle_events(&session.tenant_id, &source_id)
         .await?;
     Ok(Json(RuntimeResponse { data: events }))
@@ -696,7 +704,7 @@ async fn service(
     let lock = state.activation_lock(&session.tenant_id, &source_id)?;
     let _guard = lock.lock().await;
     let binding = state
-        .store
+        .store()?
         .active_service(&session.tenant_id, &source_id)
         .await?
         .ok_or_else(|| RuntimeError::not_found("当前租户没有活动的服务插件"))?;

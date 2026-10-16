@@ -33,7 +33,7 @@ pub(super) async fn dispatch(
                 user_id: session.user_id.clone(),
             })
             .context("序列化 Wasm 服务请求失败")?;
-            let manager = state.wasm.clone();
+            let manager = state.wasm()?;
             let tenant_id = session.tenant_id.clone();
             let source_id = source_id.to_owned();
             let revision = binding.revision.clone();
@@ -55,7 +55,7 @@ pub(super) async fn dispatch(
                 .as_deref()
                 .context("process 插件缺少活动 endpoint")?;
             Ok(state
-                .process
+                .process()?
                 .request(
                     endpoint,
                     call.method,

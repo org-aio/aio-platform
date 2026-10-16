@@ -121,7 +121,7 @@ pub(super) async fn asset(
             .get(&path)
             .ok_or_else(|| RuntimeError::not_found("插件包未声明该前端文件"))?;
         let artifact = state
-            .repository
+            .repository()?
             .artifact(&grant.revision, &format!("{}/{path}", grant.frontend_path))?;
         let bytes = tokio::fs::read(artifact)
             .await
@@ -287,7 +287,7 @@ async fn page(
     page_id: &str,
 ) -> Result<PageBinding, RuntimeError> {
     let binding = state
-        .store
+        .store()?
         .active_page_binding(&session.tenant_id, page_id)
         .await?
         .ok_or_else(|| RuntimeError::not_found("当前租户没有该活动页面"))?;

@@ -61,24 +61,16 @@ async fn tenant_installation_grants_members_and_menu_visibility_preserves_runtim
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let base = format!("http://{}", listener.local_addr()?);
     let identity = Arc::new(Identity);
-    let mut state =
-        RuntimeState::isolated_admin_test(identity.clone(), &database, &base, root.path()).await?;
-    let components = Components::open(
-        state.store.pool.clone(),
-        &database,
-        &root.path().join("keys.json"),
-        root.path().join("objects"),
-        identity,
-        state.extensions.services.clone(),
-    )
-    .await?;
+    let state =
+        RuntimeState::isolated_component_test(identity.clone(), &database, &base, root.path())
+            .await?;
+    let components = state.components()?;
     let tenant = Uuid::new_v4().to_string();
     let git = format!("https://github.com/example/access-{tenant}.git");
     let package_root = root.path().join("package");
     let first = super::tests::package(&package_root, &git, None, "1.0.0")?;
     let source = components.publish(first.clone(), "权限测试").await?;
     components.install(&tenant, &git, None).await?;
-    state.components = Some(components.clone());
     let router = crate::runtime::server::routes::router(state.clone());
     let server = tokio::spawn(async move { axum::serve(listener, router).await });
     let client = reqwest::Client::new();

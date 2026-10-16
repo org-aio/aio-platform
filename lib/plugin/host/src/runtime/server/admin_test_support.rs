@@ -1,14 +1,7 @@
-use super::{
-    RuntimeState, frontend_access::FrontendAccess, process::ProcessManager,
-    repository::RepositoryInstaller, store::PluginStore, wasm::WasmManager,
-};
+//! 隔离夹具复用正式插件装配与资源初始化，仅跳过业务恢复和后台任务。
+use super::RuntimeState;
 use anyhow::Result;
-use sqlx::postgres::PgPoolOptions;
-use std::{
-    collections::HashMap,
-    path::Path,
-    sync::{Arc, Mutex},
-};
+use std::{path::Path, sync::Arc};
 
 impl RuntimeState {
     pub async fn isolated_admin_test(
@@ -17,40 +10,38 @@ impl RuntimeState {
         origin: &str,
         cache: &Path,
     ) -> Result<Self> {
-        let pool = PgPoolOptions::new()
-            .max_connections(4)
-            .connect(database)
-            .await?;
-        let store = Arc::new(PluginStore::new(pool));
-        store.migrate().await?;
-        let extensions = super::plugins::assemble(
-            store.pool.clone(),
-            super::components::load_keyring(&cache.join("worker-keyring.json"))?,
-            super::plugins::default_plugins()?,
-        )
-        .await?;
-        Ok(Self {
-            transport: super::transport::TransportOrigins::from_env(origin)?,
-            extensions,
-            config: Arc::new(crate::configuration::HostConfig {
+        Self::isolated_test(identity, database, origin, cache, false).await
+    }
+
+    #[cfg(test)]
+    pub(super) async fn isolated_component_test(
+        identity: Arc<dyn crate::identity::IdentityProvider>,
+        database: &str,
+        origin: &str,
+        cache: &Path,
+    ) -> Result<Self> {
+        Self::isolated_test(identity, database, origin, cache, true).await
+    }
+
+    async fn isolated_test(
+        identity: Arc<dyn crate::identity::IdentityProvider>,
+        database: &str,
+        origin: &str,
+        cache: &Path,
+        components: bool,
+    ) -> Result<Self> {
+        let config = crate::configuration::HostConfig {
+            database_url: database.into(),
+            cache_root: cache.into(),
+            public_origin: origin.into(),
+            component_storage: components.then(|| crate::configuration::ComponentStorage {
                 database_url: database.into(),
-                cache_root: cache.into(),
-                public_origin: origin.into(),
-                component_storage: None,
-                default_plugins: vec![],
-                delivery: None,
-                development: None,
+                root: cache.into(),
             }),
-            development: Arc::default(),
-            store,
-            repository: Arc::new(RepositoryInstaller::new(cache.to_path_buf())),
-            identity,
-            activation_locks: Arc::new(Mutex::new(HashMap::new())),
-            publication_slots: Arc::new(tokio::sync::Semaphore::new(2)),
-            frontend: Arc::new(FrontendAccess::new(origin)?),
-            process: Arc::new(ProcessManager::new()?),
-            wasm: Arc::new(WasmManager::new()?),
-            components: None,
-        })
+            default_plugins: vec![],
+            delivery: None,
+            development: None,
+        };
+        Self::initialize_selected(config, identity, super::plugins::default_plugins()?, false).await
     }
 }

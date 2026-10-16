@@ -75,11 +75,13 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
     let child = package(&temp.path().join("child"), &child_git, Some(&git), "1.0.0")?;
     let components = Components::open(
         pool.clone(),
-        &url,
-        &temp.path().join("keys.json"),
-        temp.path().join("objects"),
+        &crate::configuration::ComponentStorage {
+            database_url: url.clone(),
+            root: temp.path().into(),
+        },
+        Arc::new(super::load_keyring(&temp.path().join("keys.json"))?),
         identity.clone(),
-        dill::Catalog::builder().build(),
+        dill::Catalog::builder().build().weak_ref(),
     )
     .await?;
     let parent = components.publish(first.clone(), "Parent").await?;
@@ -166,11 +168,13 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
     drop(components);
     let restored = Components::open(
         pool,
-        &url,
-        &temp.path().join("keys.json"),
-        temp.path().join("objects"),
+        &crate::configuration::ComponentStorage {
+            database_url: url.clone(),
+            root: temp.path().into(),
+        },
+        Arc::new(super::load_keyring(&temp.path().join("keys.json"))?),
         identity.clone(),
-        dill::Catalog::builder().build(),
+        dill::Catalog::builder().build().weak_ref(),
     )
     .await?;
     restored.restore().await?;

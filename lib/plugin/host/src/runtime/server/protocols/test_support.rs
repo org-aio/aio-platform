@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 
 use crate::{
     identity::{IdentityProvider, SessionContext},
-    runtime::server::{RuntimeState, components::Components},
+    runtime::server::RuntimeState,
 };
 
 pub(super) const PATH: &str = "/v1/math/double";
@@ -85,12 +85,8 @@ pub(super) struct Fixture {
 impl Fixture {
     pub async fn check_omitted_plugins(&self) -> Result<()> {
         let mut state = self.state.clone();
-        state.extensions = crate::runtime::server::plugins::assemble(
-            state.store.pool.clone(),
-            state.worker_keyring()?,
-            Vec::new(),
-        )
-        .await?;
+        state.extensions =
+            crate::runtime::server::plugins::assemble(state.config.clone(), Vec::new()).await?;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let origin = format!("http://{}", listener.local_addr()?);
         let router = crate::runtime::server::router(state);
@@ -126,21 +122,9 @@ impl Fixture {
         });
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let base = format!("http://{}", listener.local_addr()?);
-        let mut state =
-            RuntimeState::isolated_admin_test(identity.clone(), &database, &base, root.path())
+        let state =
+            RuntimeState::isolated_component_test(identity.clone(), &database, &base, root.path())
                 .await?;
-        state.components = Some(
-            Components::open(
-                state.store.pool.clone(),
-                &database,
-                &root.path().join("keyring.json"),
-                root.path().join("objects"),
-                identity.clone(),
-                state.extensions.services.clone(),
-            )
-            .await?,
-        );
-        state.extensions.start(&state, false).await?;
         let router = crate::runtime::server::router(state.clone());
         let server = tokio::spawn(async move { axum::serve(listener, router).await });
         Ok(Self {

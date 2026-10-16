@@ -46,27 +46,27 @@ pub(super) async fn details(
     Path(revision): Path<String>,
 ) -> Result<Json<RuntimeResponse<serde_json::Value>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
-    if let Some(components) = &state.components
+    if let Some(components) = state.optional_components()?
         && let Some(data) = components.details(&revision).await?
     {
         return Ok(Json(RuntimeResponse { data }));
     }
     let package = sqlx::query("SELECT p.git,p.version,p.source_revision,p.created_at::TEXT,d.readme FROM plugin_packages p LEFT JOIN plugin_documents d ON d.revision=p.revision WHERE p.revision=$1 AND EXISTS(SELECT 1 FROM plugin_revisions r WHERE r.revision=p.revision)")
-        .bind(&revision).fetch_optional(&state.store.pool).await?;
+        .bind(&revision).fetch_optional(&state.store()?.pool).await?;
     let Some(package) = package else {
         return Ok(Json(RuntimeResponse {
             data: serde_json::json!({"readme":"", "versions":[], "builds":[]}),
         }));
     };
     let git: String = package.try_get("git")?;
-    let versions = sqlx::query("SELECT p.revision,p.version,p.source_revision,p.created_at::TEXT FROM plugin_packages p WHERE git=$1 AND EXISTS(SELECT 1 FROM plugin_revisions r WHERE r.revision=p.revision) ORDER BY p.created_at DESC LIMIT 20").bind(&git).fetch_all(&state.store.pool).await?;
+    let versions = sqlx::query("SELECT p.revision,p.version,p.source_revision,p.created_at::TEXT FROM plugin_packages p WHERE git=$1 AND EXISTS(SELECT 1 FROM plugin_revisions r WHERE r.revision=p.revision) ORDER BY p.created_at DESC LIMIT 20").bind(&git).fetch_all(&state.store()?.pool).await?;
     let versions = versions.into_iter().map(|r| Ok::<_,sqlx::Error>(serde_json::json!({"revision":r.try_get::<String,_>("revision")?,"version":r.try_get::<String,_>("version")?,"source_revision":r.try_get::<Option<String>,_>("source_revision")?,"created_at":r.try_get::<String,_>("created_at")?}))).collect::<Result<Vec<_>,_>>()?;
     let builds = if session
         .permissions
         .iter()
         .any(|p| p == "plugin:manage" || p == "*")
     {
-        sqlx::query("SELECT id,source_revision,state,error,updated_at::TEXT FROM delivery_jobs WHERE git=$1 ORDER BY id DESC LIMIT 10").bind(&git).fetch_all(&state.store.pool).await?
+        sqlx::query("SELECT id,source_revision,state,error,updated_at::TEXT FROM delivery_jobs WHERE git=$1 ORDER BY id DESC LIMIT 10").bind(&git).fetch_all(&state.store()?.pool).await?
             .into_iter().map(|r| Ok::<_,sqlx::Error>(serde_json::json!({"id":r.try_get::<i64,_>("id")?,"source_revision":r.try_get::<String,_>("source_revision")?,"state":r.try_get::<String,_>("state")?,"error":r.try_get::<Option<String>,_>("error")?,"updated_at":r.try_get::<String,_>("updated_at")?}))).collect::<Result<Vec<_>,_>>()?
     } else {
         vec![]
@@ -86,7 +86,7 @@ pub(super) async fn image(
     Path((revision, path)): Path<(String, String)>,
 ) -> Result<Response, RuntimeError> {
     authenticate(&state, &headers).await?;
-    let value: Option<serde_json::Value> = sqlx::query_scalar("SELECT d.images->$2 FROM plugin_documents d WHERE d.revision=$1 AND EXISTS(SELECT 1 FROM plugin_revisions r WHERE r.revision=d.revision)").bind(&revision).bind(path).fetch_optional(&state.store.pool).await?.flatten();
+    let value: Option<serde_json::Value> = sqlx::query_scalar("SELECT d.images->$2 FROM plugin_documents d WHERE d.revision=$1 AND EXISTS(SELECT 1 FROM plugin_revisions r WHERE r.revision=d.revision)").bind(&revision).bind(path).fetch_optional(&state.store()?.pool).await?.flatten();
     let image: az_plugin_delivery::DocumentImage =
         serde_json::from_value(value.ok_or_else(|| RuntimeError::not_found("文档图片不存在"))?)?;
     let mut response = Response::new(Body::from(STANDARD.decode(image.content_base64)?));

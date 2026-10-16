@@ -22,7 +22,7 @@ pub(super) async fn list(
     authenticate(&state, &headers).await?;
     let git = az_plugin_package::normalize_git_source(&query.git)?;
     let rows = sqlx::query_as::<_, (String, String, String, String)>("SELECT p.version,p.source_revision,p.revision,p.manifest_toml FROM plugin_packages p WHERE p.git=$1 AND p.source_revision IS NOT NULL AND EXISTS(SELECT 1 FROM plugin_revisions r JOIN plugin_sources s ON s.id=r.source_id WHERE r.revision=p.revision AND s.git=p.git) ORDER BY p.created_at DESC LIMIT 100")
-        .bind(&git).fetch_all(&state.store.pool).await?;
+        .bind(&git).fetch_all(&state.store()?.pool).await?;
     let mut releases = rows
         .into_iter()
         .map(|(version, source_sha, digest, manifest)| PublishedRelease {
@@ -34,9 +34,9 @@ pub(super) async fn list(
             abi: 1,
         })
         .collect::<Vec<_>>();
-    if state.components.is_some() {
+    if state.optional_components()?.is_some() {
         let archives: Vec<Vec<u8>> = sqlx::query_scalar("SELECT v.archive FROM component_versions v JOIN component_sources s ON s.id=v.source_id JOIN component_publications p ON p.source_id=s.id WHERE s.git=$1 ORDER BY v.created_at DESC LIMIT 100")
-            .bind(&git).fetch_all(&state.store.pool).await?;
+            .bind(&git).fetch_all(&state.store()?.pool).await?;
         for archive in archives {
             let bundle = az_plugin_bundle::Bundle::decode(&archive)?;
             releases.push(PublishedRelease {

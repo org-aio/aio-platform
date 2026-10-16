@@ -38,7 +38,7 @@ pub(super) async fn authenticate_optional(
     session
         .permissions
         .retain(|permission| !permission.starts_with("component:"));
-    if let Some(components) = &state.components {
+    if let Some(components) = state.optional_components()? {
         session
             .permissions
             .extend(components.permissions(&session.tenant_id).await?);
@@ -86,7 +86,7 @@ pub(super) async fn authenticate_publisher(
 ) -> Result<PublisherContext, RuntimeError> {
     if let Some(token) = bearer_token(headers) {
         let binding = state
-            .store
+            .store()?
             .publisher_binding(token)
             .await?
             .ok_or_else(|| RuntimeError::unauthorized("发布令牌无效或已撤销"))?;
@@ -148,7 +148,7 @@ pub(super) async fn catalog_value(
         .collect::<String>()
         .to_uppercase();
     let mut catalog = state
-        .store
+        .store()?
         .catalog(
             &session.tenant_id,
             &session.tenant_label,
@@ -159,7 +159,7 @@ pub(super) async fn catalog_value(
             },
         )
         .await?;
-    if let Some(components) = &state.components {
+    if let Some(components) = state.optional_components()? {
         components
             .append_catalog(&session.tenant_id, &mut catalog)
             .await?;
