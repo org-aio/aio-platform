@@ -2,6 +2,7 @@ use axum::http::HeaderMap;
 use az_plugin_contract::{
     CapabilityGrants, EnhancementRequest, EnhancementResponse, InvocationScope, RequestContext,
 };
+use az_plugin_enhancement::EnhancementContract;
 
 use super::super::{
     RuntimeState, enhancements::Enhancements, http_error::RuntimeError,
@@ -43,8 +44,8 @@ fn permitted_capability(session: &SessionContext, path: &str) -> bool {
 pub(super) async fn catalog(
     state: &RuntimeState,
     session: &SessionContext,
-) -> Result<(Option<String>, Vec<String>), RuntimeError> {
-    let (revision, paths) = state
+) -> Result<(Option<String>, Vec<EnhancementContract>), RuntimeError> {
+    let (revision, contracts) = state
         .service::<Enhancements>()?
         .catalog(
             &session.tenant_id,
@@ -52,7 +53,7 @@ pub(super) async fn catalog(
             |path| permitted_capability(session, path),
         )
         .await?;
-    Ok((revision, paths))
+    Ok((revision, contracts))
 }
 
 pub(super) async fn invoke(
@@ -65,7 +66,11 @@ pub(super) async fn invoke(
     if !permitted(session, &request.path) {
         return Err(RuntimeError::forbidden("当前身份没有该增强能力权限"));
     }
-    let (revision, grants) = catalog(state, session).await?;
+    let (revision, contracts) = catalog(state, session).await?;
+    let grants: Vec<_> = contracts
+        .into_iter()
+        .map(|contract| contract.path)
+        .collect();
     if revision.is_some() && !grants.contains(&request.path) {
         return Err(RuntimeError::forbidden("当前身份缺少增强依赖权限"));
     }

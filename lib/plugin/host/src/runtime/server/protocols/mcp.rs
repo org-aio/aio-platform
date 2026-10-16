@@ -22,6 +22,7 @@ use rmcp::{
     },
 };
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use super::{super::RuntimeState, access};
 use crate::identity::SessionContext;
@@ -90,20 +91,21 @@ impl ServerHandler for McpEnhancements {
         if request.is_some_and(|request| request.cursor.is_some()) {
             return Err(ErrorData::invalid_params("增强目录不使用分页游标", None));
         }
-        let (_, paths) = access::catalog(&self.0, session(&context)?)
+        let (_, contracts) = access::catalog(&self.0, session(&context)?)
             .await
             .map_err(|_| ErrorData::internal_error("读取增强目录失败", None))?;
-        let schema = serde_json::from_value::<serde_json::Map<String, Value>>(json!({
-            "type": "object", "properties": {"input": {}}, "required": ["input"], "additionalProperties": false
-        })).map_err(|_| ErrorData::internal_error("增强参数契约无效", None))?;
-        let tools = paths
+        let tools = contracts
             .into_iter()
-            .map(|path| {
+            .map(|contract| {
                 // 路径不允许点号，转换是可逆的；它是协议符号，不承担原生插件身份。
-                let name = path.trim_start_matches('/').replace('/', ".");
-                Tool::new(name, format!("调用运行时增强 {path}"), schema.clone())
+                let name = contract.path.trim_start_matches('/').replace('/', ".");
+                let input = envelope("input", contract.input_schema)?;
+                let output = envelope("output", contract.output_schema)?;
+                let mut tool = Tool::new(name, format!("调用运行时增强 {}", contract.path), input);
+                tool.output_schema = Some(Arc::new(output));
+                Ok::<_, ErrorData>(tool)
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(ListToolsResult::with_all_items(tools))
     }
 
@@ -142,5 +144,85 @@ impl ServerHandler for McpEnhancements {
             )
             .into()),
         }
+    }
+}
+
+// 增强接收任意 JSON，MCP 则要求对象参数；嵌入资源必须有独立 base，
+// 否则业务 schema 的 #/$defs 引用会错误地解析到 MCP 外层对象。
+fn envelope(
+    field: &str,
+    schema: schemars::Schema,
+) -> Result<serde_json::Map<String, Value>, ErrorData> {
+    let mut value = serde_json::to_value(schema)
+        .map_err(|_| ErrorData::internal_error("编码增强 schema 失败", None))?;
+    let bytes = serde_json::to_vec(&value)
+        .map_err(|_| ErrorData::internal_error("编码增强 schema 失败", None))?;
+    let digest = format!("{:x}", Sha256::digest(bytes));
+    let base = reqwest::Url::parse(&format!(
+        "https://schemas.aio.invalid/enhancements/{digest}/{field}"
+    ))
+    .map_err(|_| ErrorData::internal_error("增强 schema 地址无效", None))?;
+    if let Value::Object(object) = &mut value {
+        let same_resource = object
+            .get("$id")
+            .and_then(Value::as_str)
+            .map(|id| {
+                base.join(id).map(|mut resolved| {
+                    resolved.set_fragment(None);
+                    resolved == base
+                })
+            })
+            .transpose()
+            .map_err(|_| ErrorData::internal_error("增强 schema 标识无效", None))?
+            .unwrap_or(true);
+        // 空 id、空片段以及解析后等于外层的相对 id 也必须建立独立资源。
+        if same_resource {
+            object.insert("$id".into(), json!(format!("{field}.schema.json")));
+        }
+    }
+    let mut properties = serde_json::Map::new();
+    properties.insert(field.into(), value);
+    let mut required = vec![field];
+    if field == "output" {
+        properties.insert("revision".into(), json!({"type":"string"}));
+        required.push("revision");
+    }
+    serde_json::from_value(json!({
+        "$schema":"https://json-schema.org/draft/2020-12/schema",
+        "$id":base.as_str(),
+        "type":"object", "properties":properties, "required":required, "additionalProperties":false
+    }))
+    .map_err(|_| ErrorData::internal_error("增强参数契约无效", None))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_schema_ids_keep_local_references() -> anyhow::Result<()> {
+        for id in [
+            None,
+            Some(""),
+            Some("#"),
+            Some("input"),
+            Some("relative.json"),
+            Some("https://example.test/input"),
+        ] {
+            let mut schema = json!({"$defs":{"value":{"type":"integer"}},"$ref":"#/$defs/value"});
+            if let Some(id) = id {
+                schema["$id"] = json!(id);
+            }
+            let original = jsonschema::options().offline().build(&schema)?;
+            assert!(original.is_valid(&json!(3)));
+            let wrapped = envelope("input", schema.try_into()?)?;
+            let validator = jsonschema::options().offline().build(&json!(wrapped))?;
+            assert!(validator.is_valid(&json!({"input":3})), "schema id: {id:?}");
+            assert!(
+                !validator.is_valid(&json!({"input":"wrong"})),
+                "schema id: {id:?}"
+            );
+        }
+        Ok(())
     }
 }

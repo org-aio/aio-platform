@@ -6,7 +6,7 @@ use std::{
 use anyhow::{Context, Result, ensure};
 use az_plugin_contract::{EnhancementRequest, EnhancementResponse, InvocationScope};
 use az_plugin_enhancement::{
-    Package, PreparedPackage, ScriptContext, ScriptInvocation, ScriptRuntime,
+    EnhancementContract, Package, PreparedPackage, ScriptContext, ScriptInvocation, ScriptRuntime,
 };
 use sqlx::PgPool;
 use tokio::sync::Semaphore;
@@ -48,13 +48,13 @@ impl Enhancements {
         tenant: &str,
         permitted: impl Fn(&str) -> bool,
         permitted_capability: impl Fn(&str) -> bool,
-    ) -> Result<(Option<String>, Vec<String>)> {
+    ) -> Result<(Option<String>, Vec<EnhancementContract>)> {
         let Some(revision) = self.head(tenant).await?.revision else {
             return Ok((None, Vec::new()));
         };
         let prepared = self.load(tenant, &revision).await?;
         let available = self.runtime_catalog(tenant)?;
-        let mut paths = Vec::new();
+        let mut contracts = Vec::new();
         for item in &prepared.package().enhancements {
             let required = prepared.required_paths(&item.path)?;
             let capabilities = prepared.required_capabilities(&item.path)?;
@@ -63,11 +63,11 @@ impl Enhancements {
                     permitted_capability(path) && available.iter().any(|entry| &entry.path == path)
                 })
             {
-                paths.push(item.path.clone());
+                contracts.push(item.contract());
             }
         }
-        paths.sort();
-        Ok((Some(revision), paths))
+        contracts.sort_by(|left, right| left.path.cmp(&right.path));
+        Ok((Some(revision), contracts))
     }
 
     pub(in crate::runtime::server) async fn open(
@@ -181,8 +181,15 @@ impl Enhancements {
                 .bind(tenant).bind(revision).fetch_one(&self.pool).await?;
             ensure!(known, "只能回滚到当前租户曾激活的版本");
         }
+        let mut contracts = Vec::new();
         if let Some(revision) = revision {
             let candidate = self.load(tenant, revision).await?;
+            contracts = candidate
+                .package()
+                .enhancements
+                .iter()
+                .map(|entry| entry.contract())
+                .collect();
             let available = self.runtime_catalog(tenant)?;
             for entry in &candidate.package().enhancements {
                 for path in &entry.capabilities {
@@ -219,6 +226,22 @@ impl Enhancements {
         let Some(next) = next else {
             return Ok(None);
         };
+        // CAS 已串行化当前租户发布；直接查询不可变历史，停用或回滚也不能释放已用契约。
+        let conflict: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1 FROM runtime_enhancement_revisions r
+                CROSS JOIN LATERAL jsonb_array_elements(r.package->'enhancements') old
+                JOIN jsonb_array_elements($2::jsonb) candidate ON candidate->>'path'=old->>'path'
+                WHERE r.tenant_id=$1
+                  AND EXISTS(SELECT 1 FROM runtime_enhancement_events e WHERE e.tenant_id=r.tenant_id AND e.revision=r.revision)
+                  AND (COALESCE(NULLIF(old->'input_schema','null'::jsonb),'true'::jsonb) <> candidate->'input_schema'
+                    OR COALESCE(NULLIF(old->'output_schema','null'::jsonb),'true'::jsonb) <> candidate->'output_schema')
+            )",
+        ).bind(tenant).bind(serde_json::to_value(&contracts)?).fetch_one(&mut *transaction).await?;
+        ensure!(
+            !conflict,
+            "增强路径的 schema 已发布，修改契约必须使用新版本路径"
+        );
         let action = match (revision, rollback) {
             (None, _) => "deactivate",
             (_, true) => "rollback",

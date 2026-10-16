@@ -72,6 +72,8 @@ fn package(language: Language, source: &str) -> Result<PreparedPackage> {
     az_plugin_enhancement::default_runtime()?.prepare(Package {
         schema_version: 1,
         enhancements: vec![Enhancement {
+            input_schema: Some(json!({"type":"integer","minimum":0}).try_into()?),
+            output_schema: Some(json!({"type":"integer","maximum":20}).try_into()?),
             capabilities: vec![],
             calls: vec![],
             path: "/v1/math/double".into(),
@@ -140,6 +142,14 @@ async fn same_wasm_instance_receives_runtime_enhancements_without_recompilation(
     let second: EnhancementResponse = serde_json::from_slice(&second.body)?;
     assert_eq!(second.output, json!(14));
     assert_ne!(first.revision, second.revision);
+    // 同一 Wasm 实例经 WIT 调用时，输入与输出都经过宿主契约校验。
+    for input in [json!(-1), json!("private-input"), json!(11)] {
+        let mut invalid = request();
+        invalid.body = serde_json::to_vec(&input)?;
+        let response = guest.handle(invalid, context.clone()).await?;
+        assert_eq!(response.status, 403);
+        assert!(!String::from_utf8_lossy(&response.body).contains("private-input"));
+    }
     let composed = az_plugin_enhancement::default_runtime()?.prepare(serde_json::from_str(
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),

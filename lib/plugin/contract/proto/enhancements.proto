@@ -4,6 +4,7 @@ package aio.runtime.v1;
 // 只适配能力发现与执行，版本发布继续走宿主的统一管理入口。
 service Enhancements {
   rpc List(ListRequest) returns (ListResponse);
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
   rpc Invoke(InvokeRequest) returns (InvokeResponse);
 }
 
@@ -13,6 +14,18 @@ message ListRequest {}
 message ListResponse {
   optional string revision = 1;
   repeated string paths = 2;
+}
+
+// 只返回当前租户获准调用的契约；调用结果仍包含实际执行版本。
+message DescribeRequest {
+  string path = 1;
+}
+
+message DescribeResponse {
+  string revision = 1;
+  string path = 2;
+  bytes input_schema_json = 3;
+  bytes output_schema_json = 4;
 }
 
 // JSON 保留 Rhai/TypeScript 的值语义；身份与租户从认证元数据取得。

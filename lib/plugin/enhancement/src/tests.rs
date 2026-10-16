@@ -7,6 +7,8 @@ fn package(language: Language, source: &str) -> Package {
     Package {
         schema_version: 1,
         enhancements: vec![Enhancement {
+            input_schema: None,
+            output_schema: None,
             capabilities: vec![],
             calls: vec![],
             path: "/v1/math/double".into(),

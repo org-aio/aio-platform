@@ -16,6 +16,12 @@ pub struct Enhancement {
     pub path: String,
     pub language: Language,
     pub source: String,
+    /// 输入契约由公共执行链校验；省略表示任意 JSON，不从 TypeScript 注解推断。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_schema: Option<schemars::Schema>,
+    /// 输出契约同样约束嵌套调用和替换执行器，不能通过切换语言绕过。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<schemars::Schema>,
     /// 可以组合的同版本增强路径；实际执行还需调用者逐项授权。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub calls: Vec<String>,
@@ -23,6 +29,25 @@ pub struct Enhancement {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capabilities: Vec<String>,
     pub examples: Vec<Example>,
+}
+
+/// 面向插件及协议的发现结果，不包含实现源码或候选样例。
+#[derive(Clone, Debug, Serialize, schemars::JsonSchema)]
+pub struct EnhancementContract {
+    pub path: String,
+    pub input_schema: schemars::Schema,
+    pub output_schema: schemars::Schema,
+}
+
+impl Enhancement {
+    /// 省略的 schema 在发现时明确表现为 true，持久化原包仍保留原始字段形态。
+    pub fn contract(&self) -> EnhancementContract {
+        EnhancementContract {
+            path: self.path.clone(),
+            input_schema: self.input_schema.clone().unwrap_or_else(|| true.into()),
+            output_schema: self.output_schema.clone().unwrap_or_else(|| true.into()),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]

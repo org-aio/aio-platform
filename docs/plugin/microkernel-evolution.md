@@ -40,7 +40,7 @@ flowchart TD
 
 能力路径采用 `/v1/领域/操作`。这是可跨进程的业务协议地址；Rust 进程内插件身份仍用具体类型的 TypeId，不能把路径当成第二套 DI 注册表。
 
-一个增强包包含多个路径、源码语言和输入输出样例，整个包按 SHA256 摘要发布并整体切换。普通升级必须保留旧路径、旧样例并重放通过，避免删掉验收用例后悄悄改变结果。样例比较按 JSON 数值语义接受 `1` 与 `1.0` 的往返变化，但不接受大整数舍入，且不改写既有包与摘要。有限样例不能证明所有输入的兼容性；语义破坏仍应新增 `/v2/...`。TypeScript 做语法解析和转译，类型注解不等于运行时输入验证。
+一个增强包包含多个路径、源码语言、可选输入输出 JSON Schema 和样例，整个包按 SHA256 摘要发布并整体切换。普通升级必须保留旧路径、schema、旧样例并重放通过，避免删掉验收用例后悄悄改变结果。已激活路径的 schema 约束在停用或回滚后仍保留，契约变化必须新增版本路径。公共执行链对所有执行器及嵌套调用校验输入输出；省略 schema 表示任意 JSON，且不改变旧包序列化及摘要。样例比较按 JSON 数值语义接受 `1` 与 `1.0` 的往返变化，但不接受大整数舍入。有限样例不能证明所有输入的兼容性；语义破坏仍应新增 `/v2/...`。TypeScript 做语法解析和转译，类型注解不等于运行时输入验证。
 
 ```toml
 [plugin.capabilities]
@@ -86,8 +86,8 @@ cargo run -p az-plugin-enhancement --example verify -- \
 | --- | --- | --- |
 | Sidecar | 原生依赖、长任务、进程隔离和独立重启 | 复用现有 process supervisor/broker，已接入同一增强服务 |
 | WIT | Wasm 与宿主之间的类型边界 | 已增加通用增强调用接口 |
-| MCP | 给 AI 提供工具发现和执行 | 官方 SDK 的 Streamable HTTP 已接入增强；当前 schema 是通用 JSON input；已授权演进脚本可以调用统一版本服务 |
-| gRPC | 有类型的跨进程/跨机器通信 | Tonic 与生成的 Protobuf 契约已接入增强发现/执行、消息限额和截止时间；当前为 unary |
+| MCP | 给 AI 提供工具发现和执行 | 官方 SDK 的 Streamable HTTP 已接入增强；工具发现提供业务输入及输出 schema；已授权演进脚本可以调用统一版本服务 |
+| gRPC | 有类型的跨进程/跨机器通信 | Tonic 与生成的 Protobuf 契约已接入增强发现、Describe 契约查询、执行、消息限额和截止时间；当前为 unary |
 
 MCP 和 gRPC 适配器消费同一份增强目录、请求响应与版本服务，不保存另一套活动指针，也不允许调用方自报租户。MCP 的工具发现不是授权；gRPC 的类型正确不代表权限正确。Sidecar 是执行边界，可以承载 MCP 或 gRPC 服务，但宿主仍决定哪些能力能被调用。接入方式、权限和真实客户端验收见 [协议入口](../../lib/plugin/host/src/runtime/server/protocols/README.md)。外部 MCP 工具与描述文件定义的 unary gRPC 方法现可通过可选 `RemoteCapabilitiesPlugin` 导入，配置租户、地址、契约和凭据环境变量名。导入者与协议入口共用同一能力层；两种语言均通过 `call_capability` 消费。真实验收与配置见 [外部能力](../../lib/plugin/host/src/runtime/server/remote/README.md)。启动导入及部署文件在线变更已实现：候选整批校验后原子发布，拒绝更新保留旧版，调用链持有不可变能力快照；MCP stdio 和 streaming 尚未实现。
 

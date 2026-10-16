@@ -71,6 +71,7 @@ server = ["dep:schemars", "dep:tokio-util", "dep:http-body", "dep:jsonwebtoken",
 unsafe_code = "forbid"
 
 [dev-dependencies]
+jsonschema = { version = "0.58.6", default-features = false }
 prost-types = "0.14.4"
 tonic-prost = "0.14.6"
 tempfile = "3.23.0"

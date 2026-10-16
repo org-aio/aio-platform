@@ -14,7 +14,13 @@ use crate::{
 pub struct PreparedPackage {
     revision: String,
     package: Arc<Package>,
-    pub(crate) compiled: Arc<BTreeMap<String, Arc<dyn ScriptProgram>>>,
+    pub(crate) compiled: Arc<BTreeMap<String, PreparedEnhancement>>,
+}
+
+pub(crate) struct PreparedEnhancement {
+    pub program: Arc<dyn ScriptProgram>,
+    pub input: Option<jsonschema::Validator>,
+    pub output: Option<jsonschema::Validator>,
 }
 
 impl ScriptRuntime {
@@ -36,7 +42,14 @@ impl ScriptRuntime {
                 "增强路径重复: {}",
                 enhancement.path
             );
-            let implementation = self.compile(enhancement.language, &enhancement.source)?;
+            let input = crate::value_schema::compile(enhancement.input_schema.as_ref())?;
+            let output = crate::value_schema::compile(enhancement.output_schema.as_ref())?;
+            let program = self.compile(enhancement.language, &enhancement.source)?;
+            let implementation = PreparedEnhancement {
+                program,
+                input,
+                output,
+            };
             compiled.insert(enhancement.path.clone(), implementation);
         }
         let prepared = PreparedPackage {
@@ -141,6 +154,15 @@ impl PreparedPackage {
                 .iter()
                 .find(|candidate| candidate.path == enhancement.path)
                 .with_context(|| format!("升级不能删除已有能力: {}", enhancement.path))?;
+            ensure!(
+                crate::value_schema::same(&candidate.input_schema, &enhancement.input_schema)
+                    && crate::value_schema::same(
+                        &candidate.output_schema,
+                        &enhancement.output_schema
+                    ),
+                "升级不能改变已有 schema，请使用新版本路径: {}",
+                enhancement.path
+            );
             let preserved = enhancement.examples.iter().all(|example| {
                 candidate
                     .examples

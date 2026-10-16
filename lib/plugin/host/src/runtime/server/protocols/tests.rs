@@ -22,6 +22,8 @@ mod evolution;
 #[cfg(feature = "remote")]
 #[path = "remote_tests.rs"]
 mod remote;
+#[path = "schema_tests.rs"]
+mod schemas;
 
 #[tokio::test]
 #[ignore = "需要独立本机 PostgreSQL"]
@@ -122,6 +124,8 @@ async fn exercise(fixture: &Fixture) -> Result<()> {
     upgraded
         .enhancements
         .push(az_plugin_enhancement::Enhancement {
+            input_schema: None,
+            output_schema: None,
             capabilities: vec![],
             calls: vec![],
             path: "/v1/math/triple".into(),

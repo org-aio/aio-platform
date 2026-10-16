@@ -5,6 +5,16 @@
       "path": "/v1/math/add",
       "language": "rhai",
       "source": "fn invoke(input, context) { input.left + input.right }",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "left": { "type": "integer" },
+          "right": { "type": "integer" }
+        },
+        "required": ["left", "right"],
+        "additionalProperties": false
+      },
+      "output_schema": { "type": "integer" },
       "examples": [
         {
           "input": {
@@ -19,6 +29,8 @@
       "path": "/v1/text/slug",
       "language": "typescript",
       "source": "export function invoke(input: string): string { return input.trim().toLowerCase().replace(/\\s+/g, '-'); }",
+      "input_schema": { "type": "string", "maxLength": 512 },
+      "output_schema": { "type": "string", "maxLength": 512 },
       "examples": [
         {
           "input": " AI Bootstrap ",

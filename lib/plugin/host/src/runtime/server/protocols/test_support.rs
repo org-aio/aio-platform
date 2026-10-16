@@ -302,8 +302,8 @@ pub(super) fn package(language: Language) -> Package {
         }
     };
     Package { schema_version: 1, enhancements: vec![
-        Enhancement { capabilities: vec![], calls: vec![], path: PATH.into(), language, source: source.into(), examples: vec![Example { capabilities: vec![], input: json!(3), output: json!(6) }] },
-        Enhancement { capabilities: vec![], calls: vec![], path: "/v1/caller/scope".into(), language: Language::Rhai, source: "fn invoke(input, context) { #{tenant:context.tenant_id,source:context.source_id} }".into(), examples: vec![Example { capabilities: vec![], input: json!({}), output: json!({"tenant":"validation","source":"validation"}) }] }
+        Enhancement { input_schema: None, output_schema: None, capabilities: vec![], calls: vec![], path: PATH.into(), language, source: source.into(), examples: vec![Example { capabilities: vec![], input: json!(3), output: json!(6) }] },
+        Enhancement { input_schema: None, output_schema: None, capabilities: vec![], calls: vec![], path: "/v1/caller/scope".into(), language: Language::Rhai, source: "fn invoke(input, context) { #{tenant:context.tenant_id,source:context.source_id} }".into(), examples: vec![Example { capabilities: vec![], input: json!({}), output: json!({"tenant":"validation","source":"validation"}) }] }
     ] }
 }
 

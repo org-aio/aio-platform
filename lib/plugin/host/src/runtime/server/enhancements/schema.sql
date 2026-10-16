@@ -35,3 +35,5 @@ CREATE TABLE IF NOT EXISTS runtime_enhancement_observations (
     FOREIGN KEY (tenant_id, generation) REFERENCES runtime_enhancement_events(tenant_id, generation),
     FOREIGN KEY (tenant_id, revision) REFERENCES runtime_enhancement_revisions(tenant_id, revision)
 );
+CREATE INDEX IF NOT EXISTS runtime_enhancement_event_revision
+    ON runtime_enhancement_events(tenant_id, revision);

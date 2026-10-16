@@ -10,7 +10,8 @@ use axum::{
 use az_plugin_contract::{
     EnhancementRequest,
     grpc::{
-        InvokeRequest, InvokeResponse, ListRequest, ListResponse,
+        DescribeRequest, DescribeResponse, InvokeRequest, InvokeResponse, ListRequest,
+        ListResponse,
         enhancements_server::{Enhancements, EnhancementsServer},
     },
 };
@@ -92,8 +93,39 @@ impl Enhancements for GrpcEnhancements {
     async fn list(&self, request: Request<ListRequest>) -> Result<Response<ListResponse>, Status> {
         let headers = request.metadata().clone().into_headers();
         let session = access::session(&self.0, &headers).await.map_err(status)?;
-        let (revision, paths) = access::catalog(&self.0, &session).await.map_err(status)?;
+        let (revision, contracts) = access::catalog(&self.0, &session).await.map_err(status)?;
+        let paths = contracts
+            .into_iter()
+            .map(|contract| contract.path)
+            .collect();
         Ok(Response::new(ListResponse { revision, paths }))
+    }
+
+    async fn describe(
+        &self,
+        request: Request<DescribeRequest>,
+    ) -> Result<Response<DescribeResponse>, Status> {
+        let headers = request.metadata().clone().into_headers();
+        let session = access::session(&self.0, &headers).await.map_err(status)?;
+        let path = request.into_inner().path;
+        az_plugin_contract::validate_enhancement_path(&path)
+            .map_err(|_| Status::invalid_argument("增强路径无效"))?;
+        let (revision, contracts) = access::catalog(&self.0, &session).await.map_err(status)?;
+        let contract = contracts
+            .into_iter()
+            .find(|contract| contract.path == path)
+            .ok_or_else(|| Status::not_found("增强能力不可见或不存在"))?;
+        let revision = revision.ok_or_else(|| Status::not_found("增强未激活"))?;
+        let input_schema_json = serde_json::to_vec(&contract.input_schema)
+            .map_err(|_| Status::internal("编码增强输入契约失败"))?;
+        let output_schema_json = serde_json::to_vec(&contract.output_schema)
+            .map_err(|_| Status::internal("编码增强输出契约失败"))?;
+        Ok(Response::new(DescribeResponse {
+            revision,
+            path,
+            input_schema_json,
+            output_schema_json,
+        }))
     }
 
     async fn invoke(

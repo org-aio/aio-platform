@@ -105,13 +105,16 @@ impl ScriptInvocation {
             .compiled
             .get(path)
             .context("运行时尚未提供该增强能力")?;
+        crate::value_schema::check(&implementation.input, input, "输入")?;
         let mut child = self.clone();
         child.stack.push(path.into());
         self.check()?;
-        let result = implementation.invoke(input, &child);
+        let result = implementation.program.invoke(input, &child);
         self.check()?;
         let output = result.with_context(|| format!("执行增强失败: {path}"))?;
         self.check_value(&output, "输出")?;
+        crate::value_schema::check(&implementation.output, &output, "输出")?;
+        self.check()?;
         Ok(output)
     }
 

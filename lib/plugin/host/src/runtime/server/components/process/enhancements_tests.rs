@@ -153,11 +153,13 @@ async fn sidecar_enhancements_bind_identity_grants_and_active_revision() -> Resu
     let package = Package {
         schema_version: 1,
         enhancements: vec![Enhancement {
+            input_schema: Some(json!({"type":"object","properties":{"invalid_output":{"type":"boolean"}},"additionalProperties":false}).try_into()?),
+            output_schema: Some(json!({"type":"object","properties":{"tenant":{"type":"string"},"source":{"type":"string"}},"required":["tenant","source"],"additionalProperties":false}).try_into()?),
             capabilities: vec!["/v1/host/scope".into()],
             calls: vec![],
             path: path.into(),
             language: Language::Rhai,
-            source: "fn invoke(input, context) { call_capability(\"/v1/host/scope\", input) }"
+            source: "fn invoke(input, context) { if input.contains(\"invalid_output\") { return #{}; } call_capability(\"/v1/host/scope\", input) }"
                 .into(),
             examples: vec![Example {
                 capabilities: vec![az_plugin_enhancement::CapabilityExample {
@@ -168,7 +170,7 @@ async fn sidecar_enhancements_bind_identity_grants_and_active_revision() -> Resu
                 input: json!({}),
                 output: json!({"tenant":"validation","source":"validation"}),
             }],
-        }, Enhancement {
+        }, Enhancement { input_schema: None, output_schema: None,
             path: "/v1/caller/session".into(), language: Language::TypeScript,
             source: "export function invoke(input, context) { context.user_id = 'forged'; return call_capability('/v1/host/session', input); }".into(),
             calls: vec![], capabilities: vec!["/v1/host/session".into()],
@@ -247,6 +249,12 @@ async fn sidecar_enhancements_bind_identity_grants_and_active_revision() -> Resu
         let output: EnhancementResponse = client.post(endpoint).header("x-aio-token", "fixture-token").json(&request).send().await?.error_for_status()?.json().await?;
         assert_eq!(output.output, json!({"tenant":tenant,"source":source.to_string()}));
         assert_eq!(output.revision, enhancement);
+        for input in [json!("private-input"), json!({"unknown":true}), json!({"invalid_output":true})] {
+            let response = client.post(endpoint).header("x-aio-token", "fixture-token")
+                .json(&json!({"path":path,"input":input})).send().await?;
+            assert_eq!(response.status(), 403);
+            assert!(!response.text().await?.contains("private-input"));
+        }
         let user_request = json!({"path":"/v1/caller/session","input":{}});
         let invoke_user = || client.post(endpoint).header("x-aio-token", "fixture-token").json(&user_request);
         assert_eq!(invoke_user().send().await?.status(), 403);

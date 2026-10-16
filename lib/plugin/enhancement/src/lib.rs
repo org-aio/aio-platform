@@ -12,12 +12,13 @@ mod package;
 mod rhai;
 #[cfg(feature = "typescript")]
 mod typescript;
+mod value_schema;
 
 pub use budget::InvocationControl;
 pub use capabilities::{CapabilityCaller, CapabilityExample, InvocationCapabilities};
 pub use execution::{ScriptExecutor, ScriptProgram, ScriptRuntime, default_runtime};
 pub use invocation::ScriptInvocation;
-pub use model::{Enhancement, Example, Language, Package, ScriptContext};
+pub use model::{Enhancement, EnhancementContract, Example, Language, Package, ScriptContext};
 pub use package::PreparedPackage;
 #[cfg(feature = "rhai")]
 pub use rhai::RhaiExecutor;
@@ -37,5 +38,7 @@ mod composition_tests;
 mod execution_tests;
 #[cfg(test)]
 mod invocation_tests;
+#[cfg(test)]
+mod schema_tests;
 #[cfg(all(test, feature = "rhai", feature = "typescript"))]
 mod tests;

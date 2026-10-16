@@ -20,7 +20,9 @@ Wasm 与 sidecar 继续使用已安装包的 `capabilities.enhancements`，同�
 {"name":"v1.math.double","arguments":{"input":21}}
 ```
 
-工具 schema 要求唯一的 `input` 参数，其值是任意 JSON。脚本参数本身尚未声明业务 JSON Schema；TypeScript 类型也不会自动变成运行时校验。结果同时提供 MCP 文本内容和结构化的 `{"revision":"<digest>","output":42}`。
+工具 schema 要求唯一的 `input` 参数，其值由增强声明的 `input_schema` 约束，省略时接受任意 JSON。结果同时提供 MCP 文本内容和结构化的 `{"revision":"<digest>","output":42}`；`outputSchema` 内嵌对应 `output_schema`，同时声明 revision。业务 schema 的局部引用在独立资源范围内解析，包装参数不会改变 `$defs` / `$ref` 的含义。TypeScript 类型注解不会自动成为运行时校验。
+
+schema 由公共执行链实际校验，不能依赖客户端自行执行。已激活的同一租户路径不得改变 schema，停用和回滚也不能绕过；契约变化需新增版本路径。单份 schema 最多 16 KiB，采用离线 JSON Schema 2020-12；完整约束见[增强执行器](../../../../../enhancement/README.md)。
 
 服务不保留认证会话，工具目录按请求读取。激活新版本后客户端重新调用 `tools/list`；调用结果带实际执行版本。当前只提供发现和执行，不提供发布工具、后台任务或主动目录变更通知。Host 必须匹配配置的公开主机，浏览器 Origin 必须匹配公开来源；超过 128 KiB 的请求体（包括分块传输）被拒绝。
 
@@ -29,6 +31,7 @@ Wasm 与 sidecar 继续使用已安装包的 `capabilities.enhancements`，同�
 使用 HTTP/2，服务为 `aio.runtime.v1.Enhancements`：
 
 - `List(ListRequest)` 返回当前可访问的路径和活动版本。
+- `Describe(DescribeRequest)` 接收 `path`，返回实际目录版本、路径及 UTF-8 `input_schema_json` / `output_schema_json` 字节。隐藏或不存在的路径统一返回 NotFound。
 - `Invoke(InvokeRequest)` 接收 `path` 与 UTF-8 `input_json` 字节，返回 `revision` 与 `output_json`。
 
 跨语言契约位于 `lib/plugin/contract/proto/enhancements.proto`。Rust 客户端启用 `az-plugin-contract/grpc`，从生成的 `grpc::enhancements_client` 导入。认证信息放入请求 metadata；反向代理须转发 HTTP/2 gRPC 和认证头。远程访问由正式入口提供 TLS，本适配器不另开公网端口。
@@ -44,6 +47,8 @@ cargo test -p az-plugin-host --features server protocols::tests -- --ignored
 ```
 
 真实 MCP SDK 与生成的 gRPC 客户端通过同一个 TCP 监听地址验证：权限过滤、匿名与跨租户拒绝、身份不可伪造、Rhai → TypeScript 在线升级、同连接回滚、会话撤销、停用、消息大小、超时和移除插件后的路由消失。测试只装配上述精简组合，并检查组件、密钥、Wasm、Sidecar 和包缓存均不存在。
+
+`protocols::tests::schemas` 还覆盖带局部引用的业务契约发现、双协议无效输入及输出拒绝、切换语言、历史契约保留、跨租户独立发布和重启恢复。Sidecar broker 与真实 Wasm 夹具分别验证相同的输入输出检查。
 
 这里负责把运行时增强暴露给外部客户端。导入外部 MCP 工具和描述文件定义的 unary gRPC 方法由可选的 [RemoteCapabilitiesPlugin](../remote/README.md) 提供，复用同一授权、租户绑定、schema 和取消预算。部署方文件可在线更新绑定，新调用读取新目录，已有脚本持有同一执行快照；流式任务调度仍待实现。Sidecar 已有独立进程监督器，可以在其内部运行这些协议，但不会因此绕过宿主能力检查。
 
