@@ -1,16 +1,18 @@
 use az_plugin_runtime::bindings::aio::plugin::{metadata, transport};
 use serde::{Deserialize, Serialize};
 
+/// 执行器验证整包后返回的描述，宿主用于生成租户目录与授权页面。
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(super) struct Description {
+pub struct Description {
     #[serde(default)]
     pub process: bool,
     pub label: String,
     pub pages: Vec<Page>,
 }
 
+/// 整包页面声明；入口及权限来自已验证的整包，供宿主展示和挂载。
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(super) struct Page {
+pub struct Page {
     pub id: String,
     pub label: String,
     pub entry: String,
@@ -49,7 +51,8 @@ impl From<metadata::Description> for Description {
 }
 
 impl Description {
-    pub(super) fn with_settings(
+    /// 执行器返回描述前调用，按已验证清单标记设置页并校验其展示约束。
+    pub fn with_settings(
         mut self,
         bundle: &az_plugin_bundle::VerifiedBundle,
     ) -> anyhow::Result<Self> {

@@ -1,5 +1,23 @@
 use super::*;
+use anyhow::{Result, ensure};
+use az_plugin_bundle::Bundle;
 use std::fs;
+use std::path::Path;
+
+pub(super) fn default_executors() -> Result<Arc<ComponentExecutors>> {
+    use super::{
+        execution::ComponentExecutor,
+        executors::{SidecarExecutor, WasmComponentExecutor},
+    };
+    Ok(dill::Catalog::builder()
+        .add_value(WasmComponentExecutor::default())
+        .bind::<dyn ComponentExecutor, WasmComponentExecutor>()
+        .add_value(SidecarExecutor::default())
+        .bind::<dyn ComponentExecutor, SidecarExecutor>()
+        .add::<ComponentExecutors>()
+        .build()
+        .get::<dill::OneOf<ComponentExecutors>>()?)
+}
 
 #[derive(Default)]
 pub(super) struct TestIdentity;
@@ -90,6 +108,7 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
         identity.clone(),
         dill::Catalog::builder().build().weak_ref(),
         enhancements,
+        super::tests::default_executors()?,
     )
     .await?;
     let parent = components.publish(first.clone(), "Parent").await?;
@@ -132,14 +151,7 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
     let second = package(&temp.path().join("parent"), &git, None, "2.0.0")?;
     components.publish(second.clone(), "Second").await?;
     assert_eq!(
-        components
-            .slot(parent, &tenant)
-            .await?
-            .stored()
-            .await?
-            .unwrap()
-            .bundle
-            .digest,
+        components.bundle(parent, &tenant).await?.digest(),
         first.digest
     );
     components.install(&tenant, &git, None).await?;
@@ -147,32 +159,20 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
     invalid.digest = "0".repeat(64);
     assert!(components.publish(invalid, "").await.is_err());
     assert_eq!(
-        components
-            .slot(parent, &tenant)
-            .await?
-            .stored()
-            .await?
-            .unwrap()
-            .bundle
-            .digest,
+        components.bundle(parent, &tenant).await?.digest(),
         second.digest
     );
     components.change(&tenant, parent, "rollback").await?;
     assert_eq!(
-        components
-            .slot(parent, &tenant)
-            .await?
-            .stored()
-            .await?
-            .unwrap()
-            .bundle
-            .digest,
+        components.bundle(parent, &tenant).await?.digest(),
         first.digest
     );
-    components.slot(parent, &tenant).await?.deactivate().await?;
-    for slot in components.slots.lock().await.values() {
-        slot.unload().await;
-    }
+    // 模拟执行槽提前停用，重启必须按已提交的安装记录恢复。
+    components
+        .executor(&first)?
+        .deactivate(parent, &tenant)
+        .await?;
+    components.shutdown().await?;
     drop(components);
     let enhancements = Arc::new(
         crate::runtime::server::enhancements::Enhancements::open(
@@ -191,18 +191,12 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
         identity.clone(),
         dill::Catalog::builder().build().weak_ref(),
         enhancements,
+        super::tests::default_executors()?,
     )
     .await?;
     restored.restore().await?;
     assert_eq!(
-        restored
-            .slot(parent, &tenant)
-            .await?
-            .snapshot()
-            .await?
-            .unwrap()
-            .bundle
-            .digest(),
+        restored.bundle(parent, &tenant).await?.digest(),
         first.digest
     );
     restored.change(&tenant, child_id, "uninstall").await?;
@@ -214,6 +208,7 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
             .iter()
             .all(|e| !e.installed)
     );
+    restored.shutdown().await?;
     Ok(())
 }
 

@@ -4,7 +4,7 @@ use anyhow::Result;
 use az_plugin_core::{DynPlugin, Plugin, PluginFuture, PluginGroupBuilder};
 use dill::CatalogBuilder;
 
-use super::{RuntimeAssembly, enhancement_execution::*, infrastructure::*};
+use super::{RuntimeAssembly, component_execution::*, enhancement_execution::*, infrastructure::*};
 use crate::generated::{clipboard, personal_config, worker, worker_webview};
 
 // 每项能力声明自己的服务、路由和具体类型依赖；宏只展开同一套注册步骤。
@@ -209,6 +209,9 @@ pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
         .add::<TypeScriptPlugin>()
         .add::<ScriptRuntimePlugin>()
         .add::<EnhancementServicePlugin>()
+        .add::<ComponentExecutionPlugin>()
+        .add::<WasmComponentPlugin>()
+        .add::<SidecarPlugin>()
         .add::<ComponentResourcesPlugin>()
         .add::<WorkerServicePlugin>()
         .add::<WorkerWebviewServicePlugin>()
@@ -241,6 +244,9 @@ pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
         .add::<TypeScriptPlugin>()
         .add::<ScriptRuntimePlugin>()
         .add::<EnhancementServicePlugin>()
+        .add::<ComponentExecutionPlugin>()
+        .add::<WasmComponentPlugin>()
+        .add::<SidecarPlugin>()
         .add::<ComponentResourcesPlugin>()
         .add::<WorkerServicePlugin>()
         .add::<WorkerWebviewServicePlugin>()

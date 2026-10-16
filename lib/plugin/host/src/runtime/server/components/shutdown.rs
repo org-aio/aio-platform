@@ -7,18 +7,10 @@ use super::Components;
 impl Components {
     pub(in crate::runtime::server) async fn shutdown(&self) -> Result<()> {
         let _mutation = self.mutations.lock().await;
-        let processes = self.processes.shutdown().await;
-        let slots = std::mem::take(&mut *self.slots.lock().await);
-        for slot in slots.into_values() {
-            slot.unload().await;
-        }
-        let development = std::mem::take(&mut *self.development.write().await);
-        for instance in development.into_values() {
-            if let Some(slot) = instance.slot {
-                slot.deactivate().await;
-            }
-        }
+        let execution = self.executors.shutdown().await;
+        self.active.write().await.clear();
+        self.development.write().await.clear();
         self.provisioner.close().await;
-        processes
+        execution
     }
 }

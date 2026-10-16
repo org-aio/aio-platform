@@ -1,6 +1,14 @@
-use super::Components;
+use std::sync::Arc;
+
+use super::{Components, execution::ComponentExecutor};
 use anyhow::{Context, Result, ensure};
+use az_plugin_bundle::Bundle;
 use uuid::Uuid;
+
+struct PreviousExecution {
+    executor: Arc<dyn ComponentExecutor>,
+    bundle: Bundle,
+}
 
 impl Components {
     pub async fn install(&self, tenant: &str, git: &str, revision: Option<&str>) -> Result<()> {
@@ -20,51 +28,75 @@ impl Components {
             .await?
             .context("插件尚未发布")?;
         self.require_parent(tenant, source).await?;
-        if bundle.verify()?.manifest().plugin.runtime.process.is_some() {
-            return self.install_process(tenant, source, bundle, excluded).await;
-        }
-        let enabled: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM component_installations WHERE tenant_id=$1 AND source_id=$2 AND enabled)")
-            .bind(tenant).bind(source).fetch_one(&self.pool).await?;
-        let installed = if enabled {
-            self.installed_bundle(tenant, source).await?
-        } else {
-            None
-        };
-        let previous_process = match installed.as_ref() {
-            Some(bundle) => bundle.verify()?.manifest().plugin.runtime.process.is_some(),
-            None => false,
-        };
-        let resources = self.resources(source, tenant, &bundle).await?;
-        let grants = bundle.verify()?.manifest().plugin.capabilities.clone();
-        let slot = self.slot(source, tenant).await?;
-        let previous = slot.stored().await?;
-        slot.activate(&self.engine, bundle.clone(), grants, resources)
-            .await?;
+        let executor = self.executor(&bundle)?;
+        let previous = self.previous_execution(tenant, source).await?;
         let result = async {
+            executor.activate(source, tenant, &bundle).await?;
             let mut tx = self.pool.begin().await?;
             self.save_installation(&mut tx, tenant, source, &bundle.digest, excluded)
                 .await?;
             tx.commit().await?;
-            anyhow::Ok(())
+            Ok::<_, anyhow::Error>(())
         }
         .await;
         if let Err(error) = result {
-            if previous_process {
-                if let Err(cleanup) = slot.deactivate().await {
-                    eprintln!("清理失败的 process 迁移实例失败: {cleanup:#}");
+            return match self
+                .recover_execution(source, tenant, &executor, previous.as_ref())
+                .await
+            {
+                Ok(()) => Err(error),
+                Err(cleanup) => {
+                    Err(error.context(format!("安装失败且执行器恢复失败: {cleanup:#}")))
                 }
-            } else if let Some(previous) = previous {
-                let resources = self.resources(source, tenant, &previous.bundle).await?;
-                slot.activate(&self.engine, previous.bundle, previous.grants, resources)
-                    .await?;
-            } else {
-                slot.deactivate().await?;
-            }
-            return Err(error);
+            };
         }
-        if previous_process && let Err(error) = self.processes.stop(source, tenant).await {
-            eprintln!("清理旧 process 实例失败: {error:#}");
+        self.bind_execution(source, tenant, &bundle.digest, executor.clone())
+            .await;
+        if let Some(previous) = previous
+            && previous.executor.as_ref().type_id() != executor.as_ref().type_id()
+            && let Err(error) = previous.executor.deactivate(source, tenant).await
+        {
+            // 安装提交点已经完成，旧实例清理失败不能伪装成新版本未激活。
+            eprintln!("清理旧执行器实例失败 ({source}, {tenant}): {error:#}");
         }
+        Ok(())
+    }
+
+    async fn previous_execution(
+        &self,
+        tenant: &str,
+        source: Uuid,
+    ) -> Result<Option<PreviousExecution>> {
+        let Some(bundle) = self.enabled_bundle(tenant, source).await? else {
+            return Ok(None);
+        };
+        let executor = self.executor(&bundle)?;
+        Ok(Some(PreviousExecution { executor, bundle }))
+    }
+
+    async fn recover_execution(
+        &self,
+        source: Uuid,
+        tenant: &str,
+        candidate: &Arc<dyn ComponentExecutor>,
+        previous: Option<&PreviousExecution>,
+    ) -> Result<()> {
+        let mut errors = Vec::new();
+        if previous.is_none_or(|previous| {
+            previous.executor.as_ref().type_id() != candidate.as_ref().type_id()
+        }) && let Err(error) = candidate.deactivate(source, tenant).await
+        {
+            errors.push(format!("清理候选失败: {error:#}"));
+        }
+        if let Some(previous) = previous
+            && let Err(error) = previous
+                .executor
+                .restore(source, tenant, &previous.bundle)
+                .await
+        {
+            errors.push(format!("恢复旧实例失败: {error:#}"));
+        }
+        ensure!(errors.is_empty(), "{}", errors.join("; "));
         Ok(())
     }
 
@@ -87,34 +119,34 @@ impl Components {
         }
         ensure!(action == "disable" || action == "uninstall", "未知管理操作");
         self.require_no_children(tenant, source).await?;
-        let installed:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM component_installations WHERE source_id=$1 AND tenant_id=$2)").bind(source).bind(tenant).fetch_one(&self.pool).await?;
-        ensure!(installed, "当前租户未安装插件");
-        if let Some(bundle) = self.installed_bundle(tenant, source).await?
-            && bundle.verify()?.manifest().plugin.runtime.process.is_some()
-        {
-            return self.change_process(tenant, source, action, bundle).await;
-        }
-        let slot = self.slot(source, tenant).await?;
-        let previous = slot.stored().await?;
-        slot.deactivate().await?;
-        let sql = if action == "uninstall" {
-            "DELETE FROM component_installations WHERE source_id=$1 AND tenant_id=$2"
-        } else {
-            "UPDATE component_installations SET enabled=false,generation=gen_random_uuid() WHERE source_id=$1 AND tenant_id=$2"
-        };
-        let result = sqlx::query(sql)
-            .bind(source)
-            .bind(tenant)
-            .execute(&self.pool)
-            .await;
+        let bundle = self
+            .installed_bundle(tenant, source)
+            .await?
+            .context("当前租户未安装插件")?;
+        let executor = self.executor(&bundle)?;
+        let previous = self.previous_execution(tenant, source).await?;
+        let result = async {
+            executor.deactivate(source, tenant).await?;
+            let sql = if action == "uninstall" {
+                "DELETE FROM component_installations WHERE source_id=$1 AND tenant_id=$2"
+            } else {
+                "UPDATE component_installations SET enabled=false,generation=gen_random_uuid() WHERE source_id=$1 AND tenant_id=$2"
+            };
+            sqlx::query(sql).bind(source).bind(tenant).execute(&self.pool).await?;
+            Ok::<_, anyhow::Error>(())
+        }.await;
         if let Err(error) = result {
-            if let Some(previous) = previous {
-                let resources = self.resources(source, tenant, &previous.bundle).await?;
-                slot.activate(&self.engine, previous.bundle, previous.grants, resources)
-                    .await?;
-            }
-            return Err(error.into());
+            return match self
+                .recover_execution(source, tenant, &executor, previous.as_ref())
+                .await
+            {
+                Ok(()) => Err(error),
+                Err(cleanup) => {
+                    Err(error.context(format!("停用失败且执行器恢复失败: {cleanup:#}")))
+                }
+            };
         }
+        self.active.write().await.remove(&(source, tenant.into()));
         Ok(())
     }
     pub(super) async fn save_installation(

@@ -206,6 +206,28 @@ impl Processes {
         Ok(())
     }
 
+    pub async fn restore(&self, source: Uuid, tenant: &str, bundle: &Bundle) -> Result<()> {
+        let existing = self
+            .instances
+            .lock()
+            .await
+            .get(&(source, tenant.into()))
+            .cloned();
+        if let Some(existing) = existing
+            && existing.bundle.digest() == bundle.digest
+            && existing
+                .client
+                .get("http://localhost/health")
+                .timeout(Duration::from_secs(2))
+                .send()
+                .await
+                .is_ok_and(|response| response.status().is_success())
+        {
+            return Ok(());
+        }
+        self.activate(source, tenant, bundle).await
+    }
+
     pub async fn bundle(&self, source: Uuid, tenant: &str) -> Option<Arc<VerifiedBundle>> {
         self.instances
             .lock()

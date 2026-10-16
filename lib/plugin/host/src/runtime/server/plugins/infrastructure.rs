@@ -14,7 +14,10 @@ use super::super::{
     components::Components, process::ProcessManager, repository::RepositoryInstaller,
     store::PluginStore, wasm::WasmManager,
 };
-use super::{EnhancementServicePlugin, Resource, RuntimeAssembly};
+use super::{
+    ComponentExecutionPlugin, ComponentExecutors, EnhancementServicePlugin, Resource,
+    RuntimeAssembly,
+};
 use crate::configuration::HostConfig;
 
 /// 提供当前宿主拥有的数据库连接池；应用可替换连接建立方式，停止时统一关闭。
@@ -268,6 +271,7 @@ impl Plugin<RuntimeAssembly> for ComponentResourcesPlugin {
             TypeId::of::<StorePlugin>(),
             TypeId::of::<KeyringPlugin>(),
             TypeId::of::<EnhancementServicePlugin>(),
+            TypeId::of::<ComponentExecutionPlugin>(),
         ]
     }
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
@@ -290,6 +294,7 @@ impl Plugin<RuntimeAssembly> for ComponentResourcesPlugin {
                         state.identity.clone(),
                         state.extensions.services.weak_ref(),
                         state.service::<super::super::enhancements::Enhancements>()?,
+                        state.service::<ComponentExecutors>()?,
                     )
                     .await?;
                     state.service::<Resource<Components>>()?.provide(components)

@@ -21,3 +21,32 @@ Component 前端单独变化时保留同一执行实例；本地服务由 CLI �
 `tenant_installation_grants_members_and_menu_visibility_preserves_runtime` 在独立 `component_market_test` PostgreSQL 与真实 WIT 测试组件上验证成员自动授权、跨租户与已移除成员拒绝、旧权限索引回填、升级回退、启停卸载，以及隐藏菜单不改变运行实例和授权。设置 `AIO_COMPONENT_TEST_DATABASE_URL` 与 `AIO_TEST_HEALTHY_COMPONENT` 后运行 `cargo test -p az-plugin-host --features server --lib components:: -- --include-ignored`。
 
 `installation` 统一安装事务、启停卸载与回滚；`delivery` 在同一变更锁内再次检查启用状态、市场版本及排除摘要，自动更新既有安装。回滚仅排除当前市场版本，不永久固定插件；失败沿用安装路径的旧实例恢复。
+
+## 可替换执行器
+
+从宿主 `plugins/component_execution.rs` 进入。`WasmComponentPlugin` 与 `SidecarPlugin` 提供默认实现，`ComponentExecutionPlugin` 汇集 Dill 中的 `ComponentExecutor`，`ComponentResourcesPlugin` 在资源就绪后初始化实现，`ComponentsPlugin` 按持久化安装记录恢复实例。
+
+`execution.rs` 中的 `ComponentExecutor` 相当于 Kotlin 的接口。应用插件可以把自定义实现绑定到这个接口，并省略对应默认插件：
+
+```rust,ignore
+assembly.services
+    .add_value(MyExecutor::default())
+    .bind::<dyn ComponentExecutor, MyExecutor>();
+```
+
+具体实现的 `TypeId` 只用于当前运行时去重和判断是否切换实现；不能写入配置或数据库。`supports` 根据已验证整包选择实现，必须是无副作用且稳定的判断。缺失和歧义匹配都会失败；展示用的 `description.process` 不决定执行路径。
+
+请求先检查当前租户的安装记录、摘要和页面授权，再经 `dispatch.rs` 找到绑定的执行器。原生实现还要核对自己的实例摘要，避免升级期间用新实例处理旧请求。`ExecutionContext` 使用弱引用连接宿主，按整包授权准备租户资源，并从宿主同一个 Dill 容器取得服务。执行器不得长期强持有该容器或宿主，以免形成循环引用。
+
+`installation.rs` 统一版本提交与补偿：
+
+1. 选中候选执行器，记住已启用的旧整包与执行器。
+2. 激活候选，提交安装事务。
+3. 失败时清理异类候选，再按旧安装记录恢复；清理失败仍继续恢复。
+4. 提交成功后更新路由绑定，再释放不同类型的旧执行器资源。
+
+`activate` 与 `restore` 都接收具体整包；后者必须修复未完成提交或被停用的实例，不能只相信本地缓存。默认 Wasm 实现维护持久槽、引擎缓存和开发槽；默认 Sidecar 实现复用监督器、Unix socket broker、数据库转发及其资源所有权。
+
+初始化失败与 panic 会在资源交出前补偿；关闭按反序尝试所有实现并汇总错误。`shutdown` 必须允许部分初始化且只释放当前宿主拥有的资源，不能删除安装记录和持久版本。开发 Sidecar 由 CLI 启停，宿主只释放自身 broker 与转发。默认 Wasm 的前端刷新继续复用后端实例。
+
+这是可信原生扩展接口，具体实现负责自己的执行配额、进程隔离和实例取消。脚本自举使用独立的增强服务，其权限和版本提交仍由宿主控制。当前只覆盖 v2 整包执行；旧 v1 的 `WasmPlugin` / `ProcessPlugin` 以及数据库 provisioner、对象存储仍有独立迁移工作。

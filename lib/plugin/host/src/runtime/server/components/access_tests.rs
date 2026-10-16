@@ -3,7 +3,9 @@ use crate::{
     identity::{IdentityProvider, SessionContext},
     runtime::server::{RuntimeState, request_context},
 };
+use anyhow::{Result, ensure};
 use axum::http::HeaderMap;
+use az_plugin_bundle::Bundle;
 use az_plugin_contract::InvocationScope;
 use az_plugin_runtime::HostServices;
 use serde_json::Value;
@@ -186,13 +188,9 @@ async fn tenant_installation_grants_members_and_menu_visibility_preserves_runtim
             .is_empty()
     );
     assert_eq!(components.description(&tenant, source).await?.1, before.1);
-    assert!(
-        components
-            .slot(source, &tenant)
-            .await?
-            .snapshot()
-            .await?
-            .is_some()
+    assert_eq!(
+        components.bundle(source, &tenant).await?.digest(),
+        first.digest
     );
     assert_eq!(
         components.permissions(&tenant).await?,

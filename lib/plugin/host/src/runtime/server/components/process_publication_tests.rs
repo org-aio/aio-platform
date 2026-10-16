@@ -1,11 +1,14 @@
 use super::*;
+use anyhow::{Context, Result, ensure};
 use axum::{
     Json, Router,
     extract::State,
     http::StatusCode,
     routing::{get, post},
 };
+use az_plugin_bundle::Bundle;
 use serde_json::json;
+use std::path::Path;
 use tokio::{net::UnixListener, task::JoinHandle};
 
 struct Running {
@@ -23,6 +26,7 @@ impl Drop for Running {
 struct Supervisor {
     running: Mutex<HashMap<String, Running>>,
     starts: Mutex<Vec<process::Start>>,
+    rejected: Mutex<Option<String>>,
 }
 
 // 模拟同一租户只能运行一个后台实例，并通过真实 Unix socket 返回健康状态和描述。
@@ -30,6 +34,9 @@ async fn start(
     State(state): State<Arc<Supervisor>>,
     Json(request): Json<process::Start>,
 ) -> Result<StatusCode, StatusCode> {
+    if state.rejected.lock().await.as_ref() == Some(&request.revision) {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
     let mut running = state.running.lock().await;
     if running.values().any(|instance| {
         instance.start.source == request.source && instance.start.tenant == request.tenant
@@ -77,7 +84,7 @@ async fn stop(
     StatusCode::NO_CONTENT
 }
 
-fn package(root: &Path, git: &str, version: &str) -> Result<Bundle> {
+pub(super) fn package(root: &Path, git: &str, version: &str) -> Result<Bundle> {
     std::fs::create_dir_all(root.join("web"))?;
     std::fs::write(root.join("web/index.html"), "<html>Fixture</html>")?;
     let mut binary = vec![0; 64];
@@ -101,7 +108,7 @@ fn package(root: &Path, git: &str, version: &str) -> Result<Bundle> {
 }
 
 #[tokio::test]
-#[ignore = "需要独立本机 PostgreSQL、AIO_PROCESS_ROOT 和监督器测试 socket"]
+#[ignore = "需要独立本机 PostgreSQL、真实 WIT Component 和监督器测试 socket"]
 async fn publication_preserves_running_singleton_process() -> Result<()> {
     let database = std::env::var("AIO_COMPONENT_TEST_DATABASE_URL")?;
     let url = reqwest::Url::parse(&database)?;
@@ -140,6 +147,7 @@ async fn publication_preserves_running_singleton_process() -> Result<()> {
         Arc::new(super::tests::TestIdentity),
         dill::Catalog::builder().build().weak_ref(),
         enhancements,
+        super::tests::default_executors()?,
     )
     .await?;
     let git = format!(
@@ -158,7 +166,7 @@ async fn publication_preserves_running_singleton_process() -> Result<()> {
     // 重发相同整包和发布新版本均不能触碰已安装实例。
     components.publish(first.clone(), "Same").await?;
     let second = package(root.path(), &git, "2.0.0")?;
-    components.publish(second, "Second").await?;
+    components.publish(second.clone(), "Second").await?;
     assert_eq!(
         components
             .installed_bundle("default", source)
@@ -197,15 +205,50 @@ async fn publication_preserves_running_singleton_process() -> Result<()> {
     let broker_socket = root.join(original.id()).join("broker/gateway.sock");
     let broker = tokio::net::UnixStream::connect(&broker_socket).await?;
     drop(broker);
+    // 监督器拒绝新版后，必须恢复旧进程及其 broker，不能只恢复数据库记录。
+    *supervisor.rejected.lock().await = Some(second.digest.clone());
+    assert!(components.install("default", &git, None).await.is_err());
+    *supervisor.rejected.lock().await = None;
+    assert_eq!(
+        components.bundle(source, "default").await?.digest(),
+        first.digest
+    );
+    assert!(supervisor.running.lock().await.contains_key(&original.id()));
+    tokio::net::UnixStream::connect(&broker_socket).await?;
+
+    components.install("default", &git, None).await?;
+    assert_eq!(
+        components.bundle(source, "default").await?.digest(),
+        second.digest
+    );
+    components.change("default", source, "rollback").await?;
+    assert_eq!(
+        components.bundle(source, "default").await?.digest(),
+        first.digest
+    );
+
+    // 同一来源在真实 Wasm 与 Unix socket 进程之间切换，并按发布版本回滚。
+    let wasm = super::tests::package(&root.join("wasm-candidate"), &git, None, "3.0.0")?;
+    components.publish(wasm.clone(), "Wasm").await?;
+    components.install("default", &git, None).await?;
+    assert!(supervisor.running.lock().await.is_empty());
+    assert_eq!(
+        components.bundle(source, "default").await?.digest(),
+        wasm.digest
+    );
+    components.change("default", source, "rollback").await?;
+    assert_eq!(
+        components.bundle(source, "default").await?.digest(),
+        second.digest
+    );
+    components.change("default", source, "rollback").await?;
+    assert_eq!(
+        components.bundle(source, "default").await?.digest(),
+        first.digest
+    );
     components.shutdown().await?;
     assert!(supervisor.running.lock().await.is_empty());
-    assert!(
-        components
-            .processes
-            .bundle(source, "default")
-            .await
-            .is_none()
-    );
+    assert!(components.bundle(source, "default").await.is_err());
     assert!(
         tokio::net::UnixStream::connect(&broker_socket)
             .await

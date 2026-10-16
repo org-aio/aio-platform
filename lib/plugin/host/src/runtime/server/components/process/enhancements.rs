@@ -89,6 +89,7 @@ mod tests {
             Arc::new(TestIdentity),
             dill::Catalog::builder().build().weak_ref(),
             enhancements,
+            crate::runtime::server::components::tests::default_executors()?,
         )
         .await?;
         let tenant = uuid::Uuid::new_v4().to_string();

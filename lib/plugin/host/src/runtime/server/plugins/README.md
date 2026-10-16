@@ -99,11 +99,13 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 | `RhaiPlugin` / `TypeScriptPlugin` | 向 Dill 提供对应的 `ScriptExecutor`，省略后不接受该语言 |
 | `ScriptRuntimePlugin` | 汇集所选脚本执行器，统一候选与样例验证，不连接数据库或创建文件 |
 | `EnhancementServicePlugin` | 依赖数据库与脚本运行时，提供统一的增强版本、授权和调用服务 |
-| `ComponentResourcesPlugin` | 依赖存储、密钥和增强服务，配置组件存储时创建组件执行环境，停止时卸载实例并关闭组件连接 |
+| `WasmComponentPlugin` / `SidecarPlugin` | 向 Dill 提供 v2 整包的 `ComponentExecutor`；省略后不初始化对应引擎或监督器客户端 |
+| `ComponentExecutionPlugin` | 汇集整包执行器并拒绝重复类型；本身不创建执行资源 |
+| `ComponentResourcesPlugin` | 依赖存储、密钥、增强服务与整包执行器，配置组件存储时初始化所选实现，停止时卸载实例并关闭组件连接 |
 
 替换数据库连接方式时保留 `DatabasePlugin`，省略 `PostgresPlugin`，在自己的插件中使用 Dill 绑定 `dyn DatabaseProvider`；密钥同理。Provider 返回的连接池属于本次宿主，会在关闭或初始化失败时关闭，不应返回另一个宿主仍在使用的池。所有服务和 Sidecar 消费同一个容器提供的实例。
 
-该替换点允许外部连接管理与密钥来源；平台的数据模型仍使用 PostgreSQL，组件数据库 provisioner、对象存储和执行器分发尚未全部抽象。选择是否安装 Wasm 资源不等于已经具备任意执行器替换契约。
+该替换点允许外部连接管理与密钥来源；平台的数据模型仍使用 PostgreSQL，组件数据库 provisioner 与对象存储尚未抽象。旧 `WasmPlugin` / `ProcessPlugin` 管理 v1 资源，与 v2 整包执行器插件分开。
 
 ## 脚本执行器
 
@@ -111,8 +113,18 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 
 `EnhancementServicePlugin` 将此运行时用于候选编译、样例重放与持久版本恢复，编译产物用于在线调用。自定义原生执行器属于可信宿主代码，必须自行保持状态隔离、资源上限与取消约定；脚本无法替换执行器或扩大权限。增强服务统一保留输入输出配额、并发额度、租户授权和原子版本激活。
 
-只有 `ScriptRuntimePlugin` 和语言插件的宿主可以使用无效数据库配置启动并执行纯计算。增加 `EnhancementServicePlugin` 后才需要数据库；MCP/gRPC 直接依赖此服务，不再通过组件资源间接初始化执行引擎。Wasm 与 Sidecar 仍使用各自的执行契约，其统一替换工作尚未完成。
+只有 `ScriptRuntimePlugin` 和语言插件的宿主可以使用无效数据库配置启动并执行纯计算。增加 `EnhancementServicePlugin` 后才需要数据库；MCP/gRPC 直接依赖此服务，不再通过组件资源间接初始化执行引擎。Wasm 与 Sidecar 的 v2 整包执行统一使用 `ComponentExecutor`，同样不要求选择默认实现。
+
+## 整包执行器
+
+从 `component_execution.rs` 的装配入口开始，再读 `components/execution.rs` 的契约与 `components/README.md` 的数据流。保留 `ComponentExecutionPlugin` / `ComponentResourcesPlugin` / `ComponentsPlugin`，省略 `WasmComponentPlugin` 或 `SidecarPlugin`，在自己的插件中绑定 `dyn ComponentExecutor`。同一具体类型重复绑定、没有匹配和多个匹配都明确失败；`supports` 只匹配已验证的整包格式，不是运行时身份。
+
+安装记录是版本提交点。执行器负责准备并激活实例、按指定已提交整包恢复、释放单实例及关闭本次宿主资源。候选激活失败或安装 SQL 提交失败时，宿主清理异类候选并恢复旧执行器；一个清理失败不跳过其他补偿。提交成功后的旧实例清理失败会被报告，不会把已成功提交的安装误报为失败。关闭保留安装状态和活动版本；初始化失败或 panic、关闭 panic 均经过资源补偿。原生实现必须能关闭部分初始化的资源。
+
+`ExecutionContext` 复用租户资源与宿主同一个 Dill 容器；它只交给可信的原生执行器。Rhai、TypeScript、Wasm 和 Sidecar 内的业务代码不能通过这个接口突破能力授权。`TypeId` 不进入数据库；重启时从安装整包重新选择执行器，在线请求仍核对租户与已提交摘要。
 
 ## 验证
 
 `plugins::tests` 使用无效数据库地址启动真实 HTTP 入口，验证仅安装自定义路由时没有隐式资源；`plugins::infrastructure_tests` 验证注入共享、初始化顺序、无业务恢复时资源仍就绪、失败与 panic 后补偿、重复资源及歧义 Provider 拒绝。独立 PostgreSQL 测试验证替换 Provider 后的迁移、查询和连接池关闭。协议与 Sidecar 测试复用正式装配，验证所有调用通道继续共享增强版本和授权。
+
+外部 crate 集成测试 `tests/component_executors.rs` 只消费公开契约，覆盖实际 HTTP 发布、安装、挂载、调用、不同执行器切换、回滚、真实 COMMIT 失败、停用、卸载和重启恢复；还覆盖缺失/歧义匹配、重复类型、初始化失败、panic、取消等待和关闭错误的补偿。默认 Wasm/Sidecar 回归使用真实 WIT 组件和 Unix socket。

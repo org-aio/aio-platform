@@ -2,6 +2,7 @@
 
 mod admission;
 mod builtins;
+mod component_execution;
 mod enhancement_execution;
 mod infrastructure;
 #[cfg(test)]
@@ -25,6 +26,7 @@ use super::RuntimeState;
 
 pub(super) use admission::admit;
 pub use builtins::*;
+pub use component_execution::*;
 pub use enhancement_execution::*;
 pub use infrastructure::*;
 use lifecycle::{HookPlan, Lifecycle};

@@ -76,7 +76,7 @@ async fn update_status(
             .as_ref()
             .is_some_and(|status| status.phase == "failed")
         {
-            state.components()?.discard_development_candidate().await;
+            state.components()?.discard_development_candidate().await?;
         }
         if let Err(error) = super::retention::collect(&state).await {
             eprintln!("开发快照回收失败: {error:#}");

@@ -20,6 +20,21 @@ impl Drop for SocketAlias {
 }
 
 impl Processes {
+    pub(in crate::runtime::server::components) async fn deactivate_development(
+        &self,
+        source: Uuid,
+    ) {
+        let instance = self
+            .instances
+            .lock()
+            .await
+            .remove(&(source, "development".into()));
+        if let Some(instance) = instance {
+            // 本地进程由 CLI 所有；宿主只关闭自己的 broker、数据库转发和短路径。
+            instance.resources.shutdown().await;
+        }
+    }
+
     pub(in crate::runtime::server::components) async fn prepare_development(
         &self,
         artifact: &DevArtifact,
