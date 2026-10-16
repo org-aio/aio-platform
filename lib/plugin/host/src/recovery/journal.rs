@@ -131,6 +131,18 @@ impl ConfigurationJournal {
         self.save(next)
     }
 
+    /// 本机工具在持锁状态下写入经过产品契约迁移的候选；成功组合仍由下次实际启动确认。
+    pub fn stage_configuration(&mut self, value: &Value) -> Result<()> {
+        ensure!(self.healthy, "恢复记录写入状态不确定，请退出并重新打开");
+        let bytes = serde_json::to_vec_pretty(value)?;
+        ensure!(bytes.len() <= 64 * 1024, "候选配置超过大小限制");
+        if let Err(error) = storage::write_atomic(&self.record.source, &bytes) {
+            self.healthy = false;
+            return Err(error.context("写入迁移后的候选失败"));
+        }
+        self.allow_retry()
+    }
+
     /// 调用方校验最后成功配置后，显式恢复部署文件；从不默认恢复为全量启用。
     pub fn restore(&mut self) -> Result<()> {
         ensure!(self.healthy, "恢复记录写入状态不确定，请退出并重新打开");

@@ -6,6 +6,32 @@ use serde_json::json;
 use super::*;
 
 #[test]
+fn staged_contract_migration_keeps_the_last_confirmed_configuration() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let source = root.path().join("composition.json");
+    std::fs::write(&source, b"original")?;
+    let mut journal = ConfigurationJournal::open(&root.path().join("journal"), &source)?;
+    let original = serde_json::json!({"schema_version":1,"disabled":true});
+    let attempt = journal.begin(configuration_digest(b"original"))?;
+    journal.confirm(&attempt, original.clone())?;
+    let next = serde_json::json!({"schema_version":2,"disabled":true});
+    journal.stage_configuration(&next)?;
+    assert_eq!(journal.confirmed().context("缺少成功记录")?.value, original);
+    let bytes = read_configuration(&source)?;
+    assert_eq!(serde_json::from_slice::<serde_json::Value>(&bytes)?, next);
+    journal.begin(configuration_digest(&bytes))?;
+    drop(journal);
+    let mut restarted = ConfigurationJournal::open(&root.path().join("journal"), &source)?;
+    assert!(restarted.blocked(&configuration_digest(&bytes)));
+    assert!(restarted.begin(configuration_digest(&bytes)).is_err());
+    assert_eq!(
+        restarted.confirmed().context("缺少成功记录")?.value,
+        original
+    );
+    Ok(())
+}
+
+#[test]
 fn confirmed_configuration_survives_rejection_interruption_and_explicit_restore() -> Result<()> {
     let root = tempfile::tempdir()?;
     let directory = root.path().join("recovery");
