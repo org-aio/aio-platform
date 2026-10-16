@@ -1,0 +1,20 @@
+[package]
+name = "az-plugin-process"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+az-plugin-contract = { path = "../contract" }
+axum.workspace = true
+serde_json.workspace = true
+subtle = "2.6"
+tokio = { workspace = true, features = ["signal"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+
+[lints]
+workspace = true

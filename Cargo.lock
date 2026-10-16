@@ -701,6 +701,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "az-plugin-process"
+version = "2026.5.10"
+dependencies = [
+ "anyhow",
+ "axum",
+ "az-plugin-contract",
+ "serde_json",
+ "subtle",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "az-plugin-runtime"
 version = "2026.5.10"
 dependencies = [
