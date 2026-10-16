@@ -15,7 +15,7 @@ async-trait = { version = "0.1", optional = true }
 futures-util = { version = "0.3", optional = true }
 az-plugin-bundle = { path = "../bundle", optional = true }
 az-plugin-contract = { path = "../contract", optional = true }
-az-plugin-runtime = { path = "../runtime", optional = true }
+az-plugin-runtime = { path = "../runtime", default-features = false, optional = true }
 az-plugin-core = { path = "../core", default-features = false, optional = true }
 az-plugin-enhancement = { path = "../enhancement", optional = true }
 semver = { version = "1", optional = true }
@@ -53,10 +53,12 @@ web-sys = { version = "0.3.77", features = ["AbortSignal", "Document", "Element"
 test-support = ["server"]
 components = ["dep:az-plugin-bundle", "dep:az-plugin-contract", "dep:az-plugin-runtime", "dep:az-plugin-core", "dep:az-plugin-enhancement", "dep:async-trait", "dep:semver", "dep:getrandom", "dep:futures-util"]
 default = []
+wasm = ["server", "dep:wasmtime", "az-plugin-runtime/wasm", "az-plugin-manifest/wasm-validation"]
+sidecar = ["server"]
 ui = ["dep:dioxus", "dep:dioxus-icons", "dep:az-dioxus-admin-shell", "dep:az-ui-components"]
 web = ["ui", "dioxus/web", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
 desktop = ["ui", "dioxus/desktop", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
-server = ["dep:tokio-util", "dep:http-body", "dep:jsonwebtoken","components", "az-plugin-manifest/validation", "az-plugin-contract/grpc", "dep:rmcp", "dep:tonic", "axum/http2", "dep:az-plugin-package", "dep:axum", "dep:flate2", "dep:kuchikiki", "dep:mime_guess", "dep:reqwest", "dep:sha2", "dep:sqlx", "dep:tar", "dep:tokio", "dep:toml", "dep:tower-http", "dep:uuid", "dep:wasmtime"]
+server = ["dep:tokio-util", "dep:http-body", "dep:jsonwebtoken","components", "az-plugin-manifest/validation", "az-plugin-contract/grpc", "dep:rmcp", "dep:tonic", "axum/http2", "dep:az-plugin-package", "dep:axum", "dep:flate2", "dep:kuchikiki", "dep:mime_guess", "dep:reqwest", "dep:sha2", "dep:sqlx", "dep:tar", "dep:tokio", "dep:toml", "dep:tower-http", "dep:uuid"]
 
 [lints.rust]
 unsafe_code = "forbid"

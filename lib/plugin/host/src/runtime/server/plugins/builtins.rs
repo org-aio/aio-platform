@@ -1,10 +1,12 @@
+#[cfg(any(feature = "wasm", feature = "sidecar"))]
+use super::component_execution::*;
 use std::any::TypeId;
 
 use anyhow::Result;
-use az_plugin_core::{DynPlugin, Plugin, PluginFuture, PluginGroupBuilder};
+use az_plugin_core::{DynPlugin, Plugin, PluginFuture};
 use dill::CatalogBuilder;
 
-use super::{RuntimeAssembly, component_execution::*, enhancement_execution::*, infrastructure::*};
+use super::{RuntimeAssembly, enhancement_execution::*, infrastructure::*};
 use crate::generated::{clipboard, personal_config, worker, worker_webview};
 
 // 每项能力声明自己的服务、路由和具体类型依赖；宏只展开同一套注册步骤。
@@ -31,12 +33,9 @@ macro_rules! route_plugin {
     };
 }
 
-route_plugin!(
-    FrontendPlugin,
-    [StorePlugin, RepositoryPlugin, ProcessPlugin, WasmPlugin],
-    [],
-    |_| { super::super::routes::frontend() }
-);
+route_plugin!(FrontendPlugin, [StorePlugin, RepositoryPlugin], [], |_| {
+    super::super::routes::frontend()
+});
 route_plugin!(EnhancementsPlugin, [EnhancementServicePlugin], [], |_| {
     super::super::enhancements::router()
 });
@@ -75,8 +74,6 @@ impl Plugin<RuntimeAssembly> for ManagementPlugin {
         vec![
             TypeId::of::<StorePlugin>(),
             TypeId::of::<RepositoryPlugin>(),
-            TypeId::of::<ProcessPlugin>(),
-            TypeId::of::<WasmPlugin>(),
         ]
     }
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
@@ -203,24 +200,16 @@ pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
         .add::<KeyringPlugin>()
         .add::<StorePlugin>()
         .add::<RepositoryPlugin>()
-        .add::<ProcessPlugin>()
-        .add::<WasmPlugin>()
         .add::<RhaiPlugin>()
         .add::<TypeScriptPlugin>()
         .add::<ScriptRuntimePlugin>()
         .add::<EnhancementServicePlugin>()
-        .add::<ComponentExecutionPlugin>()
-        .add::<WasmComponentPlugin>()
-        .add::<SidecarPlugin>()
-        .add::<ComponentResourcesPlugin>()
         .add::<WorkerServicePlugin>()
         .add::<WorkerWebviewServicePlugin>()
         .add::<PersonalConfigServicePlugin>()
         .add::<ClipboardServicePlugin>()
         .add::<ManagementPlugin>()
         .add::<FrontendPlugin>()
-        .add::<ComponentsPlugin>()
-        .add::<DeliveryPlugin>()
         .add::<EnhancementsPlugin>()
         .add::<McpPlugin>()
         .add::<GrpcPlugin>()
@@ -231,40 +220,18 @@ pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
         .add::<WorkerWebviewsPlugin>()
         .add::<PersonalConfigPlugin>()
         .add::<ClipboardPlugin>();
-    PluginGroupBuilder::default()
-        .add::<PostgresPlugin>()
-        .add::<DatabasePlugin>()
-        .add::<FileKeyringPlugin>()
-        .add::<KeyringPlugin>()
-        .add::<StorePlugin>()
-        .add::<RepositoryPlugin>()
-        .add::<ProcessPlugin>()
-        .add::<WasmPlugin>()
-        .add::<RhaiPlugin>()
-        .add::<TypeScriptPlugin>()
-        .add::<ScriptRuntimePlugin>()
-        .add::<EnhancementServicePlugin>()
+    #[cfg(feature = "wasm")]
+    catalog.add::<WasmPlugin>().add::<WasmComponentPlugin>();
+    #[cfg(feature = "sidecar")]
+    catalog.add::<ProcessPlugin>().add::<SidecarPlugin>();
+    #[cfg(any(feature = "wasm", feature = "sidecar"))]
+    catalog
         .add::<ComponentExecutionPlugin>()
-        .add::<WasmComponentPlugin>()
-        .add::<SidecarPlugin>()
         .add::<ComponentResourcesPlugin>()
-        .add::<WorkerServicePlugin>()
-        .add::<WorkerWebviewServicePlugin>()
-        .add::<PersonalConfigServicePlugin>()
-        .add::<ClipboardServicePlugin>()
-        .add::<ManagementPlugin>()
-        .add::<FrontendPlugin>()
         .add::<ComponentsPlugin>()
-        .add::<DeliveryPlugin>()
-        .add::<EnhancementsPlugin>()
-        .add::<McpPlugin>()
-        .add::<GrpcPlugin>()
-        .add::<BootstrapPlugin>()
-        .add::<NavigationPlugin>()
-        .add::<ToolsPlugin>()
-        .add::<WorkersPlugin>()
-        .add::<WorkerWebviewsPlugin>()
-        .add::<PersonalConfigPlugin>()
-        .add::<ClipboardPlugin>()
-        .resolve(&catalog.build())
+        .add::<DeliveryPlugin>();
+    let catalog = catalog.build();
+    Ok(catalog
+        .get::<dill::AllOf<dyn Plugin<RuntimeAssembly>>>()?
+        .to_vec())
 }

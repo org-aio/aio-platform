@@ -1,11 +1,9 @@
 use crate::identity::SessionContext;
 use anyhow::{Result, bail};
 use async_trait::async_trait;
+use az_plugin_contract::transport::{Request, Response};
 use az_plugin_contract::{InvocationScope, RequestContext};
-use az_plugin_runtime::{
-    HostServices,
-    bindings::aio::plugin::transport::{Request, Response},
-};
+use az_plugin_runtime::HostServices;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -33,6 +31,7 @@ impl Services {
             ..Default::default()
         }
     }
+    #[cfg(any(test, feature = "sidecar"))]
     pub(super) fn interactive(&self, id: &str, tenant: &str, user: &str) -> Result<RequestContext> {
         let requests = self
             .requests
@@ -53,6 +52,7 @@ impl Services {
         Ok(context.clone())
     }
 
+    #[cfg(any(test, feature = "sidecar"))]
     pub(super) fn background(
         self: &Arc<Self>,
         tenant: &str,

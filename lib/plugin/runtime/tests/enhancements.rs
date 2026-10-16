@@ -1,3 +1,6 @@
+#![cfg(feature = "wasm")]
+
+use az_plugin_contract::transport::{Request, Response};
 use std::sync::{Arc, RwLock};
 
 use anyhow::{Context, Result};
@@ -8,10 +11,7 @@ use az_plugin_contract::{
 use az_plugin_enhancement::{
     Enhancement, Example, Language, Package, PreparedPackage, ScriptContext,
 };
-use az_plugin_runtime::{
-    ComponentEngine, HostServices, InvocationResources,
-    bindings::aio::plugin::transport::{Request, Response},
-};
+use az_plugin_runtime::{ComponentEngine, HostServices, InvocationResources};
 use serde_json::json;
 
 struct Host(RwLock<PreparedPackage>);

@@ -18,7 +18,7 @@ impl Components {
         pool: PgPool,
         storage: &crate::configuration::ComponentStorage,
         keyring: Arc<Keyring>,
-        identity: Arc<dyn crate::identity::IdentityProvider>,
+        #[cfg(feature = "sidecar")] identity: Arc<dyn crate::identity::IdentityProvider>,
         runtime_services: dill::CatalogWeakRef,
         enhancements: Arc<super::super::enhancements::Enhancements>,
         executors: Arc<ComponentExecutors>,
@@ -31,6 +31,7 @@ impl Components {
         let provisioner = DatabaseProvisioner::connect(&storage.database_url).await?;
         let services = Arc::new(services::Services::with_enhancements(enhancements.clone()));
         let components = Arc::new(Self {
+            #[cfg(feature = "sidecar")]
             enhancements,
             pool,
             development: Default::default(),
@@ -38,6 +39,7 @@ impl Components {
             keyring,
             objects: storage.root.join("objects"),
             services,
+            #[cfg(feature = "sidecar")]
             identity,
             runtime_services,
             executors,
@@ -80,7 +82,7 @@ impl Components {
             .migrations()
             .map(|(name, sql)| (name.to_owned(), sql.to_owned()))
             .collect::<Vec<_>>();
-        Ok(InvocationResources {
+        let resources = InvocationResources {
             database: if grants.database {
                 Some(
                     self.provisioner
@@ -97,7 +99,9 @@ impl Components {
             },
             keyring: Some(self.keyring.clone()),
             services: Some(self.services.clone()),
-        })
+        };
+        resources.validate_scope(&source.to_string(), tenant)?;
+        Ok(resources)
     }
 }
 

@@ -28,6 +28,7 @@ mod package_repository;
 mod package_store;
 mod page_state;
 pub mod plugins;
+#[cfg(feature = "sidecar")]
 mod process;
 mod protocols;
 mod publication;
@@ -41,11 +42,13 @@ mod routes;
 mod service_dispatch;
 mod source_migration;
 mod store;
+#[cfg(feature = "sidecar")]
 mod supervisor;
 #[cfg(feature = "test-support")]
 pub mod test_support;
 mod tools;
 pub(crate) mod transport;
+#[cfg(feature = "wasm")]
 mod wasm;
 
 use std::{
@@ -59,6 +62,7 @@ use crate::runtime::PublishState;
 
 pub use bootstrap_document::document as bootstrap_document;
 pub use routes::router;
+#[cfg(feature = "sidecar")]
 pub use supervisor::run as run_supervisor;
 
 #[derive(Clone)]
@@ -95,10 +99,10 @@ impl RuntimeState {
     pub(crate) fn repository(&self) -> Result<Arc<repository::RepositoryInstaller>> {
         self.service()
     }
-    pub(crate) fn process(&self) -> Result<Arc<process::ProcessManager>> {
+    pub(crate) fn process(&self) -> Result<Arc<dyn plugins::ProcessExecutor>> {
         self.service()
     }
-    pub(crate) fn wasm(&self) -> Result<Arc<wasm::WasmManager>> {
+    pub(crate) fn wasm(&self) -> Result<Arc<dyn plugins::WasmExecutor>> {
         self.service()
     }
 
@@ -349,7 +353,18 @@ impl RuntimeState {
         for target in &targets {
             self.restore_package_cache(&target.revision).await?;
         }
-        if let Err(error) = self.process()?.health().await {
+        if targets.is_empty()
+            && self
+                .extensions
+                .services
+                .builders_for::<dyn plugins::ProcessExecutor>()
+                .count()
+                == 0
+        {
+            return Ok(());
+        }
+        let manager = self.process().context("未装配可用的进程执行器")?;
+        if let Err(error) = manager.health().await {
             if !targets.is_empty() {
                 return Err(error.context("已安装 process 插件，需要可用的监督器"));
             }
@@ -360,7 +375,7 @@ impl RuntimeState {
             .reconcile(
                 targets
                     .iter()
-                    .map(|target| supervisor::StartProcessRequest {
+                    .map(|target| plugins::StartProcessRequest {
                         tenant_id: target.tenant_id.clone(),
                         source_id: target.source_id.clone(),
                         revision: target.revision.clone(),
@@ -447,7 +462,7 @@ impl RuntimeState {
         source_id: &str,
         revision: &str,
         artifact: &str,
-    ) -> Result<wasm::WasmActivation> {
+    ) -> Result<plugins::WasmActivation> {
         self.restore_package_cache(revision).await?;
         let artifact = self.repository()?.artifact(revision, artifact)?;
         let manager = self.wasm()?;

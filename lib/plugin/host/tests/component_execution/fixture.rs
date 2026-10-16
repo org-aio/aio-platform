@@ -227,13 +227,11 @@ pub fn plugins(probes: [Arc<Probe>; 2], surfaces: bool) -> Vec<DynPlugin<Runtime
         Arc::new(RhaiPlugin),
     ];
     if surfaces {
-        // 既有 v1 管理与页面路由仍显式选择其依赖；v2 执行器没有隐式默认实现。
+        // 管理与页面路由只依赖公共执行契约，替代执行器不引入内置引擎。
         plugins.extend([
             Arc::new(ManagementPlugin) as DynPlugin<RuntimeAssembly>,
             Arc::new(FrontendPlugin),
             Arc::new(RepositoryPlugin),
-            Arc::new(ProcessPlugin),
-            Arc::new(WasmPlugin),
         ]);
     }
     plugins

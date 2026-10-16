@@ -1,4 +1,6 @@
-use az_plugin_runtime::bindings::aio::plugin::{metadata, transport};
+use az_plugin_contract::transport;
+#[cfg(feature = "wasm")]
+use az_plugin_runtime::bindings::aio::plugin::metadata;
 use serde::{Deserialize, Serialize};
 
 /// 执行器验证整包后返回的描述，宿主用于生成租户目录与授权页面。
@@ -22,6 +24,7 @@ pub struct Page {
     pub surface: String,
 }
 
+#[cfg(feature = "wasm")]
 impl From<metadata::Description> for Description {
     fn from(value: metadata::Description) -> Self {
         Self {

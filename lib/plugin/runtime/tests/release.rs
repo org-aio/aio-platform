@@ -1,3 +1,6 @@
+#![cfg(feature = "wasm")]
+
+use az_plugin_contract::transport::{Request, Response};
 use std::{
     fs,
     sync::{
@@ -11,10 +14,7 @@ use anyhow::{Result, ensure};
 use async_trait::async_trait;
 use az_plugin_bundle::Bundle;
 use az_plugin_contract::{InvocationScope, RequestContext};
-use az_plugin_runtime::{
-    ComponentEngine, ComponentSlot, HostServices, InvocationResources,
-    bindings::aio::plugin::transport::{Request, Response},
-};
+use az_plugin_runtime::{ComponentEngine, ComponentSlot, HostServices, InvocationResources};
 use tokio::sync::Notify;
 
 const MANIFEST: &str = r#"
@@ -252,6 +252,90 @@ async fn replacement_drains_requests_and_revokes_old_page_revisions() -> Result<
             .await?
             .status,
         200
+    );
+    Ok(())
+}
+
+#[derive(Default)]
+struct TransportHost(std::sync::Mutex<Option<Request>>);
+
+#[async_trait]
+impl HostServices for TransportHost {
+    async fn authorize(&self, _: &InvocationScope, permission: &str) -> Result<bool> {
+        Ok(permission == "plugin:manage")
+    }
+
+    async fn manage(&self, _: &InvocationScope, request: Request) -> Result<Response> {
+        let response = Response {
+            status: 202,
+            headers: request.headers.clone(),
+            body: request.body.clone(),
+        };
+        *self
+            .0
+            .lock()
+            .map_err(|_| anyhow::anyhow!("测试请求锁损坏"))? = Some(request);
+        Ok(response)
+    }
+}
+
+#[tokio::test]
+#[ignore = "需要已构建的 WIT 测试组件"]
+async fn engine_neutral_transport_survives_guest_and_host_wit_boundaries() -> Result<()> {
+    let bytes = fs::read(std::env::var("AIO_TEST_HEALTHY_COMPONENT")?)?;
+    let engine = ComponentEngine::new()?;
+    let component = engine.compile(&bytes).await?;
+    let host = Arc::new(TransportHost::default());
+    let context = RequestContext {
+        tenant_id: Some("tenant".into()),
+        user_id: Some("user".into()),
+        request_id: "transport".into(),
+        ..Default::default()
+    };
+    let scope = InvocationScope {
+        source_id: "source".into(),
+        revision: "revision".into(),
+        context: context.clone(),
+        grants: az_plugin_contract::CapabilityGrants {
+            management: true,
+            ..Default::default()
+        },
+    };
+    let mut instance = engine
+        .instantiate(
+            &component,
+            scope,
+            InvocationResources {
+                services: Some(host.clone()),
+                ..Default::default()
+            },
+        )
+        .await?;
+    let request = Request {
+        method: "PATCH".into(),
+        path: "/management".into(),
+        query: Some("filter=a%2Fb&limit=2".into()),
+        headers: vec![az_plugin_contract::transport::Header {
+            name: "content-type".into(),
+            value: "application/octet-stream".into(),
+        }],
+        body: vec![0, 255, 128, 42],
+    };
+    let response = instance.handle(request.clone(), context).await?;
+    assert_eq!(
+        host.0
+            .lock()
+            .map_err(|_| anyhow::anyhow!("测试请求锁损坏"))?
+            .as_ref(),
+        Some(&request)
+    );
+    assert_eq!(
+        response,
+        Response {
+            status: 202,
+            headers: request.headers,
+            body: request.body
+        }
     );
     Ok(())
 }

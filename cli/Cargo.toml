@@ -22,7 +22,7 @@ sha2.workspace = true
 semver.workspace = true
 include_dir = "0.7.4"
 anyhow.workspace = true
-az-plugin-manifest = { workspace = true, features = ["schema", "validation"] }
+az-plugin-manifest = { workspace = true, features = ["schema", "validation", "wasm-validation"] }
 az-plugin-package.workspace = true
 az-plugin-bundle = { path = "../lib/plugin/bundle" }
 reqwest = { workspace = true, features = ["json"] }

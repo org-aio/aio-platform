@@ -1,19 +1,30 @@
 use super::*;
-use anyhow::{Result, ensure};
+use anyhow::Result;
+#[cfg(feature = "wasm")]
+use anyhow::ensure;
 use az_plugin_bundle::Bundle;
 use std::fs;
 use std::path::Path;
 
+#[cfg(any(feature = "wasm", feature = "sidecar"))]
 pub(super) fn default_executors() -> Result<Arc<ComponentExecutors>> {
-    use super::{
-        execution::ComponentExecutor,
-        executors::{SidecarExecutor, WasmComponentExecutor},
-    };
-    Ok(dill::Catalog::builder()
-        .add_value(WasmComponentExecutor::default())
-        .bind::<dyn ComponentExecutor, WasmComponentExecutor>()
-        .add_value(SidecarExecutor::default())
-        .bind::<dyn ComponentExecutor, SidecarExecutor>()
+    use super::execution::ComponentExecutor;
+    let mut catalog = dill::CatalogBuilder::new();
+    #[cfg(feature = "wasm")]
+    {
+        use super::executors::WasmComponentExecutor;
+        catalog
+            .add_value(WasmComponentExecutor::default())
+            .bind::<dyn ComponentExecutor, WasmComponentExecutor>();
+    }
+    #[cfg(feature = "sidecar")]
+    {
+        use super::executors::SidecarExecutor;
+        catalog
+            .add_value(SidecarExecutor::default())
+            .bind::<dyn ComponentExecutor, SidecarExecutor>();
+    }
+    Ok(catalog
         .add::<ComponentExecutors>()
         .build()
         .get::<dill::OneOf<ComponentExecutors>>()?)
@@ -73,6 +84,7 @@ pub(super) fn package(
     )
 }
 
+#[cfg(feature = "wasm")]
 #[tokio::test]
 #[ignore = "需要独立本机 PostgreSQL 和已构建 WIT Component"]
 async fn published_components_install_optionally_and_restore() -> Result<()> {
@@ -86,6 +98,7 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
     sqlx::raw_sql("CREATE TABLE IF NOT EXISTS plugin_sources(id TEXT PRIMARY KEY,git TEXT); CREATE TABLE IF NOT EXISTS tenant_plugin_bindings(tenant_id TEXT,source_id TEXT,enabled BOOLEAN);").execute(&pool).await?;
     let temp = tempfile::tempdir()?;
     let tenant = Uuid::new_v4().to_string();
+    #[cfg(feature = "sidecar")]
     let identity = Arc::new(TestIdentity);
     let git = format!("https://github.com/example/parent-{tenant}.git");
     let child_git = format!("https://github.com/example/child-{tenant}.git");
@@ -105,6 +118,7 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
             root: temp.path().into(),
         },
         Arc::new(super::load_keyring(&temp.path().join("keys.json"))?),
+        #[cfg(feature = "sidecar")]
         identity.clone(),
         dill::Catalog::builder().build().weak_ref(),
         enhancements,
@@ -188,6 +202,7 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
             root: temp.path().into(),
         },
         Arc::new(super::load_keyring(&temp.path().join("keys.json"))?),
+        #[cfg(feature = "sidecar")]
         identity.clone(),
         dill::Catalog::builder().build().weak_ref(),
         enhancements,
@@ -220,7 +235,7 @@ fn binary_requests_reject_forged_identity_and_escaping_paths() {
         )
         .unwrap()
     };
-    use az_plugin_runtime::bindings::aio::plugin::transport::Request;
+    use az_plugin_contract::transport::Request;
     assert!(Request::try_from(request("/screens", serde_json::json!([]))).is_ok());
     assert!(Request::try_from(request("/../secrets", serde_json::json!([]))).is_err());
     assert!(

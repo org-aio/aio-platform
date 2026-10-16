@@ -59,7 +59,8 @@ impl ScopedDatabase {
         self.source == source && self.tenant == tenant
     }
 
-    pub(crate) async fn begin(&self) -> Result<Transaction<'static, Postgres>> {
+    /// 供可信原生执行器开启受租户隔离和数据库超时限制的事务。
+    pub async fn begin(&self) -> Result<Transaction<'static, Postgres>> {
         let mut transaction = self.pool.begin().await.context("开始插件事务失败")?;
         sqlx::query("SET LOCAL statement_timeout = '3s'")
             .execute(&mut *transaction)

@@ -160,7 +160,7 @@ async fn selected_plugins_control_real_http_routes() -> Result<()> {
     .await?;
     assert!(state.service::<sqlx::PgPool>().is_err());
     assert!(state.service::<az_plugin_runtime::Keyring>().is_err());
-    assert!(state.service::<super::super::wasm::WasmManager>().is_err());
+    assert!(state.service::<dyn super::WasmExecutor>().is_err());
     assert!(!root.path().join("cache").exists());
     let trace = state.service::<Trace>()?;
     assert_eq!(

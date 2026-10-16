@@ -1,12 +1,10 @@
+use az_plugin_contract::transport::Request;
 use std::time::Duration;
 
 use anyhow::Result;
 use az_plugin_contract::{CapabilityGrants, InvocationScope, RequestContext};
 
-use crate::{
-    ComponentEngine, DatabaseProvisioner, InvocationResources,
-    bindings::aio::plugin::transport::Request,
-};
+use crate::{ComponentEngine, DatabaseProvisioner, InvocationResources};
 
 fn increment() -> Request {
     Request {

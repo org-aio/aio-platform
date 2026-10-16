@@ -2,7 +2,7 @@ use crate::identity::SessionContext;
 use anyhow::Context as _;
 
 use super::{
-    RuntimeState, http_error::RuntimeError, process::ProcessResponse, store::ServiceBinding,
+    RuntimeState, http_error::RuntimeError, plugins::ProcessResponse, store::ServiceBinding,
 };
 use crate::runtime::{PluginRequest, PluginRuntime};
 

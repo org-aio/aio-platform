@@ -1,5 +1,13 @@
 # 宿主能力插件
 
+## 编译与装配分开选择
+
+`az-plugin-host` 的 `server` feature 编译宿主契约、平台服务和脚本协议入口，不引入内置 Wasm 或 Sidecar 实现。`wasm` 增加 Wasmtime、v1 Wasm 产物验证及 `WasmPlugin` / `WasmComponentPlugin`；`sidecar` 增加监督器、进程 broker 及 `ProcessPlugin` / `SidecarPlugin`。应用要交付完整组合时启用 `server,wasm,sidecar`，随后仍通过 Dill 选择实际装配的插件。独立的 `aio-host` 和产品宿主显式选择完整组合。
+
+精简 MCP/gRPC 宿主只启用 `server`。替代整包执行器也只需 `server`：`ComponentExecutor`、中立请求类型和执行资源不会引用 Wasmtime 生成类型。关闭任意实现不会回退到内置执行器；缺失或歧义匹配在调用前被拒绝。没有内置整包执行器时，默认组合不注册组件资源和交付任务；自定义组合可显式选择外部实现。
+
+v1 页面分发使用 `WasmExecutor` / `ProcessExecutor` 的 Dill 绑定。内置实现拥有资源初始化与停止钩子，替代实现也必须声明相应生命周期。v1 Wasm 仓库校验仍需 `wasm-validation`；关闭该 feature 明确拒绝该格式，不跳过产物验证。v2 整包的候选验证由所选 `ComponentExecutor` 完成。
+
 宿主通过 `Plugin<RuntimeAssembly>` 复用 `az-plugin-core` 的 TypeId 身份和依赖排序，通过 Dill 提供服务。`RuntimeState` 不再拥有剪贴板、个人配置、设备、设备视图、数据库、包仓库和执行资源的固定字段；HTTP、组件 broker 和 sidecar 使用同一个服务容器。
 
 先看 `RuntimeAssembly`，再看 `builtins.rs` 中的默认平台组合。插件可以注册服务、贡献 HTTP 路由，以及注册恢复、就绪和停止动作。所有恢复动作成功后才执行就绪动作；省略交付插件也会省略它的后台启动动作。`require_service::<dyn Trait>()` 检查接口的唯一绑定，允许应用提供其他实现。`Plugin::dependencies()` 只声明必须先构建的具体插件类型，不能用它强制绑定某个默认服务实现。
@@ -48,11 +56,11 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 
 停止只释放当前宿主拥有的 Sidecar、broker、数据库转发与 Wasm 内存实例，保留 PostgreSQL 中的安装状态、授权与活动版本。旧监督器报告为已存在的进程不会被当成本次创建的资源停止。开发 Sidecar 的进程由 CLI 所有，宿主只关闭自己的 broker 和转发。协作取消要求回调和任务最终返回；无限阻塞或忽略取消的原生插件仍需要外部监督器处理。关闭有错误时仍执行其余清理，下一次启动由现有恢复/孤立实例清理流程继续恢复。
 
-这是原生宿主插件的装配边界，还不包含在线卸载、单插件重启或脚本服务代理。HTTP 路由不能替代能力授权。数据库连接、密钥来源与执行器创建已由所选插件管理；组件内部具体执行器、存储及分发契约仍待迁移，完整目标见 [一切皆插件验收清单](../../../../../../../docs/plugin/everything-as-plugin.md)。
+这是原生宿主插件的装配边界，还不包含在线卸载、单插件重启或脚本服务代理。HTTP 路由不能替代能力授权。数据库连接、密钥来源与执行器创建已由所选插件管理；组件执行契约已经接通，数据库 provisioner 和对象存储仍待抽象，完整目标见 [一切皆插件验收清单](../../../../../../../docs/plugin/everything-as-plugin.md)。
 
 验证：`cargo test -p az-plugin-host --features server plugins::tests`。真实 HTTP 精简组合验收使用无效数据库地址，无需数据库即可运行。
 
-故障验收：`cargo test -p az-plugin-host --features server lifecycle_tests` 覆盖真实端口释放、启动/就绪失败、取消等待、回调 panic、后台工作提交与 HTTP 收尾。`process::shutdown_tests` 使用真实 Unix socket 监督器协议验证只停止本次创建的进程；Component 的持久化停止验收复用 `publication_preserves_running_singleton_process`。
+故障验收：`cargo test -p az-plugin-host --features server lifecycle_tests` 覆盖真实端口释放、启动/就绪失败、取消等待、回调 panic、后台工作提交与 HTTP 收尾。`cargo test -p az-plugin-host --features sidecar process::shutdown_tests` 使用真实 Unix socket 监督器协议验证只停止本次创建的进程；Component 的持久化停止验收复用 `publication_preserves_running_singleton_process`。
 
 空组合或只有自定义路由的组合不连接 PostgreSQL、不读取密钥、不创建 Wasm 或 Sidecar 资源。配置值只由实际安装的插件消费。
 

@@ -8,6 +8,7 @@ use uuid::Uuid;
 pub(super) struct Instance {
     pub source: String,
     pub repository: String,
+    #[cfg(feature = "sidecar")]
     pub backend_digest: String,
     pub generation: String,
     pub bundle: Arc<VerifiedBundle>,
@@ -40,6 +41,7 @@ impl Components {
         let instance = Instance {
             source: artifact.source.clone(),
             repository: repository.into(),
+            #[cfg(feature = "sidecar")]
             backend_digest: artifact.backend_digest.clone(),
             generation: artifact.generation.to_string(),
             bundle: bundle.clone(),

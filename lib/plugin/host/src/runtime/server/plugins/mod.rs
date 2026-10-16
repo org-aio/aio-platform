@@ -10,10 +10,12 @@ mod infrastructure_tests;
 mod lifecycle;
 #[cfg(test)]
 mod lifecycle_tests;
+pub(super) mod process_execution;
 mod resource;
 mod tasks;
 #[cfg(test)]
 mod tests;
+mod wasm_execution;
 
 use std::{any::TypeId, future::Future, pin::Pin, sync::Arc};
 
@@ -30,8 +32,12 @@ pub use component_execution::*;
 pub use enhancement_execution::*;
 pub use infrastructure::*;
 use lifecycle::{HookPlan, Lifecycle};
+pub use process_execution::{
+    ProcessExecutor, ProcessInstance, ProcessResponse, StartProcessRequest,
+};
 pub use resource::Resource;
 pub use tasks::PluginTasks;
+pub use wasm_execution::{WasmActivation, WasmExecutor};
 
 /// 插件贡献的 HTTP 路由；认证仍由各能力的正式入口执行。
 pub type RouteFactory = fn(&RuntimeState) -> Router<RuntimeState>;

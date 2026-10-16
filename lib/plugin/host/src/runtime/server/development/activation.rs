@@ -1,7 +1,6 @@
 use super::super::{
-    RuntimeState, frontend_package::FrontendPackage,
+    RuntimeState, frontend_package::FrontendPackage, plugins::ProcessInstance,
     publication_validation::ensure_publish_capabilities, repository::DiscoveredPlugin,
-    supervisor::ProcessInstance,
 };
 use crate::runtime::PluginRuntime;
 use anyhow::{Context, Result, ensure};

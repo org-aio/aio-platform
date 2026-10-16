@@ -16,13 +16,17 @@ serde_json.workspace = true
 sha2.workspace = true
 sqlx = { workspace = true, features = ["uuid"] }
 tokio = { workspace = true, features = ["fs", "rt-multi-thread"] }
-wasmtime = { workspace = true, features = ["async", "component-model-async", "cache"] }
-wasmtime-wasi = { version = "48.0.1", default-features = false, features = ["p2"] }
+wasmtime = { workspace = true, features = ["async", "component-model-async", "cache"], optional = true }
+wasmtime-wasi = { version = "48.0.1", default-features = false, features = ["p2"], optional = true }
 getrandom = "0.4.2"
 tracing.workspace = true
 sqlparser = { version = "0.61.0", features = ["visitor"] }
 futures-util = "0.3.32"
 aes-gcm = "0.10.3"
+
+[features]
+default = []
+wasm = ["dep:wasmtime", "dep:wasmtime-wasi"]
 
 [dev-dependencies]
 az-plugin-enhancement = { path = "../enhancement" }
@@ -34,3 +38,8 @@ kuchikiki = "=0.8.8-speedreader"
 
 [lints]
 workspace = true
+
+[[example]]
+name = "preview"
+path = "examples/preview/main.rs"
+required-features = ["wasm"]

@@ -6,7 +6,7 @@ mod delivery;
 #[cfg(test)]
 mod delivery_tests;
 mod development;
-#[cfg(test)]
+#[cfg(all(test, feature = "wasm", feature = "sidecar"))]
 mod development_tests;
 mod dispatch;
 pub(in crate::runtime::server) mod execution;
@@ -15,8 +15,9 @@ mod frontend;
 mod installation;
 mod model;
 mod permissions;
+#[cfg(feature = "sidecar")]
 pub(in crate::runtime::server) mod process;
-#[cfg(test)]
+#[cfg(all(test, feature = "sidecar"))]
 mod process_publication_tests;
 mod resources;
 mod services;
@@ -40,6 +41,7 @@ pub(super) use frontend::mount;
 pub(super) use resources::load_keyring;
 
 pub(super) struct Components {
+    #[cfg(feature = "sidecar")]
     pub(super) enhancements: Arc<super::enhancements::Enhancements>,
     pub pool: PgPool,
     development: RwLock<std::collections::BTreeMap<Uuid, development::Instance>>,
@@ -47,6 +49,7 @@ pub(super) struct Components {
     keyring: Arc<Keyring>,
     objects: PathBuf,
     services: Arc<services::Services>,
+    #[cfg(feature = "sidecar")]
     identity: Arc<dyn crate::identity::IdentityProvider>,
     runtime_services: dill::CatalogWeakRef,
     executors: Arc<ComponentExecutors>,

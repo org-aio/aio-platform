@@ -227,25 +227,39 @@ async fn publication_preserves_running_singleton_process() -> Result<()> {
         first.digest
     );
 
-    // 同一来源在真实 Wasm 与 Unix socket 进程之间切换，并按发布版本回滚。
     let wasm = super::tests::package(&root.join("wasm-candidate"), &git, None, "3.0.0")?;
-    components.publish(wasm.clone(), "Wasm").await?;
-    components.install("default", &git, None).await?;
-    assert!(supervisor.running.lock().await.is_empty());
-    assert_eq!(
-        components.bundle(source, "default").await?.digest(),
-        wasm.digest
-    );
-    components.change("default", source, "rollback").await?;
-    assert_eq!(
-        components.bundle(source, "default").await?.digest(),
-        second.digest
-    );
-    components.change("default", source, "rollback").await?;
+    // 完整组合允许同一来源跨执行器切换；精简组合明确拒绝缺失的执行器。
+    #[cfg(feature = "wasm")]
+    {
+        components.publish(wasm.clone(), "Wasm").await?;
+        components.install("default", &git, None).await?;
+        assert!(supervisor.running.lock().await.is_empty());
+        assert_eq!(
+            components.bundle(source, "default").await?.digest(),
+            wasm.digest
+        );
+        components.change("default", source, "rollback").await?;
+        assert_eq!(
+            components.bundle(source, "default").await?.digest(),
+            second.digest
+        );
+        components.change("default", source, "rollback").await?;
+    }
+    #[cfg(not(feature = "wasm"))]
+    {
+        let error = components
+            .publish(wasm, "Unsupported Wasm")
+            .await
+            .err()
+            .context("缺失 Wasm 执行器时仍接受了发布")?;
+        assert!(error.to_string().contains("未装配支持该整包的执行器"));
+    }
     assert_eq!(
         components.bundle(source, "default").await?.digest(),
         first.digest
     );
+    assert!(supervisor.running.lock().await.contains_key(&original.id()));
+    tokio::net::UnixStream::connect(&broker_socket).await?;
     components.shutdown().await?;
     assert!(supervisor.running.lock().await.is_empty());
     assert!(components.bundle(source, "default").await.is_err());

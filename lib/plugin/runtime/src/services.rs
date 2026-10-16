@@ -2,7 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use az_plugin_contract::{EnhancementRequest, EnhancementResponse, InvocationScope};
 
-use crate::bindings::aio::plugin::transport::{Request, Response};
+use az_plugin_contract::transport::{Request, Response};
 
 #[async_trait]
 pub trait HostServices: Send + Sync {

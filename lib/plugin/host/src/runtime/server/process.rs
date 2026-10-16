@@ -2,10 +2,11 @@ use std::{env, net::IpAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{Context as _, Result, bail, ensure};
 use az_plugin_manifest::PageDefinition;
-use reqwest::{Method, StatusCode, Url, header};
+use reqwest::{Method, Url, header};
 
-use super::supervisor::{
-    ProcessInstance, ReconcileProcessesRequest, StartProcessRequest, StopProcessRequest,
+use super::plugins::process_execution::{
+    ProcessExecutor, ProcessInstance, ProcessResponse, ReconcileProcessesRequest,
+    StartProcessRequest, StopProcessRequest,
 };
 
 const MAX_PROCESS_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
@@ -20,12 +21,6 @@ pub struct ProcessManager {
     owned: Arc<tokio::sync::Mutex<Vec<String>>>,
     supervisor: reqwest::Client,
     runtime: reqwest::Client,
-}
-
-pub struct ProcessResponse {
-    pub status: StatusCode,
-    pub content_type: Option<String>,
-    pub body: Vec<u8>,
 }
 
 impl ProcessManager {
@@ -64,7 +59,37 @@ impl ProcessManager {
         })
     }
 
-    pub async fn health(&self) -> Result<()> {
+    fn url(&self, endpoint: &str, path: &str, query: Option<&str>) -> Result<Url> {
+        if !self.local {
+            return process_url(endpoint, path, query);
+        }
+        let mut url = Url::parse(endpoint)?;
+        ensure!(
+            url.scheme() == "http"
+                && url.username().is_empty()
+                && url.password().is_none()
+                && url
+                    .host_str()
+                    .and_then(|s| s.parse::<IpAddr>().ok())
+                    .is_some_and(|ip| ip.is_loopback())
+                && url.path() == "/"
+                && url.query().is_none()
+                && url.fragment().is_none(),
+            "开发服务只允许回环地址"
+        );
+        ensure!(
+            path.starts_with('/') && !path.starts_with("//"),
+            "开发服务路径无效"
+        );
+        url.set_path(path);
+        url.set_query(query);
+        Ok(url)
+    }
+}
+
+#[async_trait::async_trait]
+impl ProcessExecutor for ProcessManager {
+    async fn health(&self) -> Result<()> {
         let response = self
             .supervisor
             .get("http://localhost/health")
@@ -75,7 +100,7 @@ impl ProcessManager {
         Ok(())
     }
 
-    pub async fn start(
+    async fn start(
         &self,
         tenant_id: &str,
         source_id: &str,
@@ -99,7 +124,7 @@ impl ProcessManager {
         Ok(instance)
     }
 
-    pub async fn stop(&self, instance_id: &str) -> Result<()> {
+    async fn stop(&self, instance_id: &str) -> Result<()> {
         let response = self
             .supervisor
             .post("http://localhost/instances/stop")
@@ -117,7 +142,7 @@ impl ProcessManager {
     }
 
     /// 仅释放本次宿主确实创建的实例，监督器返回的既有实例不属于本次清理。
-    pub(super) async fn shutdown(&self) -> Result<()> {
+    async fn shutdown(&self) -> Result<()> {
         let owned = self.owned.lock().await.clone();
         let mut errors = Vec::new();
         for id in owned.iter().rev() {
@@ -133,7 +158,7 @@ impl ProcessManager {
         Ok(())
     }
 
-    pub(super) async fn reconcile(&self, instances: Vec<StartProcessRequest>) -> Result<()> {
+    async fn reconcile(&self, instances: Vec<StartProcessRequest>) -> Result<()> {
         let response = self
             .supervisor
             .post("http://localhost/instances/reconcile")
@@ -150,7 +175,7 @@ impl ProcessManager {
         );
     }
 
-    pub async fn load_pages(&self, endpoint: &str) -> Result<Vec<PageDefinition>> {
+    async fn load_pages(&self, endpoint: &str) -> Result<Vec<PageDefinition>> {
         let endpoint = self.url(endpoint, "/aio/definition", None)?;
         let response = self
             .runtime
@@ -173,7 +198,7 @@ impl ProcessManager {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn request(
+    async fn request(
         &self,
         endpoint: &str,
         method: &str,
@@ -216,33 +241,6 @@ impl ProcessManager {
             content_type,
             body: body.to_vec(),
         })
-    }
-
-    fn url(&self, endpoint: &str, path: &str, query: Option<&str>) -> Result<Url> {
-        if !self.local {
-            return process_url(endpoint, path, query);
-        }
-        let mut url = Url::parse(endpoint)?;
-        ensure!(
-            url.scheme() == "http"
-                && url.username().is_empty()
-                && url.password().is_none()
-                && url
-                    .host_str()
-                    .and_then(|s| s.parse::<IpAddr>().ok())
-                    .is_some_and(|ip| ip.is_loopback())
-                && url.path() == "/"
-                && url.query().is_none()
-                && url.fragment().is_none(),
-            "开发服务只允许回环地址"
-        );
-        ensure!(
-            path.starts_with('/') && !path.starts_with("//"),
-            "开发服务路径无效"
-        );
-        url.set_path(path);
-        url.set_query(query);
-        Ok(url)
     }
 }
 

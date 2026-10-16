@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     MarketplaceManifest, PageBody, PageDefinition, PluginRuntime, RepositoryManifest,
-    RepositoryPackage, validate_wasm_component,
+    RepositoryPackage,
 };
 use anyhow::{Context as _, Result, bail, ensure};
 
@@ -230,10 +230,12 @@ pub fn validate_repository(root: &Path) -> Result<ValidationReport> {
             )?;
             pages.len()
         }
+        #[cfg(feature = "wasm-validation")]
         PluginRuntime::WasmComponent => {
-            let pages = validate_wasm_component(&fs::read(&artifact).with_context(|| {
-                format!("读取 Wasm Component 产物失败: {}", artifact.display())
-            })?)?;
+            let pages =
+                crate::validate_wasm_component(&fs::read(&artifact).with_context(|| {
+                    format!("读取 Wasm Component 产物失败: {}", artifact.display())
+                })?)?;
             validate_declared_pages(&manifest, &pages)?;
             crate::validate_frontend_pages(
                 &manifest,
@@ -242,6 +244,8 @@ pub fn validate_repository(root: &Path) -> Result<ValidationReport> {
             )?;
             pages.len()
         }
+        #[cfg(not(feature = "wasm-validation"))]
+        PluginRuntime::WasmComponent => bail!("当前构建未启用 Wasm 产物验证"),
         PluginRuntime::Process => 0,
         PluginRuntime::RustSource => bail!("rust-source 不使用 plugin.runtime"),
     };

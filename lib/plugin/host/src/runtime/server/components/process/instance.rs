@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, ensure};
 use az_plugin_bundle::{Bundle, VerifiedBundle};
 use az_plugin_contract::RequestContext;
-use az_plugin_runtime::bindings::aio::plugin::transport::{Header, Request, Response};
+use az_plugin_contract::transport::{Header, Request, Response};
 use std::{
     path::PathBuf,
     sync::{Arc, Weak},

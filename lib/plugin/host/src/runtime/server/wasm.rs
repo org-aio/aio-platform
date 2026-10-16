@@ -1,3 +1,4 @@
+use super::plugins::{WasmActivation, WasmExecutor};
 use std::{
     collections::{HashMap, hash_map::Entry},
     path::{Path, PathBuf},
@@ -44,11 +45,6 @@ struct TenantInstance {
     instance: Instance,
 }
 
-pub struct WasmActivation {
-    pub pages: Vec<PageDefinition>,
-    pub created: bool,
-}
-
 pub struct WasmManager {
     engine: Engine,
     components: Mutex<HashMap<PathBuf, Arc<Component>>>,
@@ -74,102 +70,6 @@ impl WasmManager {
             components: Mutex::new(HashMap::new()),
             instances: Mutex::new(HashMap::new()),
         })
-    }
-
-    pub fn activate(
-        &self,
-        tenant_id: &str,
-        source_id: &str,
-        revision: &str,
-        artifact: &Path,
-    ) -> Result<WasmActivation> {
-        let key = InstanceKey::new(tenant_id, source_id, revision);
-        if let Some(instance) = self.instances()?.get(&key).cloned() {
-            return Ok(WasmActivation {
-                pages: call_definition(&instance)?,
-                created: false,
-            });
-        }
-        let candidate = Arc::new(Mutex::new(self.instantiate(artifact)?));
-        let (instance, created) = {
-            let mut instances = self.instances()?;
-            match instances.entry(key.clone()) {
-                Entry::Occupied(entry) => (entry.get().clone(), false),
-                Entry::Vacant(entry) => (entry.insert(candidate).clone(), true),
-            }
-        };
-        match call_definition(&instance) {
-            Ok(pages) => Ok(WasmActivation { pages, created }),
-            Err(error) => {
-                if created {
-                    self.instances()?.remove(&key);
-                }
-                Err(error)
-            }
-        }
-    }
-
-    /// 释放内存实例与编译缓存引用，不修改数据库中的活动版本。
-    pub(super) fn shutdown(&self) -> Result<()> {
-        self.instances()?.clear();
-        self.components
-            .lock()
-            .map_err(|_| anyhow!("Wasm 编译缓存锁已损坏"))?
-            .clear();
-        Ok(())
-    }
-
-    pub fn deactivate(&self, tenant_id: &str, source_id: &str, revision: &str) -> Result<bool> {
-        let key = InstanceKey::new(tenant_id, source_id, revision);
-        Ok(self.instances()?.remove(&key).is_some())
-    }
-
-    pub(super) fn bind_revision(
-        &self,
-        tenant: &str,
-        source: &str,
-        backend: &str,
-        revision: &str,
-    ) -> Result<()> {
-        let mut instances = self.instances()?;
-        let instance = instances
-            .get(&InstanceKey::new(tenant, source, backend))
-            .cloned()
-            .context("开发后端实例不存在")?;
-        instances.insert(InstanceKey::new(tenant, source, revision), instance);
-        Ok(())
-    }
-
-    pub(super) fn retain_development_revisions(
-        &self,
-        tenant: &str,
-        source: &str,
-        backend: &str,
-        revision: &str,
-    ) -> Result<()> {
-        self.instances()?.retain(|key, _| {
-            key.tenant_id != tenant
-                || key.source_id != source
-                || key.revision == backend
-                || key.revision == revision
-        });
-        Ok(())
-    }
-
-    pub fn handle(
-        &self,
-        tenant_id: &str,
-        source_id: &str,
-        revision: &str,
-        request: String,
-    ) -> Result<ComponentResponse> {
-        let key = InstanceKey::new(tenant_id, source_id, revision);
-        let instance = self
-            .instances()?
-            .get(&key)
-            .cloned()
-            .context("当前租户的 Wasm Component 实例未激活")?;
-        call_handler(&instance, request)
     }
 
     fn instantiate(&self, artifact: &Path) -> Result<TenantInstance> {
@@ -233,6 +133,104 @@ impl WasmManager {
     #[cfg(test)]
     fn active_instances(&self) -> Result<usize> {
         Ok(self.instances()?.len())
+    }
+}
+
+impl WasmExecutor for WasmManager {
+    fn activate(
+        &self,
+        tenant_id: &str,
+        source_id: &str,
+        revision: &str,
+        artifact: &Path,
+    ) -> Result<WasmActivation> {
+        let key = InstanceKey::new(tenant_id, source_id, revision);
+        if let Some(instance) = self.instances()?.get(&key).cloned() {
+            return Ok(WasmActivation {
+                pages: call_definition(&instance)?,
+                created: false,
+            });
+        }
+        let candidate = Arc::new(Mutex::new(self.instantiate(artifact)?));
+        let (instance, created) = {
+            let mut instances = self.instances()?;
+            match instances.entry(key.clone()) {
+                Entry::Occupied(entry) => (entry.get().clone(), false),
+                Entry::Vacant(entry) => (entry.insert(candidate).clone(), true),
+            }
+        };
+        match call_definition(&instance) {
+            Ok(pages) => Ok(WasmActivation { pages, created }),
+            Err(error) => {
+                if created {
+                    self.instances()?.remove(&key);
+                }
+                Err(error)
+            }
+        }
+    }
+
+    /// 释放内存实例与编译缓存引用，不修改数据库中的活动版本。
+    fn shutdown(&self) -> Result<()> {
+        self.instances()?.clear();
+        self.components
+            .lock()
+            .map_err(|_| anyhow!("Wasm 编译缓存锁已损坏"))?
+            .clear();
+        Ok(())
+    }
+
+    fn deactivate(&self, tenant_id: &str, source_id: &str, revision: &str) -> Result<bool> {
+        let key = InstanceKey::new(tenant_id, source_id, revision);
+        Ok(self.instances()?.remove(&key).is_some())
+    }
+
+    fn bind_revision(
+        &self,
+        tenant: &str,
+        source: &str,
+        backend: &str,
+        revision: &str,
+    ) -> Result<()> {
+        let mut instances = self.instances()?;
+        let instance = instances
+            .get(&InstanceKey::new(tenant, source, backend))
+            .cloned()
+            .context("开发后端实例不存在")?;
+        instances.insert(InstanceKey::new(tenant, source, revision), instance);
+        Ok(())
+    }
+
+    fn retain_development_revisions(
+        &self,
+        tenant: &str,
+        source: &str,
+        backend: &str,
+        revision: &str,
+    ) -> Result<()> {
+        self.instances()?.retain(|key, _| {
+            key.tenant_id != tenant
+                || key.source_id != source
+                || key.revision == backend
+                || key.revision == revision
+        });
+        Ok(())
+    }
+
+    fn handle(
+        &self,
+        tenant_id: &str,
+        source_id: &str,
+        revision: &str,
+        request: String,
+    ) -> Result<ComponentResponse> {
+        let key = InstanceKey::new(tenant_id, source_id, revision);
+        let instance = self
+            .instances()?
+            .get(&key)
+            .cloned()
+            .context("当前租户的 Wasm Component 实例未激活")?;
+        call_handler(&instance, request)
     }
 }
 

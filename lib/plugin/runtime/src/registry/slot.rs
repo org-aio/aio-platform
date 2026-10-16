@@ -1,3 +1,4 @@
+use az_plugin_contract::transport::{Request, Response};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, ensure};
@@ -9,7 +10,6 @@ use uuid::Uuid;
 
 use crate::{
     ComponentEngine, ComponentSlot, DatabaseProvisioner, InvocationResources, ReleaseSnapshot,
-    bindings::aio::plugin::transport::{Request, Response},
 };
 
 use super::{StoredRelease, storage};

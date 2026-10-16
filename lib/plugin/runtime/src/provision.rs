@@ -200,7 +200,7 @@ pub(crate) fn validate_migration(statement: &Statement) -> Result<()> {
         }
         _ => anyhow::bail!("受控迁移只接受建表、建索引、新增列及约束修订"),
     }
-    crate::database_query::validate_nodes(statement)
+    crate::database_policy::validate_nodes(statement)
 }
 
 fn validate_reference(name: &ObjectName) -> Result<()> {

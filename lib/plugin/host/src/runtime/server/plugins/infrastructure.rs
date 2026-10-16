@@ -1,4 +1,12 @@
 //! 基础设施由所选插件持有，异步初始化和失败补偿沿用宿主生命周期。
+#[cfg(feature = "sidecar")]
+use super::super::process::ProcessManager;
+#[cfg(feature = "wasm")]
+use super::super::wasm::WasmManager;
+#[cfg(feature = "sidecar")]
+use super::ProcessExecutor;
+#[cfg(feature = "wasm")]
+use super::WasmExecutor;
 
 use std::{
     any::{Any, TypeId},
@@ -10,10 +18,7 @@ use az_plugin_core::{Plugin, PluginFuture};
 use az_plugin_runtime::Keyring;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 
-use super::super::{
-    components::Components, process::ProcessManager, repository::RepositoryInstaller,
-    store::PluginStore, wasm::WasmManager,
-};
+use super::super::{components::Components, repository::RepositoryInstaller, store::PluginStore};
 use super::{
     ComponentExecutionPlugin, ComponentExecutors, EnhancementServicePlugin, Resource,
     RuntimeAssembly,
@@ -194,14 +199,19 @@ impl Plugin<RuntimeAssembly> for RepositoryPlugin {
 }
 
 /// 旧进程执行资源的初始化与停止，不承担路由注册。
+#[cfg(feature = "sidecar")]
 #[dill::component]
 #[dill::interface(dyn Plugin<RuntimeAssembly>)]
 pub struct ProcessPlugin;
 
+#[cfg(feature = "sidecar")]
 impl Plugin<RuntimeAssembly> for ProcessPlugin {
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
             assembly.declare_resource::<ProcessManager>()?;
+            assembly
+                .services
+                .bind::<dyn ProcessExecutor, ProcessManager>();
             assembly.on_initialize::<Self>(|state, _| {
                 Box::pin(async move {
                     let process = if state.config.development.is_some() {
@@ -230,14 +240,17 @@ impl Plugin<RuntimeAssembly> for ProcessPlugin {
 }
 
 /// 旧 Wasm 引擎的初始化与停止，不承担路由注册。
+#[cfg(feature = "wasm")]
 #[dill::component]
 #[dill::interface(dyn Plugin<RuntimeAssembly>)]
 pub struct WasmPlugin;
 
+#[cfg(feature = "wasm")]
 impl Plugin<RuntimeAssembly> for WasmPlugin {
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
             assembly.declare_resource::<WasmManager>()?;
+            assembly.services.bind::<dyn WasmExecutor, WasmManager>();
             assembly.on_initialize::<Self>(|state, _| {
                 Box::pin(async move {
                     let wasm =
@@ -291,6 +304,7 @@ impl Plugin<RuntimeAssembly> for ComponentResourcesPlugin {
                         state.service::<PgPool>()?.as_ref().clone(),
                         storage,
                         state.service::<Keyring>()?,
+                        #[cfg(feature = "sidecar")]
                         state.identity.clone(),
                         state.extensions.services.weak_ref(),
                         state.service::<super::super::enhancements::Enhancements>()?,

@@ -4,7 +4,7 @@ use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
 };
-use az_plugin_runtime::bindings::aio::plugin::transport::{Header, Request};
+use az_plugin_contract::transport::{Header, Request};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 

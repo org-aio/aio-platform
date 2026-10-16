@@ -1,9 +1,9 @@
 use anyhow::Result;
 
 use super::{
+    plugins::ProcessInstance,
     repository::DiscoveredPlugin,
     store::{PluginStore, record_event, runtime_name, start_instance, stop_instances},
-    supervisor::ProcessInstance,
 };
 use crate::runtime::MarketplaceEntry;
 

@@ -1,4 +1,6 @@
-# Wasm 宿主
+# 执行资源与可选 Wasm 宿主
+
+默认构建提供密钥、数据库、对象存储和 `InvocationResources`，不引入 Wasmtime、WASI 或 Cranelift。需要 `ComponentEngine`、执行槽和 WIT 绑定时显式启用 `wasm` feature。宿主服务的请求使用 `az-plugin-contract::transport`；`InvocationResources::validate_scope` 检查资源归属，可信原生执行器可通过 `ScopedDatabase::begin` 使用受限事务。
 
 `ComponentEngine::with_cache` 使用宿主独占的目录保存 Wasmtime 编译缓存，发布校验、安装及重启恢复复用同一份机器码。缓存键包含引擎与编译配置，磁盘软限额为 512 MiB/4096 项；只缓存代码，不缓存租户实例、数据库连接或授权。宿主必须限制目录写权限，不接收插件上传的预编译机器码。
 
@@ -6,13 +8,13 @@
 
 每次调用临时持有完整执行状态，只有成功结束才归还实例；取消、超时或陷阱会销毁状态，未提交事务进入回滚。失效实例不能复用。空值参数使用 PostgreSQL 的上下文类型推导，不强制转换为文本。
 
-`cargo test -p az-plugin-runtime` 执行无外部依赖的测试。完整测试需要一次性 PostgreSQL（已撤销 public schema 的 PUBLIC 权限）以及已构建的 Kotlin 示例，三个路径/地址通过环境变量指定：
+`cargo test -p az-plugin-runtime --features wasm` 执行无外部依赖的测试。完整测试需要一次性 PostgreSQL（已撤销 public schema 的 PUBLIC 权限）以及已构建的 Kotlin 示例，三个路径/地址通过环境变量指定：
 
 ```sh
 export AIO_TEST_DATABASE_URL=postgres://test_admin@127.0.0.1:55432/postgres
 export AIO_TEST_COMPONENT=/absolute/path/aio-plugin-kmp-example/dist/plugin.wasm
 export AIO_TEST_MIGRATION=/absolute/path/aio-plugin-kmp-example/backend/migrations/0001_counter.sql
-cargo test -p az-plugin-runtime -- --include-ignored
+cargo test -p az-plugin-runtime --features wasm -- --include-ignored
 ```
 
 这些测试创建随机来源的独立角色和 schema，仅对一次性测试库运行。`DatabaseProvisioner::install` 持久保存加密数据库凭据及有序迁移校验和，支持追加受限建表和索引迁移，拒绝改写、删除或重排历史。公网接入状态由 `docs/refactor/README.md` 跟踪。

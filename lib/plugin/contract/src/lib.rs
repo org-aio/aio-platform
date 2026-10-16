@@ -3,6 +3,7 @@
 mod enhancement;
 mod model;
 pub mod process;
+pub mod transport;
 
 /// 原生客户端与宿主共享的 gRPC 契约；Wasm 构建不启用此 feature。
 #[cfg(feature = "grpc")]

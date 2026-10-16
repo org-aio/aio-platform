@@ -1,7 +1,10 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, ensure};
-use az_plugin_contract::InvocationScope;
+use az_plugin_contract::{
+    InvocationScope,
+    transport::{Request, Response},
+};
 use wasmtime::{
     Collector, Config, Engine, Store,
     component::{Component, HasSelf, Linker},
@@ -9,10 +12,7 @@ use wasmtime::{
 
 use crate::{
     InvocationResources,
-    bindings::{
-        Plugin,
-        aio::plugin::transport::{Phase, Request, Response},
-    },
+    bindings::{Plugin, aio::plugin::transport::Phase},
     state::InvocationState,
 };
 
@@ -86,24 +86,10 @@ impl ComponentEngine {
         scope: InvocationScope,
         resources: InvocationResources,
     ) -> Result<ComponentInstance> {
-        if let Some(storage) = &resources.storage {
-            ensure!(
-                storage.matches(
-                    &scope.source_id,
-                    scope.context.tenant_id.as_deref().unwrap_or("")
-                ),
-                "对象存储绑定不属于当前插件和租户"
-            );
-        }
-        if let Some(database) = &resources.database {
-            ensure!(
-                database.matches(
-                    &scope.source_id,
-                    scope.context.tenant_id.as_deref().unwrap_or("")
-                ),
-                "数据库绑定不属于当前插件和租户"
-            );
-        }
+        resources.validate_scope(
+            &scope.source_id,
+            scope.context.tenant_id.as_deref().unwrap_or(""),
+        )?;
         let mut linker = Linker::new(&self.engine);
         wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
         Plugin::add_to_linker::<_, HasSelf<_>>(&mut linker, |state: &mut InvocationState| state)?;
@@ -207,6 +193,7 @@ impl ComponentInstance {
         );
         let mut execution = self.begin(true)?;
         execution.store.data_mut().scope.context = context;
+        let request = request.into();
         let result = tokio::time::timeout(
             Duration::from_secs(30),
             execution.plugin.call_handle(&mut execution.store, &request),
@@ -220,6 +207,6 @@ impl ComponentInstance {
             "响应超过配额"
         );
         self.execution = Some(execution);
-        Ok(response)
+        Ok(response.into())
     }
 }

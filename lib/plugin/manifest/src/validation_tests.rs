@@ -1,4 +1,6 @@
-use std::{fs, io::Write};
+use std::fs;
+#[cfg(feature = "wasm-validation")]
+use std::io::Write;
 
 use tempfile::{NamedTempFile, tempdir};
 
@@ -9,6 +11,23 @@ const RUNTIME: &str = r#"
 kind = "page-definition"
 artifact = "dist/pages.json"
 "#;
+
+#[cfg(not(feature = "wasm-validation"))]
+#[test]
+fn disabled_wasm_validation_rejects_the_repository_instead_of_skipping_execution() -> Result<()> {
+    let repository = tempdir()?;
+    fs::write(
+        repository.path().join("aio-plugin.toml"),
+        "[plugin.runtime]\nkind='wasm-component'\nartifact='plugin.wasm'\n",
+    )?;
+    fs::write(
+        repository.path().join("plugin.wasm"),
+        b"not an executable component",
+    )?;
+    let result = validate_repository(repository.path());
+    assert!(result.is_err_and(|error| error.to_string().contains("未启用 Wasm")));
+    Ok(())
+}
 
 #[test]
 fn accepts_parent_with_ordered_subplugins() -> Result<()> {
@@ -237,12 +256,13 @@ fn rejects_account_action_without_a_declared_page() -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "wasm-validation")]
 #[test]
 fn rejects_non_component_artifact() -> Result<()> {
     let mut file = NamedTempFile::new()?;
     file.write_all(b"not wasm")?;
     let bytes = fs::read(file.path())?;
-    assert!(validate_wasm_component(&bytes).is_err());
+    assert!(crate::validate_wasm_component(&bytes).is_err());
     Ok(())
 }
 

@@ -1,3 +1,6 @@
+#![cfg(feature = "wasm")]
+
+use az_plugin_contract::transport::{Request, Response};
 use std::{
     fs,
     sync::{
@@ -10,10 +13,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use az_plugin_bundle::Bundle;
 use az_plugin_contract::{InvocationScope, RequestContext};
-use az_plugin_runtime::{
-    ComponentEngine, DatabaseProvisioner, HostServices, InvocationResources,
-    bindings::aio::plugin::transport::{Request, Response},
-};
+use az_plugin_runtime::{ComponentEngine, DatabaseProvisioner, HostServices, InvocationResources};
 
 #[derive(Default)]
 struct Services {

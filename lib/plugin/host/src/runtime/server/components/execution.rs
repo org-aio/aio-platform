@@ -17,7 +17,7 @@ use futures_util::FutureExt;
 use uuid::Uuid;
 
 pub use super::model::{Description as ComponentDescription, Page as ComponentPage};
-pub use az_plugin_runtime::bindings::aio::plugin::transport::{Request, Response};
+pub use az_plugin_contract::transport::{Request, Response};
 
 /// 宿主交给原生执行器的资源入口；弱引用避免执行器和组件管理器相互持有。
 /// 原生执行器属于可信宿主代码，脚本和进程插件不能获得此对象。

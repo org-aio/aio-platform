@@ -1,12 +1,12 @@
+#![cfg(feature = "wasm")]
+
+use az_plugin_contract::transport::Request;
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result, ensure};
 use az_plugin_bundle::Bundle;
 use az_plugin_contract::{CapabilityGrants, RequestContext};
-use az_plugin_runtime::{
-    ComponentEngine, ComponentSlot, DatabaseProvisioner, InvocationResources,
-    bindings::aio::plugin::transport::Request,
-};
+use az_plugin_runtime::{ComponentEngine, ComponentSlot, DatabaseProvisioner, InvocationResources};
 
 fn context(tenant: &str) -> RequestContext {
     RequestContext {

@@ -1,8 +1,11 @@
+#![cfg(feature = "wasm")]
+
 use anyhow::{Context, Result};
+use az_plugin_contract::transport::Request;
 use az_plugin_contract::{CapabilityGrants, InvocationScope, RequestContext};
 use az_plugin_runtime::{
     ComponentEngine, ComponentInstance, DatabaseProvisioner, InvocationResources,
-    bindings::aio::plugin::transport::{Phase, Request},
+    bindings::aio::plugin::transport::Phase,
 };
 
 fn context(tenant: &str) -> RequestContext {

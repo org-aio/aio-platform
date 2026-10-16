@@ -4,9 +4,9 @@ use anyhow::Result;
 pub use az_plugin_package::PluginPackage;
 use std::sync::Arc;
 
+pub use super::plugins::ProcessInstance;
 pub use super::repository::{DiscoveredPlugin, RepositoryInstaller};
 pub use super::store::PluginStore;
-pub use super::supervisor::ProcessInstance;
 
 impl RuntimeState {
     pub async fn cache_test_package(&self, package: &PluginPackage) -> Result<()> {

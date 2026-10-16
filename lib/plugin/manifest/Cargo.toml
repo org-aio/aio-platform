@@ -13,7 +13,8 @@ workspace = "../../.."
 default = []
 schema = ["dep:schemars"]
 dependency-validation = ["dep:anyhow", "dep:semver", "dep:url"]
-validation = ["dependency-validation", "dep:toml", "dep:wasmtime", "dep:wit-component", "dep:wit-parser"]
+validation = ["dependency-validation", "dep:toml"]
+wasm-validation = ["validation", "dep:wasmtime", "dep:wit-component", "dep:wit-parser"]
 
 [dependencies]
 anyhow = { workspace = true, optional = true }

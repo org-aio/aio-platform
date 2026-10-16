@@ -1,3 +1,4 @@
+use az_plugin_contract::transport::{Request, Response};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, ensure};
@@ -7,10 +8,7 @@ use tokio::sync::{Mutex, RwLock};
 
 use crate::{
     ComponentEngine, ComponentInstance, InvocationResources,
-    bindings::aio::plugin::{
-        metadata::Description,
-        transport::{Phase, Request, Response},
-    },
+    bindings::aio::plugin::{metadata::Description, transport::Phase},
 };
 
 pub struct ComponentSlot {

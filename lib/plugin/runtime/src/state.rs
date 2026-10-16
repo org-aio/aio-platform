@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -10,20 +9,12 @@ use sqlx::{Postgres, Transaction};
 use wasmtime::{StoreLimits, StoreLimitsBuilder};
 
 use crate::{
-    HostServices, ObjectStore, ScopedDatabase,
+    InvocationResources,
     bindings::aio::plugin::{
         cryptography, database, host, management, metadata, storage, transport,
     },
     database_query,
 };
-
-#[derive(Clone, Default)]
-pub struct InvocationResources {
-    pub keyring: Option<Arc<crate::Keyring>>,
-    pub database: Option<ScopedDatabase>,
-    pub storage: Option<ObjectStore>,
-    pub services: Option<Arc<dyn HostServices>>,
-}
 
 pub(crate) struct InvocationState {
     pub scope: InvocationScope,
@@ -361,8 +352,9 @@ impl management::Host for InvocationState {
                 .services
                 .as_ref()
                 .context("管理服务未绑定")?
-                .manage(&self.scope, request)
+                .manage(&self.scope, request.into())
                 .await
+                .map(Into::into)
         }
         .await;
         Ok(wire(result))

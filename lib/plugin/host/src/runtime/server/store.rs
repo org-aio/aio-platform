@@ -3,7 +3,7 @@ use az_plugin_manifest::PluginManifest;
 use serde_json::Value;
 use sqlx::{PgPool, Row};
 
-use super::{page_state, supervisor::ProcessInstance};
+use super::{page_state, plugins::ProcessInstance};
 use crate::runtime::{
     InstalledPluginView, PageDefinition, PluginLifecycleEvent, PluginRuntime, PluginState,
     RuntimeAccountItem, RuntimeCatalog, TenantView, UserView,

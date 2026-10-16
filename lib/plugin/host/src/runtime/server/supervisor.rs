@@ -19,7 +19,6 @@ use axum::{
 use az_plugin_manifest::{
     PluginRuntime, RuntimeManifest, read_manifest, validate_host_compatibility, validate_repository,
 };
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::process::Command;
 
@@ -27,30 +26,9 @@ const CONTAINER_PORT: u16 = 8080;
 const DEFAULT_STOP_TIMEOUT_SECONDS: u64 = 10;
 const MAX_DOCKER_OUTPUT_BYTES: usize = 16 * 1024;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub(super) struct StartProcessRequest {
-    pub tenant_id: String,
-    pub source_id: String,
-    pub revision: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub(super) struct StopProcessRequest {
-    pub instance_id: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct ReconcileProcessesRequest {
-    pub instances: Vec<StartProcessRequest>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ProcessInstance {
-    pub instance_id: String,
-    pub endpoint: String,
-    pub created: bool,
-}
+use super::plugins::process_execution::{
+    ProcessInstance, ReconcileProcessesRequest, StartProcessRequest, StopProcessRequest,
+};
 
 #[derive(Clone)]
 struct SupervisorState {
