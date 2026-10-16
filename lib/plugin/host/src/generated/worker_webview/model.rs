@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// 宿主从前端挂载推导身份，浏览器不能提交其他账号或插件来源。
 #[derive(Clone)]
-pub(crate) struct ViewOwner {
+pub struct ViewOwner {
     pub runtime: WebviewRuntime,
     pub tenant: String,
     pub user: String,
@@ -45,7 +45,7 @@ pub(crate) struct OpenView {
 /// 运行时由插件能力推导，浏览器不能跨插件切换设备授权。
 #[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum WebviewRuntime {
+pub enum WebviewRuntime {
     #[default]
     Codex,
     Dsh,

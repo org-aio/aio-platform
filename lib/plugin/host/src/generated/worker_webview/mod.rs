@@ -8,7 +8,7 @@ mod service_impl;
 #[cfg(feature = "server")]
 mod util;
 #[cfg(feature = "server")]
-pub(crate) use service::WorkerWebviewService;
+pub use service::{ViewFrame, WorkerWebviewService};
 #[cfg(feature = "server")]
 pub(crate) use service_impl::WorkerWebviewServiceImpl;
 #[cfg(all(test, feature = "server"))]

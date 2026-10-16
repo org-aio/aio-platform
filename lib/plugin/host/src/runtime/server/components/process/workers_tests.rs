@@ -1,4 +1,5 @@
 use super::*;
+use crate::generated::worker::WorkerService as RuntimeWorkerService;
 use crate::{
     generated::worker::{
         controller,
@@ -140,9 +141,16 @@ async fn workspace_access_cancel_and_bridge_isolation() -> Result<()> {
             &root.path().join("components-keyring.json"),
             root.path().join("objects"),
             state.identity.clone(),
+            state.extensions.services.clone(),
         )
         .await?,
     );
+    let host_workers = state.service::<dyn RuntimeWorkerService>()?;
+    let sidecar_workers = state
+        .components()?
+        .runtime_services
+        .get_one::<dyn RuntimeWorkerService>()?;
+    assert!(Arc::ptr_eq(&host_workers, &sidecar_workers));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let base = format!("http://{}/api/runtime/workers", listener.local_addr()?);
     let server = tokio::spawn(
@@ -161,7 +169,7 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
     let client = reqwest::Client::new();
     let owner = session("test", "owner");
     let pair = state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .pair(PairRequest {
             label: "workspace-device".into(),
             platform: "linux".into(),
@@ -169,11 +177,14 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
             machine_id: None,
         })
         .await?;
-    state.workers.approve(&owner, &pair.code).await?;
+    state
+        .service::<dyn RuntimeWorkerService>()?
+        .approve(&owner, &pair.code)
+        .await?;
     let input = json!({"action":"describe"});
     assert!(
         state
-            .workers
+            .service::<dyn RuntimeWorkerService>()?
             .enqueue(&owner, submit(&pair.device_id, WORKSPACE, input.clone()))
             .await
             .is_err()
@@ -218,20 +229,28 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
             .await?
             .error_for_status()?;
     }
-    let device = state.workers.identity(&pair.token).await?;
+    let device = state
+        .service::<dyn RuntimeWorkerService>()?
+        .identity(&pair.token)
+        .await?;
     assert_eq!(device.capabilities, ["space.scan", WORKSPACE]);
     let added = state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .enqueue(
             &owner,
             submit(&device.id, WORKSPACE, json!({"action":"add"})),
         )
         .await?;
     assert_eq!(added.input, json!({"action":"add"}));
+    // 清理仅用于验证入参的任务，后续领取断言才能针对新建的运行任务。
+    state
+        .service::<dyn RuntimeWorkerService>()?
+        .cancel_task(&owner, &added.id)
+        .await?;
     for other in [session("test", "other"), session("other", "owner")] {
         assert!(
             state
-                .workers
+                .service::<dyn RuntimeWorkerService>()?
                 .enqueue(&other, submit(&device.id, WORKSPACE, input.clone()))
                 .await
                 .is_err()
@@ -248,18 +267,33 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
     ] {
         assert!(
             state
-                .workers
+                .service::<dyn RuntimeWorkerService>()?
                 .enqueue(&owner, submit(&device.id, WORKSPACE, invalid))
                 .await
                 .is_err()
         );
     }
     let first = submit(&device.id, WORKSPACE, input.clone());
-    let queued = state.workers.enqueue(&owner, first.clone()).await?;
-    assert_eq!(state.workers.enqueue(&owner, first.clone()).await?, queued);
+    let queued = state
+        .service::<dyn RuntimeWorkerService>()?
+        .enqueue(&owner, first.clone())
+        .await?;
+    assert_eq!(
+        state
+            .service::<dyn RuntimeWorkerService>()?
+            .enqueue(&owner, first.clone())
+            .await?,
+        queued
+    );
     let mut conflict = first;
     conflict.input = json!({"action":"run","jobs":[{}]});
-    assert!(state.workers.enqueue(&owner, conflict).await.is_err());
+    assert!(
+        state
+            .service::<dyn RuntimeWorkerService>()?
+            .enqueue(&owner, conflict)
+            .await
+            .is_err()
+    );
     for (tenant, user) in [("test", "other"), ("other", "owner")] {
         assert!(
             client
@@ -292,30 +326,38 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
         .await?;
     assert_eq!(cancelled["data"]["state"], "cancelled");
     assert_eq!(
-        serde_json::to_value(state.workers.cancel_task(&owner, &queued.id).await?)?,
+        serde_json::to_value(
+            state
+                .service::<dyn RuntimeWorkerService>()?
+                .cancel_task(&owner, &queued.id)
+                .await?
+        )?,
         cancelled["data"]
     );
     assert!(
         state
-            .workers
+            .service::<dyn RuntimeWorkerService>()?
             .cancel_task(&owner, "invalid-id")
             .await
             .is_err()
     );
     let running = state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .enqueue(
             &owner,
             submit(&device.id, WORKSPACE, json!({"action":"run","jobs":[{}]})),
         )
         .await?;
     let claimed = state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .claim(&device, &Uuid::new_v4().to_string())
         .await?
         .context("未领取运行任务")?;
     assert_eq!(claimed.id, running.id);
-    state.workers.cancel_task(&owner, &running.id).await?;
+    state
+        .service::<dyn RuntimeWorkerService>()?
+        .cancel_task(&owner, &running.id)
+        .await?;
     let complete = CompleteTask {
         lease: claimed.lease.context("租约缺失")?,
         result: Some(json!({"done":true})),
@@ -323,14 +365,14 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
     };
     assert!(
         state
-            .workers
+            .service::<dyn RuntimeWorkerService>()?
             .complete(&device, &running.id, complete.clone())
             .await
             .is_err()
     );
     assert!(
         state
-            .workers
+            .service::<dyn RuntimeWorkerService>()?
             .heartbeat(&device, Some((&running.id, &complete.lease)))
             .await
             .is_err()
@@ -345,7 +387,7 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
     // 完成、失败和中断等终态的取消均保持现有结果。
     for terminal in ["complete", "failed", "interrupted"] {
         let task = state
-            .workers
+            .service::<dyn RuntimeWorkerService>()?
             .enqueue(&owner, submit(&device.id, WORKSPACE, input.clone()))
             .await?;
         sqlx::query("UPDATE worker_tasks SET state=$2,result=$3,error=$4 WHERE id=$1")
@@ -355,31 +397,40 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
             .bind("saved error")
             .execute(&state.store.pool)
             .await?;
-        let before = state.workers.task(&owner, &task.id).await?;
-        assert_eq!(state.workers.cancel_task(&owner, &task.id).await?, before);
+        let before = state
+            .service::<dyn RuntimeWorkerService>()?
+            .task(&owner, &task.id)
+            .await?;
+        assert_eq!(
+            state
+                .service::<dyn RuntimeWorkerService>()?
+                .cancel_task(&owner, &task.id)
+                .await?,
+            before
+        );
     }
     let active = state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .enqueue(&owner, submit(&device.id, WORKSPACE, input.clone()))
         .await?;
     let waiting = state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .enqueue(&owner, submit(&device.id, WORKSPACE, input))
         .await?;
     let unaffected = state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .enqueue(&owner, submit(&device.id, "space.scan", json!({})))
         .await?;
     let claim_id = Uuid::new_v4().to_string();
     let claimed = state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .claim(&device, &claim_id)
         .await?
         .context("未领取待关闭任务")?;
     assert_eq!(claimed.id, active.id);
     assert!(
         state
-            .workers
+            .service::<dyn RuntimeWorkerService>()?
             .claim(&device, &Uuid::new_v4().to_string())
             .await?
             .is_none()
@@ -394,7 +445,11 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
             .error_for_status()?;
     }
     assert_eq!(
-        state.workers.identity(&pair.token).await?.capabilities,
+        state
+            .service::<dyn RuntimeWorkerService>()?
+            .identity(&pair.token)
+            .await?
+            .capabilities,
         ["space.scan"]
     );
     for id in [&active.id, &waiting.id] {
@@ -408,15 +463,28 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
         assert!(row.try_get::<Option<String>, _>("lease")?.is_none());
         assert!(row.try_get::<bool, _>("cleared")?);
     }
-    assert!(state.workers.claim(&device, &claim_id).await?.is_none());
-    assert_eq!(
-        state.workers.task(&owner, &unaffected.id).await?.state,
-        "queued"
-    );
-    state.workers.cancel_task(&owner, &unaffected.id).await?;
     assert!(
         state
-            .workers
+            .service::<dyn RuntimeWorkerService>()?
+            .claim(&device, &claim_id)
+            .await?
+            .is_none()
+    );
+    assert_eq!(
+        state
+            .service::<dyn RuntimeWorkerService>()?
+            .task(&owner, &unaffected.id)
+            .await?
+            .state,
+        "queued"
+    );
+    state
+        .service::<dyn RuntimeWorkerService>()?
+        .cancel_task(&owner, &unaffected.id)
+        .await?;
+    assert!(
+        state
+            .service::<dyn RuntimeWorkerService>()?
             .enqueue(
                 &owner,
                 submit(&device.id, WORKSPACE, json!({"action":"describe"}))
@@ -437,7 +505,7 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
         json!({"session":Uuid::new_v4(),"action":"get_app_state","arguments":{"app":"WPS"}});
     assert!(
         state
-            .workers
+            .service::<dyn RuntimeWorkerService>()?
             .enqueue(&owner, submit(&device.id, CONTROL, desktop_input.clone()))
             .await
             .is_err()
@@ -460,12 +528,12 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
         .await?
         .error_for_status()?;
     let desktop_task = state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .enqueue(&owner, submit(&device.id, CONTROL, desktop_input.clone()))
         .await?;
     assert!(
         state
-            .workers
+            .service::<dyn RuntimeWorkerService>()?
             .enqueue(
                 &session("test", "other"),
                 submit(&device.id, CONTROL, desktop_input.clone())
@@ -475,7 +543,7 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
     );
     assert!(
         state
-            .workers
+            .service::<dyn RuntimeWorkerService>()?
             .enqueue(
                 &session("other", "owner"),
                 submit(&device.id, CONTROL, desktop_input)
@@ -491,18 +559,25 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
         .await?
         .error_for_status()?;
     assert_eq!(
-        state.workers.task(&owner, &desktop_task.id).await?.state,
+        state
+            .service::<dyn RuntimeWorkerService>()?
+            .task(&owner, &desktop_task.id)
+            .await?
+            .state,
         "cancelled"
     );
     assert!(
         !state
-            .workers
+            .service::<dyn RuntimeWorkerService>()?
             .identity(&pair.token)
             .await?
             .capabilities
             .contains(&CONTROL.into())
     );
-    state.workers.revoke(&owner, &device.id).await?;
+    state
+        .service::<dyn RuntimeWorkerService>()?
+        .revoke(&owner, &device.id)
+        .await?;
     assert_eq!(
         client
             .post(&access)
@@ -558,7 +633,7 @@ async fn verify_bridge(state: &RuntimeState, worker: &str) -> Result<()> {
     headers.insert("x-aio-token", "process-token".parse()?);
     let owner = session("test", "owner");
     let desktop = state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .pair(PairRequest {
             label: "desktop".into(),
             platform: "darwin".into(),
@@ -566,9 +641,12 @@ async fn verify_bridge(state: &RuntimeState, worker: &str) -> Result<()> {
             machine_id: None,
         })
         .await?;
-    state.workers.approve(&owner, &desktop.code).await?;
+    state
+        .service::<dyn RuntimeWorkerService>()?
+        .approve(&owner, &desktop.code)
+        .await?;
     let other = state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .pair(PairRequest {
             label: "other".into(),
             platform: "linux".into(),
@@ -577,7 +655,7 @@ async fn verify_bridge(state: &RuntimeState, worker: &str) -> Result<()> {
         })
         .await?;
     state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .approve(&session("test", "other"), &other.code)
         .await?;
     let devices = call(&gateway, &headers, bridge("list", "*")).await?;
@@ -661,7 +739,14 @@ async fn verify_bridge(state: &RuntimeState, worker: &str) -> Result<()> {
             invalid[field] = json!(value);
             assert!(call(&gateway, &headers, invalid).await.is_err());
         }
-        assert_eq!(state.workers.task(&owner, &task.id).await?.state, "queued");
+        assert_eq!(
+            state
+                .service::<dyn RuntimeWorkerService>()?
+                .task(&owner, &task.id)
+                .await?
+                .state,
+            "queued"
+        );
         let value = call(&gateway, &headers, access.clone()).await?;
         assert!(value["lease"].is_null());
         if operation == "cancel" {

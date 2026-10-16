@@ -3,7 +3,7 @@ use crate::runtime::server::http_error::RuntimeError;
 
 /// 网页和已授权设备共用剪切板通道，所有读写均限定所有者。
 #[async_trait::async_trait]
-pub(crate) trait ClipboardService: Send + Sync {
+pub trait ClipboardService: std::any::Any + Send + Sync {
     /// 当前槽位与最新条目，用于界面和变更轮询。
     async fn head(&self, owner: &Owner) -> Result<ClipHead, RuntimeError>;
     /// 按序号倒序分页；`cursor` 为空时从最新开始。

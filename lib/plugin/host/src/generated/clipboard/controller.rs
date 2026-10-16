@@ -1,4 +1,6 @@
 use super::model::*;
+use crate::generated::clipboard::ClipboardService as RuntimeClipboardService;
+use crate::generated::worker::WorkerService as RuntimeWorkerService;
 use crate::identity::SessionContext;
 use crate::runtime::{
     RuntimeResponse,
@@ -77,7 +79,12 @@ async fn head(
     State(state): State<RuntimeState>,
     Extension(owner): Extension<Owner>,
 ) -> Result<Response, RuntimeError> {
-    Ok(response(state.clipboard.head(&owner).await?))
+    Ok(response(
+        state
+            .service::<dyn RuntimeClipboardService>()?
+            .head(&owner)
+            .await?,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -96,7 +103,10 @@ async fn list(
         return Err(RuntimeError::bad_request("分页游标无效"));
     }
     Ok(response(
-        state.clipboard.list(&owner, query.cursor, limit).await?,
+        state
+            .service::<dyn RuntimeClipboardService>()?
+            .list(&owner, query.cursor, limit)
+            .await?,
     ))
 }
 
@@ -105,7 +115,12 @@ async fn read(
     Extension(owner): Extension<Owner>,
     Path(id): Path<String>,
 ) -> Result<Response, RuntimeError> {
-    Ok(response(state.clipboard.read(&owner, &id).await?))
+    Ok(response(
+        state
+            .service::<dyn RuntimeClipboardService>()?
+            .read(&owner, &id)
+            .await?,
+    ))
 }
 
 async fn write(
@@ -113,7 +128,12 @@ async fn write(
     Extension(owner): Extension<Owner>,
     Json(request): Json<ClipWrite>,
 ) -> Result<Response, RuntimeError> {
-    Ok(response(state.clipboard.write(&owner, request).await?))
+    Ok(response(
+        state
+            .service::<dyn RuntimeClipboardService>()?
+            .write(&owner, request)
+            .await?,
+    ))
 }
 
 /// 把指定条目显式投递到设备；未指定设备时投递到全部已开通通道的设备。
@@ -126,10 +146,13 @@ async fn push(
     if request.devices.len() > 100 {
         return Err(RuntimeError::bad_request("投递设备过多"));
     }
-    let content = state.clipboard.read(&owner, &id).await?;
+    let content = state
+        .service::<dyn RuntimeClipboardService>()?
+        .read(&owner, &id)
+        .await?;
     let targets = if request.devices.is_empty() {
         state
-            .clipboard
+            .service::<dyn RuntimeClipboardService>()?
             .devices(&owner)
             .await?
             .into_iter()
@@ -154,7 +177,7 @@ async fn push(
     let mut tasks = Vec::new();
     for device in targets {
         let task = state
-            .workers
+            .service::<dyn RuntimeWorkerService>()?
             .enqueue(
                 &session,
                 crate::generated::worker::model::SubmitTask {
@@ -174,7 +197,12 @@ async fn devices(
     State(state): State<RuntimeState>,
     Extension(owner): Extension<Owner>,
 ) -> Result<Response, RuntimeError> {
-    Ok(response(state.clipboard.devices(&owner).await?))
+    Ok(response(
+        state
+            .service::<dyn RuntimeClipboardService>()?
+            .devices(&owner)
+            .await?,
+    ))
 }
 
 async fn access_self(
@@ -187,7 +215,7 @@ async fn access_self(
         .as_ref()
         .ok_or_else(|| RuntimeError::forbidden("需要设备身份"))?;
     state
-        .clipboard
+        .service::<dyn RuntimeClipboardService>()?
         .access(&owner, device, request.enabled)
         .await?;
     Ok(response(()))
@@ -199,7 +227,10 @@ async fn access(
     Path(id): Path<String>,
     Json(request): Json<Access>,
 ) -> Result<Response, RuntimeError> {
-    state.clipboard.access(&owner, &id, request.enabled).await?;
+    state
+        .service::<dyn RuntimeClipboardService>()?
+        .access(&owner, &id, request.enabled)
+        .await?;
     Ok(response(()))
 }
 
@@ -227,7 +258,10 @@ async fn changes(
         {
             return Err(RuntimeError::forbidden("设备所属账号已停用"));
         }
-        let head = state.clipboard.head(&owner).await?;
+        let head = state
+            .service::<dyn RuntimeClipboardService>()?
+            .head(&owner)
+            .await?;
         if head.revision != request.after || tokio::time::Instant::now() >= deadline {
             return Ok(response(head.revision));
         }

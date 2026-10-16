@@ -79,6 +79,7 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
         &temp.path().join("keys.json"),
         temp.path().join("objects"),
         identity.clone(),
+        dill::Catalog::builder().build(),
     )
     .await?;
     let parent = components.publish(first.clone(), "Parent").await?;
@@ -169,6 +170,7 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
         &temp.path().join("keys.json"),
         temp.path().join("objects"),
         identity.clone(),
+        dill::Catalog::builder().build(),
     )
     .await?;
     restored.restore().await?;

@@ -31,6 +31,25 @@ pub(in crate::runtime::server) struct Revision {
 }
 
 impl Enhancements {
+    /// 发现和调用读取同一活动指针；目录不暴露源码，也不保存独立的协议版本状态。
+    pub(in crate::runtime::server) async fn catalog(
+        &self,
+        tenant: &str,
+    ) -> Result<(Option<String>, Vec<String>)> {
+        let Some(revision) = self.head(tenant).await?.revision else {
+            return Ok((None, Vec::new()));
+        };
+        let prepared = self.load(tenant, &revision).await?;
+        let mut paths = prepared
+            .package()
+            .enhancements
+            .iter()
+            .map(|item| item.path.clone())
+            .collect::<Vec<_>>();
+        paths.sort();
+        Ok((Some(revision), paths))
+    }
+
     pub(in crate::runtime::server) async fn open(pool: PgPool) -> Result<Self> {
         sqlx::raw_sql(include_str!("schema.sql"))
             .execute(&pool)

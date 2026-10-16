@@ -5,7 +5,7 @@ use std::any::Any;
 
 /// 宿主注册的设备和任务服务，不处理登录密码或实际执行任务。
 #[async_trait::async_trait]
-pub(crate) trait WorkerService: Any + Send + Sync {
+pub trait WorkerService: Any + Send + Sync {
     async fn pair(&self, request: PairRequest) -> Result<Pairing>;
     async fn pairing(&self, code: &str) -> Result<Worker>;
     async fn approve(&self, session: &SessionContext, code: &str) -> Result<()>;

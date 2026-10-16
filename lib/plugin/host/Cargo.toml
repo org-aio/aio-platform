@@ -16,10 +16,13 @@ futures-util = { version = "0.3", optional = true }
 az-plugin-bundle = { path = "../bundle", optional = true }
 az-plugin-contract = { path = "../contract", optional = true }
 az-plugin-runtime = { path = "../runtime", optional = true }
+az-plugin-core = { path = "../core", default-features = false, optional = true }
 az-plugin-enhancement = { path = "../enhancement", optional = true }
 semver = { version = "1", optional = true }
 getrandom = { version = "0.4.2", optional = true }
 axum = { version = "0.8.6", features = ["ws"], optional = true }
+rmcp = { version = "3.5.1", default-features = false, features = ["server", "transport-streamable-http-server"], optional = true }
+tonic = { version = "0.14.6", optional = true }
 dill = "0.15.0"
 dioxus = { version = "=0.7.9", default-features = false, features = ["macro", "html", "signals"], optional = true }
 dioxus-icons = { version = "0.1.0", default-features = false, optional = true }
@@ -46,15 +49,18 @@ web-sys = { version = "0.3.77", features = ["AbortSignal", "Document", "Element"
 
 [features]
 test-support = ["server"]
-components = ["dep:az-plugin-bundle", "dep:az-plugin-contract", "dep:az-plugin-runtime", "dep:az-plugin-enhancement", "dep:async-trait", "dep:semver", "dep:getrandom", "dep:futures-util"]
+components = ["dep:az-plugin-bundle", "dep:az-plugin-contract", "dep:az-plugin-runtime", "dep:az-plugin-core", "dep:az-plugin-enhancement", "dep:async-trait", "dep:semver", "dep:getrandom", "dep:futures-util"]
 default = []
 ui = ["dep:dioxus", "dep:dioxus-icons", "dep:az-dioxus-admin-shell", "dep:az-ui-components"]
 web = ["ui", "dioxus/web", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
 desktop = ["ui", "dioxus/desktop", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
-server = ["dep:jsonwebtoken","components", "az-plugin-manifest/validation", "dep:az-plugin-package", "dep:axum", "dep:flate2", "dep:kuchikiki", "dep:mime_guess", "dep:reqwest", "dep:sha2", "dep:sqlx", "dep:tar", "dep:tokio", "dep:toml", "dep:tower-http", "dep:uuid", "dep:wasmtime"]
+server = ["dep:jsonwebtoken","components", "az-plugin-manifest/validation", "az-plugin-contract/grpc", "dep:rmcp", "dep:tonic", "axum/http2", "dep:az-plugin-package", "dep:axum", "dep:flate2", "dep:kuchikiki", "dep:mime_guess", "dep:reqwest", "dep:sha2", "dep:sqlx", "dep:tar", "dep:tokio", "dep:toml", "dep:tower-http", "dep:uuid", "dep:wasmtime"]
 
 [lints.rust]
 unsafe_code = "forbid"
 
 [dev-dependencies]
 tempfile = "3.23.0"
+reqwest = { version = "0.12.23", default-features = false, features = ["http2"] }
+rmcp = { version = "3.5.1", default-features = false, features = ["client", "transport-streamable-http-client-reqwest"] }
+reqwest-mcp = { package = "reqwest", version = "0.13.2", default-features = false }

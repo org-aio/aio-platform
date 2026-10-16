@@ -69,6 +69,7 @@ async fn tenant_installation_grants_members_and_menu_visibility_preserves_runtim
         &root.path().join("keys.json"),
         root.path().join("objects"),
         identity,
+        state.extensions.services.clone(),
     )
     .await?;
     let tenant = Uuid::new_v4().to_string();

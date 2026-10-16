@@ -1,4 +1,5 @@
 use super::*;
+use crate::generated::worker::WorkerService as RuntimeWorkerService;
 use crate::{
     generated::worker::model::{PairRequest, SubmitTask},
     identity::{IdentityProvider, SessionContext},
@@ -31,6 +32,7 @@ async fn machine_identity_pairing_and_deletion() -> Result<()> {
         root.path(),
     )
     .await?;
+    let workers = state.service::<dyn RuntimeWorkerService>()?;
     let session = SessionContext {
         session_id: "session".into(),
         user_id: "owner".into(),
@@ -46,12 +48,11 @@ async fn machine_identity_pairing_and_deletion() -> Result<()> {
         capabilities: vec!["space.scan".into()],
         machine_id: Some(uuid::Uuid::new_v4().to_string()),
     };
-    let first = state.workers.pair(request.clone()).await?;
-    state.workers.approve(&session, &first.code).await?;
-    let identity = state.workers.identity(&first.token).await?;
+    let first = workers.pair(request.clone()).await?;
+    workers.approve(&session, &first.code).await?;
+    let identity = workers.identity(&first.token).await?;
     for _ in 0..2 {
-        state
-            .workers
+        workers
             .enqueue(
                 &session,
                 SubmitTask {
@@ -64,100 +65,83 @@ async fn machine_identity_pairing_and_deletion() -> Result<()> {
             .await?;
     }
     assert!(
-        state
-            .workers
+        workers
             .claim(&identity, &uuid::Uuid::new_v4().to_string())
             .await?
             .is_some()
     );
-    let second = state.workers.pair(request.clone()).await?;
-    state.workers.approve(&session, &second.code).await?;
-    let devices = state.workers.list(&session).await?;
+    let second = workers.pair(request.clone()).await?;
+    workers.approve(&session, &second.code).await?;
+    let devices = workers.list(&session).await?;
     assert_eq!(devices.len(), 1);
     assert_eq!(devices[0].id, second.device_id);
-    assert!(state.workers.identity(&first.token).await.is_err());
+    assert!(workers.identity(&first.token).await.is_err());
     let cancelled: i64 = sqlx::query_scalar("SELECT count(*) FROM worker_tasks WHERE worker_id=$1 AND state='cancelled' AND lease IS NULL AND lease_until IS NULL")
         .bind(&first.device_id).fetch_one(&state.store.pool).await?;
     assert_eq!(cancelled, 2);
 
     // 主机名相同、标识不同的机器互不覆盖；没有标识的历史设备也不猜测合并。
-    let other = state
-        .workers
+    let other = workers
         .pair(PairRequest {
             machine_id: Some(uuid::Uuid::new_v4().to_string()),
             ..request.clone()
         })
         .await?;
-    state.workers.approve(&session, &other.code).await?;
-    let legacy = state
-        .workers
+    workers.approve(&session, &other.code).await?;
+    let legacy = workers
         .pair(PairRequest {
             machine_id: None,
             ..request.clone()
         })
         .await?;
-    state.workers.approve(&session, &legacy.code).await?;
-    assert_eq!(state.workers.list(&session).await?.len(), 3);
+    workers.approve(&session, &legacy.code).await?;
+    assert_eq!(workers.list(&session).await?.len(), 3);
 
     // 不同用户使用相同标识不能撤销当前用户的设备。
     let outsider = SessionContext {
         user_id: "outsider".into(),
         ..session.clone()
     };
-    let outside = state.workers.pair(request.clone()).await?;
-    state.workers.approve(&outsider, &outside.code).await?;
-    assert_eq!(state.workers.list(&session).await?.len(), 3);
-    assert!(
-        state
-            .workers
-            .revoke(&outsider, &second.device_id)
-            .await
-            .is_err()
-    );
+    let outside = workers.pair(request.clone()).await?;
+    workers.approve(&outsider, &outside.code).await?;
+    assert_eq!(workers.list(&session).await?.len(), 3);
+    assert!(workers.revoke(&outsider, &second.device_id).await.is_err());
 
     // 两次并发授权只留下一个同标识设备。
-    let third = state.workers.pair(request.clone()).await?;
-    let fourth = state.workers.pair(request.clone()).await?;
+    let third = workers.pair(request.clone()).await?;
+    let fourth = workers.pair(request.clone()).await?;
     let (a, b) = tokio::join!(
-        state.workers.approve(&session, &third.code),
-        state.workers.approve(&session, &fourth.code)
+        workers.approve(&session, &third.code),
+        workers.approve(&session, &fourth.code)
     );
     a?;
     b?;
-    assert_eq!(state.workers.list(&session).await?.len(), 3);
-    assert_eq!(state.workers.list(&outsider).await?.len(), 1);
+    assert_eq!(workers.list(&session).await?.len(), 3);
+    assert_eq!(workers.list(&outsider).await?.len(), 1);
 
     // 填满 32 台后，替换已有标识仍然成功；新增机器被拒绝。
     sqlx::query("INSERT INTO worker_devices(id,token_hash,label,platform,capabilities,tenant_id,user_id,state) SELECT 'filler-'||n,'filler-'||n,'filler','darwin','[\"space.scan\"]'::jsonb,$1,$2,'active' FROM generate_series(1,29) n")
         .bind(&session.tenant_id).bind(&session.user_id).execute(&state.store.pool).await?;
-    let replacement = state.workers.pair(request.clone()).await?;
-    state.workers.approve(&session, &replacement.code).await?;
-    assert_eq!(state.workers.list(&session).await?.len(), 32);
-    let excess = state
-        .workers
+    let replacement = workers.pair(request.clone()).await?;
+    workers.approve(&session, &replacement.code).await?;
+    assert_eq!(workers.list(&session).await?.len(), 32);
+    let excess = workers
         .pair(PairRequest {
             machine_id: Some(uuid::Uuid::new_v4().to_string()),
             ..request
         })
         .await?;
-    assert!(state.workers.approve(&session, &excess.code).await.is_err());
-    state
-        .workers
-        .revoke(&session, &replacement.device_id)
-        .await?;
-    state
-        .workers
-        .revoke(&session, &replacement.device_id)
-        .await?;
+    assert!(workers.approve(&session, &excess.code).await.is_err());
+    workers.revoke(&session, &replacement.device_id).await?;
+    workers.revoke(&session, &replacement.device_id).await?;
     assert!(
-        !state
-            .workers
+        !workers
             .list(&session)
             .await?
             .iter()
             .any(|device| device.id == replacement.device_id)
     );
-    assert!(state.workers.identity(&replacement.token).await.is_err());
+    assert!(workers.identity(&replacement.token).await.is_err());
 
     state.store.pool.close().await;
     sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
@@ -696,190 +680,4 @@ async fn worker_pairing_tasks_archives_and_revocation_end_to_end() -> Result<()>
     Ok(())
 }
 
-#[tokio::test]
-#[ignore = "需要隔离 PostgreSQL，设置 AIO_TEST_DATABASE_URL"]
-async fn pairing_same_machine_revokes_previous_active_device() -> Result<()> {
-    let root = tempfile::tempdir()?;
-    let database = std::env::var("AIO_TEST_DATABASE_URL")?;
-    let admin = sqlx::PgPool::connect(&database).await?;
-    let schema = format!("worker_test_{}", uuid::Uuid::new_v4().simple());
-    sqlx::query(&format!("CREATE SCHEMA {schema}"))
-        .execute(&admin)
-        .await?;
-    let mut isolated = reqwest::Url::parse(&database)?;
-    isolated
-        .query_pairs_mut()
-        .append_pair("options", &format!("-c search_path={schema}"));
-    let state = RuntimeState::isolated_admin_test(
-        Arc::new(Identity),
-        isolated.as_ref(),
-        "http://127.0.0.1:1",
-        root.path(),
-    )
-    .await?;
-    let session = SessionContext {
-        session_id: "session".into(),
-        user_id: "owner".into(),
-        account: "owner".into(),
-        display_name: "owner".into(),
-        tenant_id: "test".into(),
-        tenant_label: "test".into(),
-        permissions: vec![],
-    };
-    let request = PairRequest {
-        label: "same-machine".into(),
-        platform: "darwin".into(),
-        capabilities: vec!["space.scan".into()],
-        machine_id: Some("machine-aaa".into()),
-    };
-    let first = state.workers.pair(request.clone()).await?;
-    state.workers.approve(&session, &first.code).await?;
-    state
-        .workers
-        .enqueue(
-            &session,
-            SubmitTask {
-                id: uuid::Uuid::new_v4().to_string(),
-                worker_id: first.device_id.clone(),
-                capability: "space.scan".into(),
-                input: json!({}),
-            },
-        )
-        .await?;
-    // 同一 machine_id 重新配对：旧的 active 记录被撤销，只留一条。
-    let second = state.workers.pair(request.clone()).await?;
-    state.workers.approve(&session, &second.code).await?;
-    let devices = state.workers.list(&session).await?;
-    assert_eq!(
-        devices
-            .iter()
-            .filter(|device| device.status != "revoked")
-            .count(),
-        1
-    );
-    assert_eq!(devices[0].id, second.device_id);
-    let stale_state: String = sqlx::query_scalar("SELECT state FROM worker_devices WHERE id=$1")
-        .bind(&first.device_id)
-        .fetch_one(&state.store.pool)
-        .await?;
-    assert_eq!(stale_state, "revoked");
-    let task_state: String =
-        sqlx::query_scalar("SELECT state FROM worker_tasks WHERE worker_id=$1")
-            .bind(&first.device_id)
-            .fetch_one(&state.store.pool)
-            .await?;
-    assert_eq!(task_state, "cancelled");
-
-    let other = state
-        .workers
-        .pair(PairRequest {
-            // 故意与第一台同名同平台，但 machine_id 不同，必须各自保留。
-            label: "same-machine".into(),
-            platform: "darwin".into(),
-            capabilities: vec!["space.scan".into()],
-            machine_id: Some("machine-bbb".into()),
-        })
-        .await?;
-    state.workers.approve(&session, &other.code).await?;
-    let devices = state.workers.list(&session).await?;
-    assert_eq!(
-        devices
-            .iter()
-            .filter(|device| device.status != "revoked")
-            .count(),
-        2
-    );
-
-    state.store.pool.close().await;
-    sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
-        .execute(&admin)
-        .await?;
-    Ok(())
-}
-
-#[tokio::test]
-#[ignore = "需要隔离 PostgreSQL，设置 AIO_TEST_DATABASE_URL"]
-async fn terminal_sessions_single_owner_and_replacement() -> Result<()> {
-    use super::model::CreateTerminal;
-
-    let root = tempfile::tempdir()?;
-    let database = std::env::var("AIO_TEST_DATABASE_URL")?;
-    let admin = sqlx::PgPool::connect(&database).await?;
-    let schema = format!("worker_test_{}", uuid::Uuid::new_v4().simple());
-    sqlx::query(&format!("CREATE SCHEMA {schema}"))
-        .execute(&admin)
-        .await?;
-    let mut isolated = reqwest::Url::parse(&database)?;
-    isolated
-        .query_pairs_mut()
-        .append_pair("options", &format!("-c search_path={schema}"));
-    let state = RuntimeState::isolated_admin_test(
-        Arc::new(Identity),
-        isolated.as_ref(),
-        "http://127.0.0.1:1",
-        root.path(),
-    )
-    .await?;
-    let session = SessionContext {
-        session_id: "session".into(),
-        user_id: "owner".into(),
-        account: "owner".into(),
-        display_name: "owner".into(),
-        tenant_id: "test".into(),
-        tenant_label: "test".into(),
-        permissions: vec![],
-    };
-    let pairing = state
-        .workers
-        .pair(PairRequest {
-            label: "terminal-host".into(),
-            platform: "darwin".into(),
-            capabilities: vec!["terminal.open".into()],
-            machine_id: Some(uuid::Uuid::new_v4().to_string()),
-        })
-        .await?;
-    state.workers.approve(&session, &pairing.code).await?;
-    let device = state.workers.identity(&pairing.token).await?;
-    let create = |cols, rows| CreateTerminal {
-        worker_id: pairing.device_id.clone(),
-        cols,
-        rows,
-    };
-
-    let first = state
-        .workers
-        .terminal_create(&session, create(100, 30))
-        .await?;
-    let claimed = state
-        .workers
-        .terminal_claim(&device, 0)
-        .await?
-        .context("首次终端会话未被领取")?;
-    assert_eq!(claimed.id, first.id);
-
-    let second = state
-        .workers
-        .terminal_create(&session, create(120, 40))
-        .await?;
-    let first_state: String =
-        sqlx::query_scalar("SELECT state FROM worker_terminal_sessions WHERE id=$1")
-            .bind(&first.id)
-            .fetch_one(&state.store.pool)
-            .await?;
-    assert_eq!(first_state, "closing");
-    assert_eq!(second.state, "waiting");
-
-    let replacement = state
-        .workers
-        .terminal_claim(&device, 0)
-        .await?
-        .context("替换终端未被领取")?;
-    assert_eq!(replacement.id, second.id);
-    assert!(state.workers.terminal_claim(&device, 0).await?.is_none());
-
-    state.store.pool.close().await;
-    sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
-        .execute(&admin)
-        .await?;
-    Ok(())
-}
+mod pairing;

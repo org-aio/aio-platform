@@ -76,6 +76,7 @@ mod tests {
             &root.path().join("keys.json"),
             root.path().join("objects"),
             Arc::new(TestIdentity),
+            dill::Catalog::builder().build(),
         )
         .await?;
         let tenant = uuid::Uuid::new_v4().to_string();

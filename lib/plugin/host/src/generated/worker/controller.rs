@@ -1,4 +1,5 @@
 use super::{archive, model::*};
+use crate::generated::worker::WorkerService as RuntimeWorkerService;
 use crate::runtime::{
     RuntimeResponse,
     server::{RuntimeState, http_error::RuntimeError, request_context::authenticate},
@@ -104,7 +105,7 @@ pub(crate) async fn device(
     headers: &HeaderMap,
 ) -> Result<DeviceIdentity, RuntimeError> {
     let identity = state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .identity(&token(headers)?)
         .await
         .map_err(|error| {
@@ -127,13 +128,23 @@ async fn pair(
     State(state): State<RuntimeState>,
     Json(request): Json<PairRequest>,
 ) -> Result<Json<RuntimeResponse<Pairing>>, RuntimeError> {
-    Ok(response(state.workers.pair(request).await?))
+    Ok(response(
+        state
+            .service::<dyn RuntimeWorkerService>()?
+            .pair(request)
+            .await?,
+    ))
 }
 async fn poll(
     State(state): State<RuntimeState>,
     headers: HeaderMap,
 ) -> Result<Json<RuntimeResponse<String>>, RuntimeError> {
-    Ok(response(state.workers.poll(&token(&headers)?).await?))
+    Ok(response(
+        state
+            .service::<dyn RuntimeWorkerService>()?
+            .poll(&token(&headers)?)
+            .await?,
+    ))
 }
 async fn pairing(
     State(state): State<RuntimeState>,
@@ -141,7 +152,12 @@ async fn pairing(
     Path(code): Path<String>,
 ) -> Result<Json<RuntimeResponse<Worker>>, RuntimeError> {
     authenticate(&state, &headers).await?;
-    Ok(response(state.workers.pairing(&code).await?))
+    Ok(response(
+        state
+            .service::<dyn RuntimeWorkerService>()?
+            .pairing(&code)
+            .await?,
+    ))
 }
 async fn approve(
     State(state): State<RuntimeState>,
@@ -149,7 +165,10 @@ async fn approve(
     Path(code): Path<String>,
 ) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
-    state.workers.approve(&session, &code).await?;
+    state
+        .service::<dyn RuntimeWorkerService>()?
+        .approve(&session, &code)
+        .await?;
     Ok(response(()))
 }
 async fn list(
@@ -157,7 +176,12 @@ async fn list(
     headers: HeaderMap,
 ) -> Result<Json<RuntimeResponse<Vec<Worker>>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
-    Ok(response(state.workers.list(&session).await?))
+    Ok(response(
+        state
+            .service::<dyn RuntimeWorkerService>()?
+            .list(&session)
+            .await?,
+    ))
 }
 async fn revoke(
     State(state): State<RuntimeState>,
@@ -165,7 +189,10 @@ async fn revoke(
     Path(id): Path<String>,
 ) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
-    state.workers.revoke(&session, &id).await?;
+    state
+        .service::<dyn RuntimeWorkerService>()?
+        .revoke(&session, &id)
+        .await?;
     Ok(response(()))
 }
 async fn enqueue(
@@ -174,14 +201,24 @@ async fn enqueue(
     Json(request): Json<SubmitTask>,
 ) -> Result<Json<RuntimeResponse<Task>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
-    Ok(response(state.workers.enqueue(&session, request).await?))
+    Ok(response(
+        state
+            .service::<dyn RuntimeWorkerService>()?
+            .enqueue(&session, request)
+            .await?,
+    ))
 }
 async fn tasks(
     State(state): State<RuntimeState>,
     headers: HeaderMap,
 ) -> Result<Json<RuntimeResponse<Vec<Task>>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
-    Ok(response(state.workers.tasks(&session).await?))
+    Ok(response(
+        state
+            .service::<dyn RuntimeWorkerService>()?
+            .tasks(&session)
+            .await?,
+    ))
 }
 async fn claim(
     State(state): State<RuntimeState>,
@@ -196,7 +233,7 @@ async fn claim(
         + std::time::Duration::from_secs(u64::from(request.wait_seconds));
     let connected = device(&state, &headers).await?;
     state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .heartbeat(&connected, None)
         .await
         .map_err(worker_error)?;
@@ -204,7 +241,7 @@ async fn claim(
         // 每轮重新鉴权，等待中的连接在撤权后也不能收到任务。
         let device = device(&state, &headers).await?;
         let task = state
-            .workers
+            .service::<dyn RuntimeWorkerService>()?
             .claim(&device, &request.request_id)
             .await
             .map_err(worker_error)?;
@@ -233,7 +270,12 @@ async fn task(
     Path(id): Path<String>,
 ) -> Result<Json<RuntimeResponse<Task>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
-    Ok(response(state.workers.task(&session, &id).await?))
+    Ok(response(
+        state
+            .service::<dyn RuntimeWorkerService>()?
+            .task(&session, &id)
+            .await?,
+    ))
 }
 
 async fn cancel_task(
@@ -242,7 +284,12 @@ async fn cancel_task(
     Path(id): Path<String>,
 ) -> Result<Json<RuntimeResponse<Task>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
-    Ok(response(state.workers.cancel_task(&session, &id).await?))
+    Ok(response(
+        state
+            .service::<dyn RuntimeWorkerService>()?
+            .cancel_task(&session, &id)
+            .await?,
+    ))
 }
 
 async fn workspace_access(
@@ -259,7 +306,7 @@ async fn workspace_access(
     }
     let device = device(&state, &headers).await?;
     state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .workspace_access(&device, request.enabled)
         .await
         .map_err(worker_error)?;
@@ -280,7 +327,7 @@ async fn desktop_access(
     }
     let device = device(&state, &headers).await?;
     state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .desktop_access(&device, request.enabled)
         .await
         .map_err(worker_error)?;
@@ -301,7 +348,7 @@ async fn adb_access(
     }
     let device = device(&state, &headers).await?;
     state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .adb_access(&device, request.enabled)
         .await
         .map_err(worker_error)?;
@@ -322,7 +369,7 @@ async fn adb_shell_access(
     }
     let device = device(&state, &headers).await?;
     state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .adb_shell_access(&device, request.enabled)
         .await
         .map_err(worker_error)?;
@@ -337,7 +384,7 @@ async fn desktop(
 ) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
     state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .desktop(&session, &id, request.enabled)
         .await?;
     Ok(response(()))
@@ -349,7 +396,10 @@ async fn terminal_create(
 ) -> Result<Json<RuntimeResponse<TerminalSession>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
     Ok(response(
-        state.workers.terminal_create(&session, request).await?,
+        state
+            .service::<dyn RuntimeWorkerService>()?
+            .terminal_create(&session, request)
+            .await?,
     ))
 }
 async fn terminal_devices(
@@ -357,7 +407,12 @@ async fn terminal_devices(
     headers: HeaderMap,
 ) -> Result<Json<RuntimeResponse<Vec<Worker>>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
-    Ok(response(state.workers.terminal_devices(&session).await?))
+    Ok(response(
+        state
+            .service::<dyn RuntimeWorkerService>()?
+            .terminal_devices(&session)
+            .await?,
+    ))
 }
 async fn terminal_events(
     State(state): State<RuntimeState>,
@@ -371,7 +426,7 @@ async fn terminal_events(
     let session = authenticate(&state, &headers).await?;
     Ok(response(
         state
-            .workers
+            .service::<dyn RuntimeWorkerService>()?
             .terminal_events(&session, &id, request.after, request.wait_seconds)
             .await?,
     ))
@@ -384,7 +439,10 @@ async fn terminal_input(
 ) -> Result<Json<RuntimeResponse<TerminalSession>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
     Ok(response(
-        state.workers.terminal_input(&session, &id, request).await?,
+        state
+            .service::<dyn RuntimeWorkerService>()?
+            .terminal_input(&session, &id, request)
+            .await?,
     ))
 }
 async fn terminal_resize(
@@ -396,7 +454,7 @@ async fn terminal_resize(
     let session = authenticate(&state, &headers).await?;
     Ok(response(
         state
-            .workers
+            .service::<dyn RuntimeWorkerService>()?
             .terminal_resize(&session, &id, request)
             .await?,
     ))
@@ -407,7 +465,10 @@ async fn terminal_close(
     Path(id): Path<String>,
 ) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
-    state.workers.terminal_close(&session, &id).await?;
+    state
+        .service::<dyn RuntimeWorkerService>()?
+        .terminal_close(&session, &id)
+        .await?;
     Ok(response(()))
 }
 async fn terminal_claim(
@@ -420,7 +481,7 @@ async fn terminal_claim(
     }
     let device = device(&state, &headers).await?;
     state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .heartbeat(&device, None)
         .await
         .map_err(worker_error)?;
@@ -429,7 +490,7 @@ async fn terminal_claim(
     loop {
         let device = self::device(&state, &headers).await?;
         let session = state
-            .workers
+            .service::<dyn RuntimeWorkerService>()?
             .terminal_claim(&device, 1)
             .await
             .map_err(worker_error)?;
@@ -450,7 +511,7 @@ async fn terminal_read(
     let device = device(&state, &headers).await?;
     Ok(response(
         state
-            .workers
+            .service::<dyn RuntimeWorkerService>()?
             .terminal_read(&device, &id, request.after, request.wait_seconds)
             .await
             .map_err(worker_error)?,
@@ -464,7 +525,7 @@ async fn terminal_write(
 ) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
     let device = device(&state, &headers).await?;
     state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .terminal_write(&device, &id, request)
         .await
         .map_err(worker_error)?;
@@ -478,7 +539,7 @@ async fn terminal_finish(
 ) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
     let device = device(&state, &headers).await?;
     state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .terminal_finish(&device, &id, request)
         .await
         .map_err(worker_error)?;
@@ -498,7 +559,7 @@ async fn terminal_access(
     }
     let device = device(&state, &headers).await?;
     state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .terminal_access(&device, request.enabled)
         .await
         .map_err(worker_error)?;
@@ -510,7 +571,7 @@ async fn heartbeat(
 ) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
     let device = device(&state, &headers).await?;
     state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .heartbeat(&device, None)
         .await
         .map_err(worker_error)?;
@@ -524,7 +585,7 @@ async fn renew(
 ) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
     let device = device(&state, &headers).await?;
     state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .heartbeat(&device, Some((&id, &request.lease)))
         .await
         .map_err(worker_error)?;
@@ -538,7 +599,7 @@ async fn complete(
 ) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
     let device = device(&state, &headers).await?;
     state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .complete(&device, &id, request)
         .await
         .map_err(worker_error)?;

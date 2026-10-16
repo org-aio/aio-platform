@@ -27,6 +27,7 @@ async fn delivery_publishes_bundles_and_respects_tenant_choices() -> Result<()> 
         &root.path().join("key.json"),
         root.path().join("objects"),
         identity,
+        state.extensions.services.clone(),
     )
     .await?;
     state.components = Some(components.clone());

@@ -375,13 +375,7 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
                 .ok()
                 .and_then(|size| view.budget.clone().try_acquire_many_owned(size).ok())
             {
-                Some(permit) => view
-                    .sender
-                    .try_send(ViewFrame {
-                        value: frame,
-                        _permit: permit,
-                    })
-                    .is_ok(),
+                Some(permit) => view.sender.try_send(ViewFrame::new(frame, permit)).is_ok(),
                 None => false,
             }
         };

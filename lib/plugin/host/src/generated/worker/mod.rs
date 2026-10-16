@@ -16,6 +16,6 @@ mod util;
 #[cfg(any(feature = "web", feature = "desktop"))]
 pub(crate) mod view;
 #[cfg(feature = "server")]
-pub(crate) use service::WorkerService;
+pub use service::WorkerService;
 #[cfg(feature = "server")]
 pub(crate) use service_impl::WorkerServiceImpl;

@@ -129,6 +129,7 @@ async fn publication_preserves_running_singleton_process() -> Result<()> {
         &root.path().join("keys.json"),
         root.path().join("objects"),
         Arc::new(super::tests::TestIdentity),
+        dill::Catalog::builder().build(),
     )
     .await?;
     let git = format!(

@@ -1,4 +1,5 @@
 use super::{RuntimeState, http_error::RuntimeError, request_context::authenticate};
+use crate::generated::worker_webview::WorkerWebviewService as RuntimeWorkerWebviewService;
 use crate::generated::worker_webview::model::ViewOwner;
 use axum::http::{HeaderMap, header};
 
@@ -10,7 +11,9 @@ impl RuntimeState {
         id: &str,
     ) -> Result<(), RuntimeError> {
         let owner = self.device_view_owner(token).await?;
-        self.worker_webviews.renew(&owner, id).await?;
+        self.service::<dyn RuntimeWorkerWebviewService>()?
+            .renew(&owner, id)
+            .await?;
         self.frontend.renew(token)?;
         Ok(())
     }

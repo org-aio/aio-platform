@@ -153,6 +153,7 @@ async fn invoke(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::generated::worker::WorkerService as RuntimeWorkerService;
     use crate::generated::worker::model::PairRequest;
     use crate::identity::{IdentityProvider, SessionContext};
     use std::sync::Arc;
@@ -198,7 +199,7 @@ mod tests {
         .await
         .map_err(|_| anyhow::anyhow!("设备同步测试调用失败"))?;
         let pair = state
-            .workers
+            .service::<dyn RuntimeWorkerService>()?
             .pair(PairRequest {
                 label: "device".into(),
                 platform: "darwin".into(),
@@ -216,7 +217,10 @@ mod tests {
             tenant_label: String::new(),
             permissions: vec![],
         };
-        state.workers.approve(&session, &pair.code).await?;
+        state
+            .service::<dyn RuntimeWorkerService>()?
+            .approve(&session, &pair.code)
+            .await?;
         let mut headers = HeaderMap::new();
         headers.insert("authorization", format!("Bearer {}", pair.token).parse()?);
         assert!(
@@ -242,7 +246,10 @@ mod tests {
         )
         .await
         .map_err(|_| anyhow::anyhow!("设备同步测试调用失败"))?;
-        let identity = state.workers.identity(&pair.token).await?;
+        let identity = state
+            .service::<dyn RuntimeWorkerService>()?
+            .identity(&pair.token)
+            .await?;
         assert_eq!(identity.capabilities, vec!["space.scan", "skills.sync"]);
         assert!(allowed(&identity, "shell.execute").is_err());
         let _ = configure(
@@ -252,14 +259,20 @@ mod tests {
         )
         .await
         .map_err(|_| anyhow::anyhow!("设备同步测试调用失败"))?;
-        let identity = state.workers.identity(&pair.token).await?;
+        let identity = state
+            .service::<dyn RuntimeWorkerService>()?
+            .identity(&pair.token)
+            .await?;
         assert_eq!(identity.capabilities, vec!["space.scan"]);
         assert!(
             services(State(state.clone()), headers.clone())
                 .await
                 .is_err()
         );
-        state.workers.revoke(&session, &pair.device_id).await?;
+        state
+            .service::<dyn RuntimeWorkerService>()?
+            .revoke(&session, &pair.device_id)
+            .await?;
         assert!(
             configure(State(state), headers, Json(Access { enabled: true }))
                 .await

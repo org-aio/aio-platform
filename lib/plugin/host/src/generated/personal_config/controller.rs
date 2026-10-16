@@ -1,4 +1,5 @@
 use super::model::*;
+use crate::generated::personal_config::PersonalConfigService as RuntimePersonalConfigService;
 use crate::runtime::{
     RuntimeResponse,
     server::{RuntimeState, http_error::RuntimeError, request_context::authenticate},
@@ -80,7 +81,10 @@ async fn catalog(
     Extension(owner): Extension<Owner>,
     headers: HeaderMap,
 ) -> Result<Response, RuntimeError> {
-    let catalog = state.personal_config.catalog(&owner).await?;
+    let catalog = state
+        .service::<dyn RuntimePersonalConfigService>()?
+        .catalog(&owner)
+        .await?;
     if owner.device.is_some()
         && catalog
             .entries
@@ -115,7 +119,7 @@ async fn read(
     headers: HeaderMap,
 ) -> Result<Response, RuntimeError> {
     let value = state
-        .personal_config
+        .service::<dyn RuntimePersonalConfigService>()?
         .read(&owner, &id, query.revision)
         .await?;
     if owner.device.is_some() && value.entry.format.starts_with("yjs-") {
@@ -128,7 +132,12 @@ async fn history(
     Extension(owner): Extension<Owner>,
     Path(id): Path<String>,
 ) -> Result<Response, RuntimeError> {
-    Ok(response(state.personal_config.history(&owner, &id).await?))
+    Ok(response(
+        state
+            .service::<dyn RuntimePersonalConfigService>()?
+            .history(&owner, &id)
+            .await?,
+    ))
 }
 async fn write(
     State(state): State<RuntimeState>,
@@ -140,7 +149,10 @@ async fn write(
         require_crdt_client(&headers)?;
     }
     Ok(response(
-        state.personal_config.write(&owner, request).await?,
+        state
+            .service::<dyn RuntimePersonalConfigService>()?
+            .write(&owner, request)
+            .await?,
     ))
 }
 async fn report(
@@ -148,7 +160,10 @@ async fn report(
     Extension(owner): Extension<Owner>,
     Json(request): Json<Value>,
 ) -> Result<Response, RuntimeError> {
-    state.personal_config.report(&owner, request).await?;
+    state
+        .service::<dyn RuntimePersonalConfigService>()?
+        .report(&owner, request)
+        .await?;
     Ok(response(()))
 }
 async fn resolve(
@@ -156,7 +171,10 @@ async fn resolve(
     Extension(owner): Extension<Owner>,
     Json(request): Json<Resolution>,
 ) -> Result<Response, RuntimeError> {
-    state.personal_config.resolve(&owner, request).await?;
+    state
+        .service::<dyn RuntimePersonalConfigService>()?
+        .resolve(&owner, request)
+        .await?;
     Ok(response(()))
 }
 async fn access_self(
@@ -169,7 +187,7 @@ async fn access_self(
         .as_ref()
         .ok_or_else(|| RuntimeError::forbidden("需要设备身份"))?;
     state
-        .personal_config
+        .service::<dyn RuntimePersonalConfigService>()?
         .access(&owner, device, request.enabled)
         .await?;
     Ok(response(()))
@@ -181,7 +199,7 @@ async fn access(
     Json(request): Json<Access>,
 ) -> Result<Response, RuntimeError> {
     state
-        .personal_config
+        .service::<dyn RuntimePersonalConfigService>()?
         .access(&owner, &id, request.enabled)
         .await?;
     Ok(response(()))
@@ -210,7 +228,10 @@ async fn changes(
         {
             return Err(RuntimeError::forbidden("设备所属账号已停用"));
         }
-        let revision = state.personal_config.revision(&owner).await?;
+        let revision = state
+            .service::<dyn RuntimePersonalConfigService>()?
+            .revision(&owner)
+            .await?;
         if revision != request.after || tokio::time::Instant::now() >= deadline {
             return Ok(response(revision));
         }

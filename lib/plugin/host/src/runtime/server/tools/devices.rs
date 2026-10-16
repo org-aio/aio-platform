@@ -1,4 +1,5 @@
 use super::{model::MarketplaceItem, storage};
+use crate::generated::worker::WorkerService as RuntimeWorkerService;
 use crate::{
     generated::worker::{
         controller::device,
@@ -167,7 +168,10 @@ async fn device_tools(
     manifest: &ToolManifest,
 ) -> Result<Vec<DeviceTool>> {
     let inventories = inventories(state, session).await?;
-    let workers = state.workers.list(session).await?;
+    let workers = state
+        .service::<dyn RuntimeWorkerService>()?
+        .list(session)
+        .await?;
     Ok(workers
         .into_iter()
         .filter(|w| ["online", "offline"].contains(&w.status.as_str()))
@@ -239,7 +243,7 @@ pub(super) async fn install(
         ));
     }
     let task = state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .enqueue(
             &session,
             SubmitTask {

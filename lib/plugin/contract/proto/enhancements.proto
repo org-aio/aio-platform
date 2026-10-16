@@ -1,0 +1,27 @@
+syntax = "proto3";
+package aio.runtime.v1;
+
+// 只适配能力发现与执行，版本发布继续走宿主的统一管理入口。
+service Enhancements {
+  rpc List(ListRequest) returns (ListResponse);
+  rpc Invoke(InvokeRequest) returns (InvokeResponse);
+}
+
+message ListRequest {}
+
+// 路径只包含调用身份获准使用的当前能力，不携带脚本源码。
+message ListResponse {
+  optional string revision = 1;
+  repeated string paths = 2;
+}
+
+// JSON 保留 Rhai/TypeScript 的值语义；身份与租户从认证元数据取得。
+message InvokeRequest {
+  string path = 1;
+  bytes input_json = 2;
+}
+
+message InvokeResponse {
+  string revision = 1;
+  bytes output_json = 2;
+}

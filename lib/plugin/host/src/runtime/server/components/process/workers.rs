@@ -79,7 +79,11 @@ async fn execute(gateway: &Gateway, headers: &HeaderMap, request: Request) -> Re
     };
     match request.operation.as_str() {
         "list" => {
-            let devices = components.workers.list(&session).await?;
+            let devices = components
+                .runtime_services
+                .get_one::<dyn crate::generated::worker::WorkerService>()?
+                .list(&session)
+                .await?;
             let devices: Vec<_> = devices
                 .into_iter()
                 .filter(|device| {
@@ -97,7 +101,8 @@ async fn execute(gateway: &Gateway, headers: &HeaderMap, request: Request) -> Re
             let application = request.application.context("应用名称缺失")?;
             validate_application(&application)?;
             let task = components
-                .workers
+                .runtime_services
+                .get_one::<dyn crate::generated::worker::WorkerService>()?
                 .enqueue(
                     &session,
                     SubmitTask {
@@ -116,7 +121,8 @@ async fn execute(gateway: &Gateway, headers: &HeaderMap, request: Request) -> Re
                 "设备执行能力无效"
             );
             let task = components
-                .workers
+                .runtime_services
+                .get_one::<dyn crate::generated::worker::WorkerService>()?
                 .enqueue(
                     &session,
                     SubmitTask {
@@ -132,13 +138,21 @@ async fn execute(gateway: &Gateway, headers: &HeaderMap, request: Request) -> Re
         "task" | "cancel" => {
             let id = request.task_id.context("任务 ID 缺失")?;
             uuid::Uuid::parse_str(&id)?;
-            let task = components.workers.task(&session, &id).await?;
+            let task = components
+                .runtime_services
+                .get_one::<dyn crate::generated::worker::WorkerService>()?
+                .task(&session, &id)
+                .await?;
             ensure!(
                 task.capability == capability && capabilities.contains(&task.capability.as_str()),
                 "任务能力未授权"
             );
             let task = if request.operation == "cancel" {
-                components.workers.cancel_task(&session, &id).await?
+                components
+                    .runtime_services
+                    .get_one::<dyn crate::generated::worker::WorkerService>()?
+                    .cancel_task(&session, &id)
+                    .await?
             } else {
                 task
             };

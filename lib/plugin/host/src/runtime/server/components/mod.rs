@@ -49,7 +49,7 @@ pub(super) struct Components {
     objects: PathBuf,
     services: Arc<services::Services>,
     identity: Arc<dyn crate::identity::IdentityProvider>,
-    workers: Arc<dyn crate::generated::worker::WorkerService>,
+    runtime_services: dill::Catalog,
     slots: Mutex<HashMap<(Uuid, String), Arc<PersistentComponentSlot>>>,
     pub mutations: Mutex<()>,
     processes: process::Processes,
@@ -62,6 +62,7 @@ impl Components {
         key_path: &Path,
         objects: PathBuf,
         identity: Arc<dyn crate::identity::IdentityProvider>,
+        runtime_services: dill::Catalog,
     ) -> Result<Arc<Self>> {
         sqlx::raw_sql(include_str!("schema.sql"))
             .execute(&pool)
@@ -81,11 +82,6 @@ impl Components {
                     .join("processes")
             });
         let supervisor = process::Processes::client()?;
-        let workers = dill::Catalog::builder()
-            .add_value(pool.clone())
-            .add::<crate::generated::worker::WorkerServiceImpl>()
-            .build()
-            .get_one::<dyn crate::generated::worker::WorkerService>()?;
         let enhancements = Arc::new(super::enhancements::Enhancements::open(pool.clone()).await?);
         let services = Arc::new(services::Services::with_enhancements(enhancements.clone()));
         Ok(Arc::new_cyclic(|weak| Self {
@@ -98,7 +94,7 @@ impl Components {
             objects,
             services,
             identity,
-            workers,
+            runtime_services,
             slots: Mutex::default(),
             mutations: Mutex::new(()),
             processes: process::Processes::new(weak.clone(), root, supervisor),

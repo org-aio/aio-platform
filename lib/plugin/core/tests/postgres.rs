@@ -1,3 +1,5 @@
+#![cfg(feature = "infrastructure")]
+
 //! engine PostgreSQL 集成测试。
 
 use az_plugin_core::{

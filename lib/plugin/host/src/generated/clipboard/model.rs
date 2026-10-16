@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 /// 租户、用户和设备来自宿主身份，不接受客户端自行指定所有者。
 #[cfg(feature = "server")]
 #[derive(Clone)]
-pub(crate) struct Owner {
+pub struct Owner {
     pub tenant: String,
     pub user: String,
     pub device: Option<String>,

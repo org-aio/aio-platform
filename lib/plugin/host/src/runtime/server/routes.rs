@@ -31,14 +31,21 @@ use crate::runtime::{
 };
 
 pub fn router(state: RuntimeState) -> Router {
+    let mut router = Router::new().route(
+        "/api/runtime/{*unknown}",
+        any(|| async { StatusCode::NOT_FOUND }),
+    );
+    for factory in &state.extensions.routes {
+        router = router.merge(factory(&state));
+    }
+    router.with_state(state)
+}
+
+pub(super) fn frontend() -> Router<RuntimeState> {
     Router::new()
         .route(
             "/api/runtime/transport",
             get(super::transport::discover).options(super::transport::preflight),
-        )
-        .route(
-            "/api/runtime/{*unknown}",
-            any(|| async { StatusCode::NOT_FOUND }),
         )
         .route("/api/runtime/frontend/mount", post(frontend_routes::mount))
         .route(
@@ -57,6 +64,10 @@ pub fn router(state: RuntimeState) -> Router {
             "/api/runtime/frontend/{token}",
             delete(frontend_routes::unmount),
         )
+}
+
+pub(super) fn management(state: RuntimeState) -> Router<RuntimeState> {
+    Router::new()
         .route("/api/runtime/catalog", get(catalog))
         .route("/api/runtime/pages/action", post(page_action))
         .route(
@@ -96,21 +107,6 @@ pub fn router(state: RuntimeState) -> Router {
             "/api/runtime/plugins/{source_id}/uninstall",
             post(uninstall),
         )
-        .merge(super::delivery::router())
-        .merge(super::enhancements::router())
-        .merge(super::components::router(state.clone()))
-        .merge(super::bootstrap::router())
-        .merge(super::navigation::router())
-        .merge(super::tools::router())
-        .merge(crate::generated::worker::controller::router())
-        .merge(crate::generated::worker_webview::controller::router())
-        .merge(crate::generated::personal_config::controller::router(
-            state.clone(),
-        ))
-        .merge(crate::generated::clipboard::controller::router(
-            state.clone(),
-        ))
-        .with_state(state)
 }
 
 async fn catalog(

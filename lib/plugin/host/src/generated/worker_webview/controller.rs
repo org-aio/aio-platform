@@ -1,4 +1,5 @@
 use super::model::{Access, OpenView, ViewRequest, WebviewRuntime};
+use crate::generated::worker_webview::WorkerWebviewService as RuntimeWorkerWebviewService;
 use crate::{
     generated::worker::controller::device,
     runtime::{
@@ -21,7 +22,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use futures_util::SinkExt;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 pub(crate) fn router() -> Router<RuntimeState> {
     Router::new()
@@ -63,11 +64,17 @@ async fn view_request(
     let request: ViewRequest = serde_json::from_slice(&body)?;
     match request {
         ViewRequest::List => Ok(response(serde_json::to_value(
-            state.worker_webviews.devices(&owner).await?,
+            state
+                .service::<dyn RuntimeWorkerWebviewService>()?
+                .devices(&owner)
+                .await?,
         )?)),
         ViewRequest::Open { device, route } => {
             let route = route.as_deref().unwrap_or("/");
-            let id = state.worker_webviews.create(&owner, &device, route).await?;
+            let id = state
+                .service::<dyn RuntimeWorkerWebviewService>()?
+                .create(&owner, &device, route)
+                .await?;
             let mut src = reqwest::Url::parse(&format!(
                 "{}/api/runtime/components/assets/{token}/__device_view/{id}/index.html",
                 state.transport.request_origin(&headers)
@@ -77,7 +84,10 @@ async fn view_request(
             Ok(response(serde_json::to_value(OpenView { id, src })?))
         }
         ViewRequest::Close { id } => {
-            state.worker_webviews.close(&owner, &id).await?;
+            state
+                .service::<dyn RuntimeWorkerWebviewService>()?
+                .close(&owner, &id)
+                .await?;
             Ok(response(Value::Null))
         }
     }
@@ -90,7 +100,7 @@ async fn access(
 ) -> Result<Response, RuntimeError> {
     let identity = device(&state, &headers).await?;
     state
-        .worker_webviews
+        .service::<dyn RuntimeWorkerWebviewService>()?
         .access(
             &identity,
             request.enabled,
@@ -107,17 +117,27 @@ async fn worker_channel(
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, RuntimeError> {
     let identity = device(&state, &headers).await?;
-    let (generation, incoming) = state.worker_webviews.register(&identity).await?;
+    let service = state.service::<dyn RuntimeWorkerWebviewService>()?;
+    let (generation, incoming) = service.register(&identity).await?;
     Ok(upgrade
         .max_message_size(48 * 1024 * 1024)
         .max_frame_size(48 * 1024 * 1024)
         .on_upgrade(move |socket| {
-            worker_socket(state, headers, identity.id, generation, incoming, socket)
+            worker_socket(
+                state,
+                service,
+                headers,
+                identity.id,
+                generation,
+                incoming,
+                socket,
+            )
         }))
 }
 
 async fn worker_socket(
     state: RuntimeState,
+    service: Arc<dyn RuntimeWorkerWebviewService>,
     headers: HeaderMap,
     id: String,
     generation: String,
@@ -131,7 +151,7 @@ async fn worker_socket(
             _ = heartbeat.tick() => {
                 let authorized = device(&state, &headers).await.is_ok_and(|identity| identity.capabilities.iter().any(|capability| matches!(capability.as_str(), "codex.web" | "dsh.web")));
                 if !authorized || last_seen.elapsed() > Duration::from_secs(45) { break; }
-                if state.worker_webviews.expire(&id).await.is_err() { break; }
+                if service.expire(&id).await.is_err() { break; }
                 if socket.send(Message::Ping(Bytes::new())).await.is_err() { break; }
             }
             frame = incoming.recv() => {
@@ -147,7 +167,7 @@ async fn worker_socket(
                         let authorized = device(&state, &headers).await.is_ok_and(|identity| identity.capabilities.iter().any(|capability| matches!(capability.as_str(), "codex.web" | "dsh.web")));
                         if !authorized { break; }
                         let Ok(frame) = serde_json::from_str(&text) else { break; };
-                        if state.worker_webviews.receive(&id, &generation, frame).await.is_err() { break; }
+                        if service.receive(&id, &generation, frame).await.is_err() { break; }
                     }
                     _ => break,
                 }
@@ -155,7 +175,7 @@ async fn worker_socket(
         }
     }
     let _ = socket.close().await;
-    state.worker_webviews.unregister(&id, &generation).await;
+    service.unregister(&id, &generation).await;
 }
 
 async fn browser_channel(
@@ -174,14 +194,18 @@ async fn browser_channel(
         return Err(RuntimeError::forbidden("网页通道来源无效"));
     }
     let owner = state.device_view_owner(&token).await?;
-    let incoming = state.worker_webviews.attach(&owner, &id).await?;
+    let service = state.service::<dyn RuntimeWorkerWebviewService>()?;
+    let incoming = service.attach(&owner, &id).await?;
     Ok(upgrade
         .max_message_size(16 * 1024 * 1024)
-        .on_upgrade(move |socket| browser_socket(state, owner, token, id, incoming, socket)))
+        .on_upgrade(move |socket| {
+            browser_socket(state, service, owner, token, id, incoming, socket)
+        }))
 }
 
 async fn browser_socket(
     state: RuntimeState,
+    service: Arc<dyn RuntimeWorkerWebviewService>,
     initial_owner: super::model::ViewOwner,
     token: String,
     id: String,
@@ -199,7 +223,7 @@ async fn browser_socket(
             frame = incoming.recv() => {
                 let Some(frame) = frame else { break; };
                 let Ok(owner) = state.device_view_owner(&token).await else { break; };
-                if state.worker_webviews.authorize(&owner, &id).await.is_err() { break; }
+                if service.authorize(&owner, &id).await.is_err() { break; }
                 if socket.send(Message::Text(frame.value.to_string().into())).await.is_err() { break; }
             }
             frame = socket.recv() => {
@@ -210,7 +234,7 @@ async fn browser_socket(
                     Message::Text(text) => {
                         let Ok(owner) = state.device_view_owner(&token).await else { break; };
                         let Ok(frame) = serde_json::from_str(&text) else { break; };
-                        if state.worker_webviews.frame(&owner, &id, frame).await.is_err() { break; }
+                        if service.frame(&owner, &id, frame).await.is_err() { break; }
                     }
                     _ => break,
                 }
@@ -218,7 +242,7 @@ async fn browser_socket(
         }
     }
     let _ = socket.close().await;
-    let _ = state.worker_webviews.close(&initial_owner, &id).await;
+    let _ = service.close(&initial_owner, &id).await;
 }
 
 async fn asset(
@@ -227,7 +251,10 @@ async fn asset(
     request_headers: HeaderMap,
 ) -> Result<Response, RuntimeError> {
     let owner = state.device_view_owner(&token).await?;
-    let asset = state.worker_webviews.asset(&owner, &id, &path).await?;
+    let asset = state
+        .service::<dyn RuntimeWorkerWebviewService>()?
+        .asset(&owner, &id, &path)
+        .await?;
     if asset.get("error").is_some() {
         return Err(RuntimeError::unavailable("设备不能提供该资源"));
     }
@@ -245,7 +272,10 @@ async fn asset(
     }
     // 资源返回前再次校验，撤权不能通过进行中的资源下载绕过。
     state.device_view_owner(&token).await?;
-    state.worker_webviews.authorize(&owner, &id).await?;
+    state
+        .service::<dyn RuntimeWorkerWebviewService>()?
+        .authorize(&owner, &id)
+        .await?;
     let content_type = asset
         .get("contentType")
         .and_then(Value::as_str)

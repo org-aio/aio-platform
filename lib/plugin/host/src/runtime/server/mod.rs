@@ -16,7 +16,7 @@ mod frontend_package;
 mod frontend_routes;
 #[cfg(test)]
 mod frontend_tests;
-pub(crate) mod http_error;
+pub mod http_error;
 mod installation;
 mod lifecycle;
 mod management;
@@ -27,7 +27,9 @@ mod official_market;
 mod package_repository;
 mod package_store;
 mod page_state;
+pub mod plugins;
 mod process;
+mod protocols;
 mod publication;
 mod publication_validation;
 mod publisher_store;
@@ -68,10 +70,7 @@ pub struct RuntimeState {
     pub store: Arc<store::PluginStore>,
     pub repository: Arc<repository::RepositoryInstaller>,
     pub identity: Arc<dyn crate::identity::IdentityProvider>,
-    pub(crate) personal_config: Arc<dyn crate::generated::personal_config::PersonalConfigService>,
-    pub(crate) clipboard: Arc<dyn crate::generated::clipboard::ClipboardService>,
-    pub(crate) workers: Arc<dyn crate::generated::worker::WorkerService>,
-    pub(crate) worker_webviews: Arc<dyn crate::generated::worker_webview::WorkerWebviewService>,
+    extensions: Arc<plugins::RuntimeExtensions>,
     activation_locks: Arc<Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>>,
     publication_slots: Arc<tokio::sync::Semaphore>,
     frontend: Arc<frontend_access::FrontendAccess>,
@@ -81,6 +80,14 @@ pub struct RuntimeState {
 }
 
 impl RuntimeState {
+    /// 按接口类型取得已安装插件贡献的服务；未安装的能力不会隐式创建默认实现。
+    pub fn service<I: ?Sized + Send + Sync + 'static>(&self) -> Result<Arc<I>> {
+        self.extensions
+            .services
+            .get_one::<I>()
+            .context("宿主未安装所需服务插件")
+    }
+
     pub(crate) fn worker_keyring(&self) -> Result<az_plugin_runtime::Keyring> {
         let path = self
             .config
@@ -95,6 +102,15 @@ impl RuntimeState {
         config: crate::configuration::HostConfig,
         identity: Arc<dyn crate::identity::IdentityProvider>,
     ) -> Result<Self> {
+        Self::initialize_with_plugins(config, identity, plugins::default_plugins()?).await
+    }
+
+    /// 由应用选择宿主能力组合，使用同一套依赖校验、服务绑定与启动流程。
+    pub async fn initialize_with_plugins(
+        config: crate::configuration::HostConfig,
+        identity: Arc<dyn crate::identity::IdentityProvider>,
+        plugins: Vec<az_plugin_core::DynPlugin<plugins::RuntimeAssembly>>,
+    ) -> Result<Self> {
         let transport = transport::TransportOrigins::from_env(&config.public_origin)?;
         let pool = PgPoolOptions::new()
             .max_connections(8)
@@ -104,6 +120,17 @@ impl RuntimeState {
         let store = Arc::new(store::PluginStore::new(pool));
         store.migrate().await?;
         let cache_root = config.cache_root.clone();
+        let keyring_path = config
+            .component_storage
+            .as_ref()
+            .map(|storage| storage.root.join("keyring.json"))
+            .unwrap_or_else(|| cache_root.join("worker-keyring.json"));
+        let extensions = plugins::assemble(
+            store.pool.clone(),
+            components::load_keyring(&keyring_path)?,
+            plugins,
+        )
+        .await?;
         let repository = Arc::new(repository::RepositoryInstaller::new(cache_root.clone()));
         let process = Arc::new(if config.development.is_some() {
             anyhow::ensure!(
@@ -126,45 +153,16 @@ impl RuntimeState {
                     &root.join("keyring.json"),
                     root.join("objects"),
                     identity.clone(),
+                    extensions.services.clone(),
                 )
                 .await?,
             )
         } else {
             None
         };
-        let workers = dill::Catalog::builder()
-            .add_value(store.pool.clone())
-            .add::<crate::generated::worker::WorkerServiceImpl>()
-            .build()
-            .get_one::<dyn crate::generated::worker::WorkerService>()?;
-        let worker_webviews = dill::Catalog::builder()
-            .add_value(store.pool.clone())
-            .add::<crate::generated::worker_webview::WorkerWebviewServiceImpl>()
-            .build()
-            .get_one::<dyn crate::generated::worker_webview::WorkerWebviewService>()?;
-        let keyring_path = config
-            .component_storage
-            .as_ref()
-            .map(|s| s.root.join("keyring.json"))
-            .unwrap_or_else(|| config.cache_root.join("worker-keyring.json"));
-        let personal_config = dill::Catalog::builder()
-            .add_value(store.pool.clone())
-            .add_value(components::load_keyring(&keyring_path)?)
-            .add::<crate::generated::personal_config::PersonalConfigServiceImpl>()
-            .build()
-            .get_one::<dyn crate::generated::personal_config::PersonalConfigService>()?;
-        let clipboard = dill::Catalog::builder()
-            .add_value(store.pool.clone())
-            .add_value(components::load_keyring(&keyring_path)?)
-            .add::<crate::generated::clipboard::ClipboardServiceImpl>()
-            .build()
-            .get_one::<dyn crate::generated::clipboard::ClipboardService>()?;
         let state = Self {
             transport,
-            personal_config,
-            clipboard,
-            workers,
-            worker_webviews,
+            extensions,
             development: Arc::default(),
             store,
             repository,
@@ -184,14 +182,7 @@ impl RuntimeState {
                 .await?;
             return Ok(state);
         }
-        state.ensure_default_plugins().await?;
-        state.reconcile_wasm().await?;
-        state.reconcile_processes().await?;
-        if let Some(components) = &state.components {
-            components.restore().await?;
-        }
-        state.resume_published_jobs().await?;
-        delivery::start(state.clone());
+        state.extensions.start(&state).await?;
         Ok(state)
     }
 

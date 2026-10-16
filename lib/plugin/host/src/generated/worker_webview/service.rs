@@ -9,7 +9,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
 /// 设备长连接与网页连接的临时传输由同一服务管理；帧不落库。
 #[async_trait::async_trait]
-pub(crate) trait WorkerWebviewService: Send + Sync {
+pub trait WorkerWebviewService: std::any::Any + Send + Sync {
     async fn access(
         &self,
         device: &DeviceIdentity,
@@ -63,8 +63,18 @@ pub(super) struct ViewChannel {
     pub assets: std::collections::HashMap<String, oneshot::Sender<Value>>,
 }
 
-// 每个视图单独限制待发送帧的内存；帧处理结束或关闭队列时自动释放预算。
-pub(crate) struct ViewFrame {
+/// 每个视图单独限制待发送帧的内存；帧处理结束或关闭队列时自动释放预算。
+pub struct ViewFrame {
     pub value: Value,
-    pub(super) _permit: OwnedSemaphorePermit,
+    _permit: OwnedSemaphorePermit,
+}
+
+impl ViewFrame {
+    /// 自定义设备视图服务把已取得的内存预算交给帧，直到发送或丢弃完成才释放。
+    pub fn new(value: Value, permit: OwnedSemaphorePermit) -> Self {
+        Self {
+            value,
+            _permit: permit,
+        }
+    }
 }

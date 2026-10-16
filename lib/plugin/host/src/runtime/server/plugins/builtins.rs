@@ -1,0 +1,214 @@
+use std::any::TypeId;
+
+use anyhow::Result;
+use az_plugin_core::{DynPlugin, Plugin, PluginFuture, PluginGroupBuilder};
+use dill::CatalogBuilder;
+
+use super::RuntimeAssembly;
+use crate::generated::{clipboard, personal_config, worker, worker_webview};
+
+// 每项能力声明自己的服务、路由和具体类型依赖；宏只展开同一套注册步骤。
+macro_rules! route_plugin {
+    ($name:ident, [$($dependency:ty),*], [$($required:ty),*], $routes:expr) => {
+        /// 向宿主贡献该能力的服务与路由，由应用装配层决定是否安装。
+        #[dill::component]
+        #[dill::interface(dyn Plugin<RuntimeAssembly>)]
+        pub struct $name;
+
+        impl Plugin<RuntimeAssembly> for $name {
+            fn dependencies(&self) -> Vec<TypeId> {
+                vec![$(TypeId::of::<$dependency>()),*]
+            }
+
+            fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
+                Box::pin(async move {
+                    $(assembly.require_service::<$required>();)*
+                    assembly.add_routes($routes);
+                    Ok(())
+                })
+            }
+        }
+    };
+}
+
+route_plugin!(FrontendPlugin, [], [], |_| {
+    super::super::routes::frontend()
+});
+route_plugin!(EnhancementsPlugin, [ComponentsPlugin], [], |_| {
+    super::super::enhancements::router()
+});
+route_plugin!(McpPlugin, [ComponentsPlugin], [], |state| {
+    super::super::protocols::mcp::router(state.clone())
+});
+route_plugin!(GrpcPlugin, [ComponentsPlugin], [], |state| {
+    super::super::protocols::grpc::router(state.clone())
+});
+route_plugin!(BootstrapPlugin, [], [], |_| {
+    super::super::bootstrap::router()
+});
+route_plugin!(NavigationPlugin, [], [], |_| {
+    super::super::navigation::router()
+});
+route_plugin!(ToolsPlugin, [], [dyn worker::WorkerService], |_| {
+    super::super::tools::router()
+});
+route_plugin!(WorkersPlugin, [], [dyn worker::WorkerService], |_| {
+    worker::controller::router()
+});
+route_plugin!(WorkerWebviewsPlugin, [], [dyn worker_webview::WorkerWebviewService, dyn worker::WorkerService], |_| worker_webview::controller::router());
+route_plugin!(PersonalConfigPlugin, [], [dyn personal_config::PersonalConfigService, dyn worker::WorkerService], |state| personal_config::controller::router(state.clone()));
+route_plugin!(ClipboardPlugin, [], [dyn clipboard::ClipboardService, dyn worker::WorkerService], |state| clipboard::controller::router(state.clone()));
+
+/// 管理插件拥有默认包恢复、旧执行器恢复与发布任务恢复。
+#[dill::component]
+#[dill::interface(dyn Plugin<RuntimeAssembly>)]
+pub struct ManagementPlugin;
+
+impl Plugin<RuntimeAssembly> for ManagementPlugin {
+    fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
+        Box::pin(async move {
+            assembly.add_routes(|state| super::super::routes::management(state.clone()));
+            assembly.on_start(|state| {
+                Box::pin(async move {
+                    state.ensure_default_plugins().await?;
+                    state.reconcile_wasm().await?;
+                    state.reconcile_processes().await
+                })
+            });
+            assembly.on_ready(|state| Box::pin(async move { state.resume_published_jobs().await }));
+            Ok(())
+        })
+    }
+}
+
+/// 组件插件恢复已安装的 Wasm 与 sidecar 版本。
+#[dill::component]
+#[dill::interface(dyn Plugin<RuntimeAssembly>)]
+pub struct ComponentsPlugin;
+
+impl Plugin<RuntimeAssembly> for ComponentsPlugin {
+    fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
+        Box::pin(async move {
+            assembly.add_routes(|state| super::super::components::router(state.clone()));
+            assembly.on_start(|state| {
+                Box::pin(async move {
+                    if let Some(components) = &state.components {
+                        components.restore().await?;
+                    }
+                    Ok(())
+                })
+            });
+            Ok(())
+        })
+    }
+}
+
+/// 交付插件只在完整恢复成功后启动发现和滚动发布任务。
+#[dill::component]
+#[dill::interface(dyn Plugin<RuntimeAssembly>)]
+pub struct DeliveryPlugin;
+
+impl Plugin<RuntimeAssembly> for DeliveryPlugin {
+    fn dependencies(&self) -> Vec<TypeId> {
+        vec![
+            TypeId::of::<ManagementPlugin>(),
+            TypeId::of::<ComponentsPlugin>(),
+        ]
+    }
+    fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
+        Box::pin(async move {
+            assembly.add_routes(|_| super::super::delivery::router());
+            assembly.on_ready(|state| {
+                Box::pin(async move {
+                    super::super::delivery::start(state);
+                    Ok(())
+                })
+            });
+            Ok(())
+        })
+    }
+}
+
+// 默认实现独立于路由插件；应用可省略它并绑定同一接口的替代实现。
+macro_rules! service_plugin {
+    ($name:ident, $implementation:ty, $interface:ty) => {
+        /// 为宿主注册该服务的默认持久化实现，不绑定 HTTP 路由。
+        #[dill::component]
+        #[dill::interface(dyn Plugin<RuntimeAssembly>)]
+        pub struct $name;
+        impl Plugin<RuntimeAssembly> for $name {
+            fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
+                Box::pin(async move {
+                    assembly.services.add::<$implementation>();
+                    assembly.require_service::<$interface>();
+                    Ok(())
+                })
+            }
+        }
+    };
+}
+
+service_plugin!(
+    WorkerServicePlugin,
+    worker::WorkerServiceImpl,
+    dyn worker::WorkerService
+);
+service_plugin!(
+    WorkerWebviewServicePlugin,
+    worker_webview::WorkerWebviewServiceImpl,
+    dyn worker_webview::WorkerWebviewService
+);
+service_plugin!(
+    PersonalConfigServicePlugin,
+    personal_config::PersonalConfigServiceImpl,
+    dyn personal_config::PersonalConfigService
+);
+service_plugin!(
+    ClipboardServicePlugin,
+    clipboard::ClipboardServiceImpl,
+    dyn clipboard::ClipboardService
+);
+
+/// 默认平台组合；精简宿主或定制宿主可以从自己的 Dill Catalog 解析其他组合。
+pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
+    let mut catalog = CatalogBuilder::new();
+    catalog
+        .add::<WorkerServicePlugin>()
+        .add::<WorkerWebviewServicePlugin>()
+        .add::<PersonalConfigServicePlugin>()
+        .add::<ClipboardServicePlugin>()
+        .add::<ManagementPlugin>()
+        .add::<FrontendPlugin>()
+        .add::<ComponentsPlugin>()
+        .add::<DeliveryPlugin>()
+        .add::<EnhancementsPlugin>()
+        .add::<McpPlugin>()
+        .add::<GrpcPlugin>()
+        .add::<BootstrapPlugin>()
+        .add::<NavigationPlugin>()
+        .add::<ToolsPlugin>()
+        .add::<WorkersPlugin>()
+        .add::<WorkerWebviewsPlugin>()
+        .add::<PersonalConfigPlugin>()
+        .add::<ClipboardPlugin>();
+    PluginGroupBuilder::default()
+        .add::<WorkerServicePlugin>()
+        .add::<WorkerWebviewServicePlugin>()
+        .add::<PersonalConfigServicePlugin>()
+        .add::<ClipboardServicePlugin>()
+        .add::<ManagementPlugin>()
+        .add::<FrontendPlugin>()
+        .add::<ComponentsPlugin>()
+        .add::<DeliveryPlugin>()
+        .add::<EnhancementsPlugin>()
+        .add::<McpPlugin>()
+        .add::<GrpcPlugin>()
+        .add::<BootstrapPlugin>()
+        .add::<NavigationPlugin>()
+        .add::<ToolsPlugin>()
+        .add::<WorkersPlugin>()
+        .add::<WorkerWebviewsPlugin>()
+        .add::<PersonalConfigPlugin>()
+        .add::<ClipboardPlugin>()
+        .resolve(&catalog.build())
+}

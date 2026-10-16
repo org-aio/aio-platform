@@ -216,6 +216,7 @@ async fn enhancement_http_requires_manager_and_reports_generation_conflicts() ->
             &root.path().join("keyring.json"),
             root.path().join("objects"),
             identity,
+            state.extensions.services.clone(),
         )
         .await?,
     );

@@ -23,38 +23,15 @@ impl RuntimeState {
             .await?;
         let store = Arc::new(PluginStore::new(pool));
         store.migrate().await?;
-        let workers = dill::Catalog::builder()
-            .add_value(store.pool.clone())
-            .add::<crate::generated::worker::WorkerServiceImpl>()
-            .build()
-            .get_one::<dyn crate::generated::worker::WorkerService>()?;
-        let worker_webviews = dill::Catalog::builder()
-            .add_value(store.pool.clone())
-            .add::<crate::generated::worker_webview::WorkerWebviewServiceImpl>()
-            .build()
-            .get_one::<dyn crate::generated::worker_webview::WorkerWebviewService>()?;
-        let personal_config = dill::Catalog::builder()
-            .add_value(store.pool.clone())
-            .add_value(super::components::load_keyring(
-                &cache.join("worker-keyring.json"),
-            )?)
-            .add::<crate::generated::personal_config::PersonalConfigServiceImpl>()
-            .build()
-            .get_one::<dyn crate::generated::personal_config::PersonalConfigService>()?;
-        let clipboard = dill::Catalog::builder()
-            .add_value(store.pool.clone())
-            .add_value(super::components::load_keyring(
-                &cache.join("worker-keyring.json"),
-            )?)
-            .add::<crate::generated::clipboard::ClipboardServiceImpl>()
-            .build()
-            .get_one::<dyn crate::generated::clipboard::ClipboardService>()?;
+        let extensions = super::plugins::assemble(
+            store.pool.clone(),
+            super::components::load_keyring(&cache.join("worker-keyring.json"))?,
+            super::plugins::default_plugins()?,
+        )
+        .await?;
         Ok(Self {
             transport: super::transport::TransportOrigins::from_env(origin)?,
-            personal_config,
-            clipboard,
-            workers,
-            worker_webviews,
+            extensions,
             config: Arc::new(crate::configuration::HostConfig {
                 database_url: database.into(),
                 cache_root: cache.into(),

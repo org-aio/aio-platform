@@ -1,4 +1,5 @@
 use super::*;
+use crate::generated::worker::WorkerService as RuntimeWorkerService;
 use crate::identity::{IdentityProvider, SessionContext};
 use anyhow::Result;
 use axum::http::HeaderMap;
@@ -185,7 +186,7 @@ async fn exercise_devices(
         permissions: vec![],
     };
     let pairing = state
-        .workers
+        .service::<dyn RuntimeWorkerService>()?
         .pair(PairRequest {
             label: "安装验收设备".into(),
             platform: "darwin".into(),
@@ -193,9 +194,18 @@ async fn exercise_devices(
             machine_id: None,
         })
         .await?;
-    state.workers.approve(&session, &pairing.code).await?;
-    let identity = state.workers.identity(&pairing.token).await?;
-    state.workers.heartbeat(&identity, None).await?;
+    state
+        .service::<dyn RuntimeWorkerService>()?
+        .approve(&session, &pairing.code)
+        .await?;
+    let identity = state
+        .service::<dyn RuntimeWorkerService>()?
+        .identity(&pairing.token)
+        .await?;
+    state
+        .service::<dyn RuntimeWorkerService>()?
+        .heartbeat(&identity, None)
+        .await?;
     let devices_url = format!("{base}/api/runtime/tools/{}/devices", manifest.id);
     let snapshot: serde_json::Value = client
         .get(&devices_url)
@@ -308,7 +318,10 @@ async fn exercise_devices(
             .status(),
         400
     );
-    state.workers.revoke(&session, &pairing.device_id).await?;
+    state
+        .service::<dyn RuntimeWorkerService>()?
+        .revoke(&session, &pairing.device_id)
+        .await?;
     assert_eq!(
         client
             .post(&report_url)

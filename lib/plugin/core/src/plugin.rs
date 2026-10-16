@@ -23,13 +23,18 @@ pub trait Plugin<T>: Any + Send + Sync {
     /// 构建插件；异步返回用于覆盖数据库和文件系统初始化。
     fn build<'a>(&'a self, app: &'a mut T) -> PluginFuture<'a>;
 
+    /// 构建前必须存在的具体插件类型；内核在执行任何插件前检查完整依赖图。
+    fn dependencies(&self) -> Vec<TypeId> {
+        Vec::new()
+    }
+
     /// 可选的人类可读说明，只用于日志和诊断。
     fn comment(&self) -> &'static str {
         ""
     }
 }
 
-/// 按插件组顺序构建应用状态。
+/// 按依赖顺序构建应用状态；无依赖关系的插件保留装配顺序。
 pub struct App<T> {
     state: T,
     unique_plugin_types: HashSet<TypeId>,
@@ -49,7 +54,7 @@ impl<T: 'static> App<T> {
         plugins: impl IntoIterator<Item = DynPlugin<T>>,
     ) -> Result<()> {
         let plugins = plugins.into_iter().collect::<Vec<_>>();
-        self.validate_plugins(&plugins)?;
+        let plugins = self.plan_plugins(plugins)?;
 
         for plugin in plugins {
             let type_id = plugin.as_ref().type_id();
@@ -66,9 +71,9 @@ impl<T: 'static> App<T> {
         Ok(())
     }
 
-    fn validate_plugins(&self, plugins: &[DynPlugin<T>]) -> Result<()> {
+    fn plan_plugins(&self, plugins: Vec<DynPlugin<T>>) -> Result<Vec<DynPlugin<T>>> {
         let mut pending_unique_types = HashSet::new();
-        for plugin in plugins {
+        for plugin in &plugins {
             let type_id = plugin.as_ref().type_id();
             ensure!(
                 !self.unique_plugin_types.contains(&type_id),
@@ -79,7 +84,39 @@ impl<T: 'static> App<T> {
                 "插件组包含重复插件类型: {type_id:?}"
             );
         }
-        Ok(())
+        let available = self
+            .unique_plugin_types
+            .union(&pending_unique_types)
+            .copied()
+            .collect::<HashSet<_>>();
+        let mut pending = Vec::new();
+        for plugin in plugins {
+            let dependencies = plugin.dependencies();
+            for dependency in &dependencies {
+                ensure!(
+                    available.contains(dependency),
+                    "插件依赖缺失: {:?} -> {dependency:?}",
+                    plugin.as_ref().type_id()
+                );
+            }
+            pending.push((plugin, dependencies));
+        }
+        let mut built = self.unique_plugin_types.clone();
+        let mut ordered = Vec::new();
+        while !pending.is_empty() {
+            let position = pending
+                .iter()
+                .position(|(_, dependencies)| {
+                    dependencies
+                        .iter()
+                        .all(|dependency| built.contains(dependency))
+                })
+                .context("插件依赖形成循环，不能启动")?;
+            let (plugin, _) = pending.remove(position);
+            built.insert(plugin.as_ref().type_id());
+            ordered.push(plugin);
+        }
+        Ok(ordered)
     }
 
     #[must_use]
@@ -227,5 +264,63 @@ mod tests {
         assert!(error.to_string().contains("重复插件"));
         assert!(app.into_inner().builds.is_empty());
         Ok(())
+    }
+
+    struct Dependent;
+    impl Plugin<TestState> for Dependent {
+        fn dependencies(&self) -> Vec<TypeId> {
+            vec![TypeId::of::<First>()]
+        }
+        fn build<'a>(&'a self, app: &'a mut TestState) -> PluginFuture<'a> {
+            Box::pin(async move {
+                app.builds.push("dependent");
+                Ok(())
+            })
+        }
+    }
+
+    struct Cyclic;
+    impl Plugin<TestState> for Cyclic {
+        fn dependencies(&self) -> Vec<TypeId> {
+            vec![TypeId::of::<Cyclic>()]
+        }
+        fn build<'a>(&'a self, app: &'a mut TestState) -> PluginFuture<'a> {
+            Box::pin(async move {
+                app.builds.push("cyclic");
+                Ok(())
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn dependency_graph_orders_plugins_and_accepts_existing_dependencies() -> Result<()> {
+        let mut app = App::new(TestState::default());
+        let plugins: Vec<DynPlugin<TestState>> =
+            vec![Arc::new(Dependent), Arc::new(Second), Arc::new(First)];
+        app.add_plugins(plugins).await?;
+        assert_eq!(app.into_inner().builds, ["second", "first", "dependent"]);
+        let mut app = App::new(TestState::default());
+        app.add_plugins(vec![Arc::new(First) as DynPlugin<TestState>])
+            .await?;
+        app.add_plugins(vec![Arc::new(Dependent) as DynPlugin<TestState>])
+            .await?;
+        assert_eq!(app.into_inner().builds, ["first", "dependent"]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rejects_missing_dependencies_and_cycles_before_any_build() {
+        for invalid in [
+            Arc::new(Dependent) as DynPlugin<TestState>,
+            Arc::new(Cyclic),
+        ] {
+            let mut app = App::new(TestState::default());
+            assert!(
+                app.add_plugins(vec![Arc::new(Second), invalid])
+                    .await
+                    .is_err()
+            );
+            assert!(app.into_inner().builds.is_empty());
+        }
     }
 }

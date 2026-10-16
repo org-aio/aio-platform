@@ -2,7 +2,9 @@
 
 ## 当前判断
 
-AIO 已具备动态业务包、Wasm 和受控 process 执行、能力授权、整包健康检查、版本恢复与回滚，但不能称为“一切皆插件”。`aio-idea` 仍静态装配身份、权限、字典等系统插件，`az-plugin-core` 同时含 Rust 应用装配和数据库/HTTP 基础设施。`RuntimeState::initialize` 仍负责基础设施创建与启动顺序。平台无业务依赖，并不等于所有平台策略都可动态替换。
+持续演进的完整范围与未完成项见 [一切皆插件验收清单](everything-as-plugin.md)；不能以某个阶段的局部测试代替整体验收。
+
+AIO 已具备动态业务包、Wasm 和受控 process 执行、能力授权、整包健康检查、版本恢复与回滚，但不能称为“一切皆插件”。`aio-idea` 仍静态装配身份、权限、字典等系统插件。`az-plugin-core` 已支持不携带数据库/HTTP 的最小装配模式，宿主服务、路由及部分恢复动作已由插件组合选择，但 `RuntimeState::initialize` 仍负责基础设施创建。平台无业务依赖，并不等于所有平台策略都可动态替换。
 
 本次补充的是可编程的运行时能力层：AI 或开发者可以生成 Rhai/TypeScript 候选包，通过验证、发布和回滚在运行期间增强已有宿主。新旧插件只要声明了对应能力路径，就可使用当前租户已激活的实现，无需把脚本或解释器复制进每个插件。
 
@@ -22,6 +24,10 @@ flowchart TD
     P[Sidecar 插件] --> B[现有 Unix socket broker]
     WIT --> I[统一能力授权与调用]
     B --> I
+    M[MCP 工具客户端] --> MP[可插拔 MCP 入口]
+    G[gRPC 客户端] --> GP[可插拔 gRPC 入口]
+    MP --> I
+    GP --> I
     I --> H
     H --> E[Rhai / TypeScript 执行器]
 ```
@@ -69,10 +75,10 @@ cargo run -p az-plugin-enhancement --example verify -- \
 | --- | --- | --- |
 | Sidecar | 原生依赖、长任务、进程隔离和独立重启 | 复用现有 process supervisor/broker，已接入同一增强服务 |
 | WIT | Wasm 与宿主之间的类型边界 | 已增加通用增强调用接口 |
-| MCP | 给 AI 提供能力发现、输入 schema、试运行和发布工具 | 尚未增加 MCP server/adapter，不能把 REST API 当成 MCP 验收 |
-| gRPC | 跨进程/跨机器的强类型、高吞吐和流式传输 | 尚未增加 gRPC 服务与端到端验收 |
+| MCP | 给 AI 提供工具发现和执行 | 官方 SDK 的 Streamable HTTP 已接入增强；当前 schema 是通用 JSON input，不提供自动发布 |
+| gRPC | 有类型的跨进程/跨机器通信 | Tonic 与生成的 Protobuf 契约已接入增强发现/执行、消息限额和截止时间；当前为 unary |
 
-后续 MCP 和 gRPC 适配器应消费同一份请求、响应、能力清单和版本服务，不保存另一套活动指针，也不允许调用方自报租户。MCP 的工具发现不是授权；gRPC 的类型正确不代表权限正确。Sidecar 是执行边界，可以承载 MCP 或 gRPC 服务，但宿主仍决定哪些能力能被调用。
+MCP 和 gRPC 适配器消费同一份增强目录、请求响应与版本服务，不保存另一套活动指针，也不允许调用方自报租户。MCP 的工具发现不是授权；gRPC 的类型正确不代表权限正确。Sidecar 是执行边界，可以承载 MCP 或 gRPC 服务，但宿主仍决定哪些能力能被调用。接入方式、权限和真实客户端验收见 [协议入口](../../lib/plugin/host/src/runtime/server/protocols/README.md)。将任意外部 MCP/gRPC 服务导入为能力提供者仍未实现。
 
 ## 下一层改进的验收门槛
 
