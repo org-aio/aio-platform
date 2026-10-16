@@ -1,8 +1,8 @@
 # 宿主脚本增强
 
-`controller.rs` 是管理员 API，`store.rs` 统一负责候选验证、租户版本、激活和执行。WIT 与 process broker 都调用同一个 `Enhancements::invoke`。PostgreSQL 是活动版本的权威源；内存只缓存已验证的不可变代码。每次调用读取一次活动版本，随后完整使用该版本。切换前已接收的调用可以完成，响应返回实际执行的 revision。
+`controller.rs` 是管理员 API，`store.rs` 统一负责候选验证、租户版本、激活和执行。`EnhancementServicePlugin` 初始化服务并注入同一个 `ScriptRuntime`；WIT、process broker、HTTP、MCP 和 gRPC 都使用它。PostgreSQL 是活动版本的权威源；内存只缓存已验证的不可变代码。每次调用读取一次活动版本，随后完整使用该版本。切换前已接收的调用可以完成，响应返回实际执行的 revision。
 
-只有当前租户的 `plugin:manage` 会话能够保存、查看和激活版本，请求不能指定其他租户。插件只获得清单声明的版本路径调用权，不能发布或激活脚本。以下 API 在配置 Component 存储的宿主中可用：
+只有当前租户的 `plugin:manage` 会话能够保存、查看和激活版本，请求不能指定其他租户。插件只获得清单声明的版本路径调用权，不能发布或激活脚本。以下 API 由 `EnhancementsPlugin` 提供，需要数据库与脚本执行器，不需要配置 Component 存储：
 
 | API | 行为 |
 | --- | --- |

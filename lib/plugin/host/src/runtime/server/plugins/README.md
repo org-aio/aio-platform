@@ -96,11 +96,22 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 | `StorePlugin` | 依赖数据库，迁移平台表及清理开发会话的旧绑定 |
 | `RepositoryPlugin` | 提供包缓存与仓库能力 |
 | `ProcessPlugin` / `WasmPlugin` | 持有旧进程 / Wasm 执行资源，并负责停止 |
-| `ComponentResourcesPlugin` | 依赖存储与密钥，配置组件存储时创建组件执行环境，停止时卸载实例并关闭组件连接 |
+| `RhaiPlugin` / `TypeScriptPlugin` | 向 Dill 提供对应的 `ScriptExecutor`，省略后不接受该语言 |
+| `ScriptRuntimePlugin` | 汇集所选脚本执行器，统一候选与样例验证，不连接数据库或创建文件 |
+| `EnhancementServicePlugin` | 依赖数据库与脚本运行时，提供统一的增强版本、授权和调用服务 |
+| `ComponentResourcesPlugin` | 依赖存储、密钥和增强服务，配置组件存储时创建组件执行环境，停止时卸载实例并关闭组件连接 |
 
 替换数据库连接方式时保留 `DatabasePlugin`，省略 `PostgresPlugin`，在自己的插件中使用 Dill 绑定 `dyn DatabaseProvider`；密钥同理。Provider 返回的连接池属于本次宿主，会在关闭或初始化失败时关闭，不应返回另一个宿主仍在使用的池。所有服务和 Sidecar 消费同一个容器提供的实例。
 
 该替换点允许外部连接管理与密钥来源；平台的数据模型仍使用 PostgreSQL，组件数据库 provisioner、对象存储和执行器分发尚未全部抽象。选择是否安装 Wasm 资源不等于已经具备任意执行器替换契约。
+
+## 脚本执行器
+
+读取 `enhancement_execution.rs` 的装配，再看 `az-plugin-enhancement` 的 `ScriptExecutor` / `ScriptProgram` 契约。应用的插件向同一个 `assembly.services` 绑定 `dyn ScriptExecutor`，保留 `ScriptRuntimePlugin`，省略对应默认语言插件。执行器具体类型仍是 TypeId 身份，语言只用于检查候选输入格式；同一类型重复绑定被拒绝，同一语言匹配多个实现时拒绝编译，不按注册顺序覆盖。
+
+`EnhancementServicePlugin` 将此运行时用于候选编译、样例重放与持久版本恢复，编译产物用于在线调用。自定义原生执行器属于可信宿主代码，必须自行保持状态隔离、资源上限与取消约定；脚本无法替换执行器或扩大权限。增强服务统一保留输入输出配额、并发额度、租户授权和原子版本激活。
+
+只有 `ScriptRuntimePlugin` 和语言插件的宿主可以使用无效数据库配置启动并执行纯计算。增加 `EnhancementServicePlugin` 后才需要数据库；MCP/gRPC 直接依赖此服务，不再通过组件资源间接初始化执行引擎。Wasm 与 Sidecar 仍使用各自的执行契约，其统一替换工作尚未完成。
 
 ## 验证
 

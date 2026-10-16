@@ -4,7 +4,7 @@ use anyhow::Result;
 use az_plugin_core::{DynPlugin, Plugin, PluginFuture, PluginGroupBuilder};
 use dill::CatalogBuilder;
 
-use super::{RuntimeAssembly, infrastructure::*};
+use super::{RuntimeAssembly, enhancement_execution::*, infrastructure::*};
 use crate::generated::{clipboard, personal_config, worker, worker_webview};
 
 // 每项能力声明自己的服务、路由和具体类型依赖；宏只展开同一套注册步骤。
@@ -37,13 +37,13 @@ route_plugin!(
     [],
     |_| { super::super::routes::frontend() }
 );
-route_plugin!(EnhancementsPlugin, [ComponentsPlugin], [], |_| {
+route_plugin!(EnhancementsPlugin, [EnhancementServicePlugin], [], |_| {
     super::super::enhancements::router()
 });
-route_plugin!(McpPlugin, [ComponentsPlugin], [], |state| {
+route_plugin!(McpPlugin, [EnhancementServicePlugin], [], |state| {
     super::super::protocols::mcp::router(state.clone())
 });
-route_plugin!(GrpcPlugin, [ComponentsPlugin], [], |state| {
+route_plugin!(GrpcPlugin, [EnhancementServicePlugin], [], |state| {
     super::super::protocols::grpc::router(state.clone())
 });
 route_plugin!(BootstrapPlugin, [StorePlugin], [], |_| {
@@ -205,6 +205,10 @@ pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
         .add::<RepositoryPlugin>()
         .add::<ProcessPlugin>()
         .add::<WasmPlugin>()
+        .add::<RhaiPlugin>()
+        .add::<TypeScriptPlugin>()
+        .add::<ScriptRuntimePlugin>()
+        .add::<EnhancementServicePlugin>()
         .add::<ComponentResourcesPlugin>()
         .add::<WorkerServicePlugin>()
         .add::<WorkerWebviewServicePlugin>()
@@ -233,6 +237,10 @@ pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
         .add::<RepositoryPlugin>()
         .add::<ProcessPlugin>()
         .add::<WasmPlugin>()
+        .add::<RhaiPlugin>()
+        .add::<TypeScriptPlugin>()
+        .add::<ScriptRuntimePlugin>()
+        .add::<EnhancementServicePlugin>()
         .add::<ComponentResourcesPlugin>()
         .add::<WorkerServicePlugin>()
         .add::<WorkerWebviewServicePlugin>()

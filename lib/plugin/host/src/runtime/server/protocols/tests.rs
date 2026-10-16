@@ -160,8 +160,7 @@ async fn exercise(fixture: &Fixture) -> Result<()> {
     transport_limits(fixture, &mut grpc).await?;
     fixture
         .state
-        .components()?
-        .enhancements
+        .service::<super::super::enhancements::Enhancements>()?
         .activate(&fixture.identity.tenant, "test", None, 3, false)
         .await?
         .context("停用失败")?;
@@ -188,7 +187,7 @@ async fn exercise(fixture: &Fixture) -> Result<()> {
     other.cancel().await?;
     fixture.check_omitted_plugins().await?;
     fixture.state.shutdown().await?;
-    assert!(fixture.state.store()?.pool.is_closed());
+    assert!(fixture.state.service::<sqlx::PgPool>()?.is_closed());
     assert_eq!(
         grpc.list(auth(ListRequest {}, "manager")?)
             .await

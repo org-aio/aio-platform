@@ -6,18 +6,24 @@ rust-version.workspace = true
 license.workspace = true
 description = "Bounded Rhai and TypeScript host enhancements for AIO."
 
+[features]
+default = ["rhai", "typescript"]
+rhai = ["dep:rhai"]
+typescript = ["dep:rquickjs", "dep:oxc_allocator", "dep:oxc_ast", "dep:oxc_codegen", "dep:oxc_parser", "dep:oxc_semantic", "dep:oxc_span", "dep:oxc_transformer"]
+
 [dependencies]
 anyhow.workspace = true
 az-plugin-contract = { path = "../contract" }
-rhai = { version = "1.26.1", features = ["sync", "serde", "no_module"] }
-rquickjs = "0.14.0"
-oxc_allocator = "=0.146.0"
-oxc_ast = "=0.146.0"
-oxc_codegen = "=0.146.0"
-oxc_parser = "=0.146.0"
-oxc_semantic = "=0.146.0"
-oxc_span = "=0.146.0"
-oxc_transformer = "=0.146.0"
+dill.workspace = true
+rhai = { version = "1.26.1", features = ["sync", "serde", "no_module"], optional = true }
+rquickjs = { version = "0.14.0", optional = true }
+oxc_allocator = { version = "=0.146.0", optional = true }
+oxc_ast = { version = "=0.146.0", optional = true }
+oxc_codegen = { version = "=0.146.0", optional = true }
+oxc_parser = { version = "=0.146.0", optional = true }
+oxc_semantic = { version = "=0.146.0", optional = true }
+oxc_span = { version = "=0.146.0", optional = true }
+oxc_transformer = { version = "=0.146.0", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

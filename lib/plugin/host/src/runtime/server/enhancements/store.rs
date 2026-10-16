@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Context, Result, ensure};
 use az_plugin_contract::{EnhancementRequest, EnhancementResponse, InvocationScope};
-use az_plugin_enhancement::{Package, PreparedPackage, ScriptContext};
+use az_plugin_enhancement::{Package, PreparedPackage, ScriptContext, ScriptRuntime};
 use serde::Serialize;
 use sqlx::PgPool;
 use tokio::sync::Semaphore;
@@ -13,6 +13,7 @@ use tokio::sync::Semaphore;
 /// 租户内增强版本的唯一持久化与执行入口；传输适配器不维护自己的版本指针。
 pub(in crate::runtime::server) struct Enhancements {
     pool: PgPool,
+    runtime: Arc<ScriptRuntime>,
     cache: Mutex<BTreeMap<(String, String), Arc<PreparedPackage>>>,
     execution: Arc<Semaphore>,
 }
@@ -50,12 +51,16 @@ impl Enhancements {
         Ok((Some(revision), paths))
     }
 
-    pub(in crate::runtime::server) async fn open(pool: PgPool) -> Result<Self> {
+    pub(in crate::runtime::server) async fn open(
+        pool: PgPool,
+        runtime: Arc<ScriptRuntime>,
+    ) -> Result<Self> {
         sqlx::raw_sql(include_str!("schema.sql"))
             .execute(&pool)
             .await?;
         Ok(Self {
             pool,
+            runtime,
             cache: Mutex::default(),
             execution: Arc::new(Semaphore::new(4)),
         })
@@ -229,6 +234,7 @@ impl Enhancements {
     }
 
     async fn prepare(&self, package: Package) -> Result<Arc<PreparedPackage>> {
+        let runtime = self.runtime.clone();
         let permit = self
             .execution
             .clone()
@@ -236,7 +242,7 @@ impl Enhancements {
             .context("增强验证并发已满")?;
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            PreparedPackage::prepare(package).map(Arc::new)
+            runtime.prepare(package).map(Arc::new)
         })
         .await
         .context("等待增强编译失败")?

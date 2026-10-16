@@ -2,6 +2,7 @@
 
 mod admission;
 mod builtins;
+mod enhancement_execution;
 mod infrastructure;
 #[cfg(test)]
 mod infrastructure_tests;
@@ -24,6 +25,7 @@ use super::RuntimeState;
 
 pub(super) use admission::admit;
 pub use builtins::*;
+pub use enhancement_execution::*;
 pub use infrastructure::*;
 use lifecycle::{HookPlan, Lifecycle};
 pub use resource::Resource;

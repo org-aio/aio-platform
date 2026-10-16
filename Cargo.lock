@@ -578,6 +578,7 @@ version = "2026.5.10"
 dependencies = [
  "anyhow",
  "az-plugin-contract",
+ "dill",
  "oxc_allocator",
  "oxc_ast",
  "oxc_codegen",

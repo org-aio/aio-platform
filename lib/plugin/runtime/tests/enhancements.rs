@@ -43,7 +43,7 @@ impl HostServices for Host {
 }
 
 fn package(language: Language, source: &str) -> Result<PreparedPackage> {
-    PreparedPackage::prepare(Package {
+    az_plugin_enhancement::default_runtime()?.prepare(Package {
         schema_version: 1,
         enhancements: vec![Enhancement {
             path: "/v1/math/double".into(),

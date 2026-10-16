@@ -2,7 +2,31 @@ use anyhow::{Context, Result};
 use rhai::{AST, Dynamic, Engine, Scope};
 use serde_json::Value;
 
-use crate::ScriptContext;
+use crate::{Language, ScriptContext, ScriptExecutor, ScriptProgram};
+use std::sync::Arc;
+
+/// 默认受限 Rhai 执行器；由宿主装配，未选择它时不接受 Rhai 候选。
+#[dill::component]
+#[dill::interface(dyn ScriptExecutor)]
+#[dill::scope(dill::Singleton)]
+pub struct RhaiExecutor;
+
+impl ScriptExecutor for RhaiExecutor {
+    fn supports(&self, language: Language) -> bool {
+        language == Language::Rhai
+    }
+    fn compile(&self, source: &str) -> Result<Arc<dyn ScriptProgram>> {
+        Ok(Arc::new(RhaiProgram(compile(source)?)))
+    }
+}
+
+struct RhaiProgram(AST);
+
+impl ScriptProgram for RhaiProgram {
+    fn invoke(&self, input: &Value, context: &ScriptContext) -> Result<Value> {
+        invoke(&self.0, input, context)
+    }
+}
 
 fn engine() -> Engine {
     let mut engine = Engine::new();

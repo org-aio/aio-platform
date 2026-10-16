@@ -1,26 +1,23 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use anyhow::{Context, Result, ensure};
 use az_plugin_contract::validate_enhancement_path;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::{Enhancement, Language, Package, ScriptContext};
-
-enum Compiled {
-    Rhai(rhai::AST),
-    TypeScript(String),
-}
+use crate::{Enhancement, Package, ScriptContext, ScriptProgram, ScriptRuntime};
 
 /// 已完成语法检查和样例执行的候选版本；发布者负责持久化和原子激活。
 pub struct PreparedPackage {
     revision: String,
     package: Package,
-    compiled: BTreeMap<String, Compiled>,
+    compiled: BTreeMap<String, Arc<dyn ScriptProgram>>,
 }
 
-impl PreparedPackage {
-    pub fn prepare(package: Package) -> Result<Self> {
+impl ScriptRuntime {
+    /// 使用已装配的执行器编译候选并重放样例，成功后返回不可变的准备版本。
+    pub fn prepare(&self, package: Package) -> Result<PreparedPackage> {
+        self.validate()?;
         let encoded = serde_json::to_vec(&package)?;
         ensure!(encoded.len() <= crate::MAX_PACKAGE_BYTES, "增强包超过配额");
         ensure!(package.schema_version == 1, "增强包协议版本不受支持");
@@ -36,15 +33,10 @@ impl PreparedPackage {
                 "增强路径重复: {}",
                 enhancement.path
             );
-            let implementation = match enhancement.language {
-                Language::Rhai => Compiled::Rhai(crate::rhai::compile(&enhancement.source)?),
-                Language::TypeScript => {
-                    Compiled::TypeScript(crate::typescript::compile(&enhancement.source)?)
-                }
-            };
+            let implementation = self.compile(enhancement.language, &enhancement.source)?;
             compiled.insert(enhancement.path.clone(), implementation);
         }
-        let prepared = Self {
+        let prepared = PreparedPackage {
             revision: format!("{:x}", Sha256::digest(&encoded)),
             package,
             compiled,
@@ -52,7 +44,9 @@ impl PreparedPackage {
         prepared.check_examples(&prepared.package)?;
         Ok(prepared)
     }
+}
 
+impl PreparedPackage {
     pub fn revision(&self) -> &str {
         &self.revision
     }
@@ -71,11 +65,9 @@ impl PreparedPackage {
             .compiled
             .get(path)
             .context("运行时尚未提供该增强能力")?;
-        let output = match implementation {
-            Compiled::Rhai(ast) => crate::rhai::invoke(ast, input, context),
-            Compiled::TypeScript(code) => crate::typescript::invoke(code, input, context),
-        }
-        .with_context(|| format!("执行增强失败: {path}"))?;
+        let output = implementation
+            .invoke(input, context)
+            .with_context(|| format!("执行增强失败: {path}"))?;
         ensure!(
             serde_json::to_vec(&output)?.len() <= crate::MAX_VALUE_BYTES,
             "增强输出超过配额"

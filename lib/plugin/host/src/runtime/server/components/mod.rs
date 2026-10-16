@@ -63,6 +63,7 @@ impl Components {
         keyring: Arc<Keyring>,
         identity: Arc<dyn crate::identity::IdentityProvider>,
         runtime_services: dill::CatalogWeakRef,
+        enhancements: Arc<super::enhancements::Enhancements>,
     ) -> Result<Arc<Self>> {
         sqlx::raw_sql(include_str!("schema.sql"))
             .execute(&pool)
@@ -74,7 +75,6 @@ impl Components {
             .map(PathBuf::from)
             .unwrap_or_else(|| storage.root.join("processes"));
         let supervisor = process::Processes::client()?;
-        let enhancements = Arc::new(super::enhancements::Enhancements::open(pool.clone()).await?);
         let services = Arc::new(services::Services::with_enhancements(enhancements.clone()));
         Ok(Arc::new_cyclic(|weak| Self {
             enhancements,

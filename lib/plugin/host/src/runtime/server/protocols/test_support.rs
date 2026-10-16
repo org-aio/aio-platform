@@ -122,9 +122,38 @@ impl Fixture {
         });
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let base = format!("http://{}", listener.local_addr()?);
-        let state =
-            RuntimeState::isolated_component_test(identity.clone(), &database, &base, root.path())
-                .await?;
+        use crate::runtime::server::plugins::*;
+        // 协议宿主只装配增强依赖；无组件存储、密钥、Wasm 引擎和 Sidecar 资源。
+        let state = RuntimeState::initialize_with_plugins(
+            crate::configuration::HostConfig {
+                database_url: database,
+                public_origin: base.clone(),
+                cache_root: root.path().join("cache"),
+                component_storage: None,
+                default_plugins: vec![],
+                delivery: None,
+                development: None,
+            },
+            identity.clone(),
+            vec![
+                Arc::new(McpPlugin),
+                Arc::new(GrpcPlugin),
+                Arc::new(EnhancementsPlugin),
+                Arc::new(EnhancementServicePlugin),
+                Arc::new(ScriptRuntimePlugin),
+                Arc::new(RhaiPlugin),
+                Arc::new(TypeScriptPlugin),
+                Arc::new(DatabasePlugin),
+                Arc::new(PostgresPlugin),
+            ],
+        )
+        .await?;
+        assert!(state.optional_components()?.is_none());
+        assert!(state.service::<az_plugin_runtime::Keyring>().is_err());
+        assert!(state.wasm().is_err());
+        assert!(state.process().is_err());
+        assert!(state.store().is_err());
+        assert!(!root.path().join("cache").exists());
         let router = crate::runtime::server::router(state.clone());
         let server = tokio::spawn(async move { axum::serve(listener, router).await });
         Ok(Self {

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde_json::json;
 
-use crate::{Enhancement, Example, Language, Package, PreparedPackage, ScriptContext};
+use crate::{Enhancement, Example, Language, Package, ScriptContext, default_runtime};
 
 fn package(language: Language, source: &str) -> Package {
     Package {
@@ -27,7 +27,7 @@ fn both_languages_execute_the_same_contract() -> Result<()> {
             "export function invoke(input: number): number { return input * 2; }",
         ),
     ] {
-        let prepared = PreparedPackage::prepare(package(language, source))?;
+        let prepared = default_runtime()?.prepare(package(language, source))?;
         assert_eq!(
             prepared.invoke("/v1/math/double", &json!(9), &ScriptContext::default())?,
             json!(18)
@@ -45,39 +45,40 @@ fn both_languages_execute_the_same_contract() -> Result<()> {
 #[test]
 fn upgrade_replays_old_examples_across_languages() -> Result<()> {
     let old = package(Language::Rhai, "fn invoke(input, context) { input * 2 }");
-    let new = PreparedPackage::prepare(package(
+    let new = default_runtime()?.prepare(package(
         Language::TypeScript,
         "export function invoke(input: number) { return input * 2; }",
     ))?;
     new.check_examples(&old)?;
     let mut broken = package(Language::Rhai, "fn invoke(input, context) { input * 3 }");
     broken.enhancements[0].examples[0].output = json!(9);
-    let broken = PreparedPackage::prepare(broken)?;
+    let broken = default_runtime()?.prepare(broken)?;
     assert!(broken.check_examples(&old).is_err());
     Ok(())
 }
 
 #[test]
-fn rejects_failed_candidates_duplicate_paths_and_unversioned_contracts() {
+fn rejects_failed_candidates_duplicate_paths_and_unversioned_contracts() -> Result<()> {
     let original = package(Language::Rhai, "fn invoke(input, context) { input * 2 }");
     let mut duplicate = original.clone();
     duplicate
         .enhancements
         .push(duplicate.enhancements[0].clone());
-    assert!(PreparedPackage::prepare(duplicate).is_err());
+    assert!(default_runtime()?.prepare(duplicate).is_err());
     let mut invalid = original.clone();
     invalid.enhancements[0].path = "/math/double".into();
-    assert!(PreparedPackage::prepare(invalid).is_err());
+    assert!(default_runtime()?.prepare(invalid).is_err());
     let mut invalid = original.clone();
     invalid.enhancements[0].examples.clear();
-    assert!(PreparedPackage::prepare(invalid).is_err());
+    assert!(default_runtime()?.prepare(invalid).is_err());
     let mut invalid = original;
     invalid.enhancements[0].examples[0].output = json!(42);
-    assert!(PreparedPackage::prepare(invalid).is_err());
+    assert!(default_runtime()?.prepare(invalid).is_err());
+    Ok(())
 }
 
 #[test]
-fn execution_cannot_load_modules_or_run_forever() {
+fn execution_cannot_load_modules_or_run_forever() -> Result<()> {
     for (language, source) in [
         (Language::Rhai, "fn invoke(input, context) { loop {} }"),
         (
@@ -103,10 +104,13 @@ fn execution_cannot_load_modules_or_run_forever() {
         ),
     ] {
         assert!(
-            PreparedPackage::prepare(package(language, source)).is_err(),
+            default_runtime()?
+                .prepare(package(language, source))
+                .is_err(),
             "{source}"
         );
     }
+    Ok(())
 }
 
 #[test]
@@ -114,7 +118,7 @@ fn script_globals_and_context_do_not_leak_between_calls() -> Result<()> {
     let source = "let calls = 0; export function invoke(input: number, context: { tenant_id: string }) { calls++; return { calls, tenant: context.tenant_id }; }";
     let mut candidate = package(Language::TypeScript, source);
     candidate.enhancements[0].examples[0].output = json!({"calls":1,"tenant":"validation"});
-    let prepared = PreparedPackage::prepare(candidate)?;
+    let prepared = default_runtime()?.prepare(candidate)?;
     for tenant in ["first", "second", "first"] {
         let context = ScriptContext {
             tenant_id: tenant.into(),
@@ -131,12 +135,12 @@ fn script_globals_and_context_do_not_leak_between_calls() -> Result<()> {
 #[test]
 fn documented_package_is_executable() -> Result<()> {
     let package = serde_json::from_str(include_str!("../examples/dual-language.json"))?;
-    PreparedPackage::prepare(package)?;
+    default_runtime()?.prepare(package)?;
     Ok(())
 }
 
 #[test]
-fn scripts_cannot_exceed_container_or_js_memory_limits() {
+fn scripts_cannot_exceed_container_or_js_memory_limits() -> Result<()> {
     for (language, source) in [
         (
             Language::Rhai,
@@ -147,6 +151,11 @@ fn scripts_cannot_exceed_container_or_js_memory_limits() {
             "export function invoke() { return 'x'.repeat(32 * 1024 * 1024); }",
         ),
     ] {
-        assert!(PreparedPackage::prepare(package(language, source)).is_err());
+        assert!(
+            default_runtime()?
+                .prepare(package(language, source))
+                .is_err()
+        );
     }
+    Ok(())
 }

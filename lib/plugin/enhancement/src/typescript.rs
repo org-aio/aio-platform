@@ -11,7 +11,31 @@ use oxc_transformer::{TransformOptions, Transformer};
 use rquickjs::{Context, Function, Module, Runtime};
 use serde_json::Value;
 
-use crate::ScriptContext;
+use crate::{Language, ScriptContext, ScriptExecutor, ScriptProgram};
+use std::sync::Arc;
+
+/// 默认 Oxc 与 QuickJS 执行器；编译产物只缓存代码，每次执行创建独立 JS 上下文。
+#[dill::component]
+#[dill::interface(dyn ScriptExecutor)]
+#[dill::scope(dill::Singleton)]
+pub struct TypeScriptExecutor;
+
+impl ScriptExecutor for TypeScriptExecutor {
+    fn supports(&self, language: Language) -> bool {
+        language == Language::TypeScript
+    }
+    fn compile(&self, source: &str) -> Result<Arc<dyn ScriptProgram>> {
+        Ok(Arc::new(TypeScriptProgram(compile(source)?)))
+    }
+}
+
+struct TypeScriptProgram(String);
+
+impl ScriptProgram for TypeScriptProgram {
+    fn invoke(&self, input: &Value, context: &ScriptContext) -> Result<Value> {
+        invoke(&self.0, input, context)
+    }
+}
 
 pub(super) fn compile(source: &str) -> Result<String> {
     let allocator = Allocator::default();

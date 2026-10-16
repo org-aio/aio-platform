@@ -70,6 +70,13 @@ mod tests {
         let pool = PgPool::connect(&database).await?;
         PluginStore::new(pool.clone()).migrate().await?;
         let root = tempfile::tempdir()?;
+        let enhancements = Arc::new(
+            crate::runtime::server::enhancements::Enhancements::open(
+                pool.clone(),
+                az_plugin_enhancement::default_runtime()?,
+            )
+            .await?,
+        );
         let components = Components::open(
             pool.clone(),
             &crate::configuration::ComponentStorage {
@@ -81,6 +88,7 @@ mod tests {
             )?),
             Arc::new(TestIdentity),
             dill::Catalog::builder().build().weak_ref(),
+            enhancements,
         )
         .await?;
         let tenant = uuid::Uuid::new_v4().to_string();

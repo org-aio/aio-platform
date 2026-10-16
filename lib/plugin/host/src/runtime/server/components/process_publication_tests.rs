@@ -123,6 +123,13 @@ async fn publication_preserves_running_singleton_process() -> Result<()> {
     let root = tempfile::tempdir()?;
     let pool = PgPool::connect(&database).await?;
     sqlx::raw_sql("CREATE TABLE IF NOT EXISTS plugin_sources(id TEXT PRIMARY KEY,git TEXT); CREATE TABLE IF NOT EXISTS tenant_plugin_bindings(tenant_id TEXT,source_id TEXT,enabled BOOLEAN);").execute(&pool).await?;
+    let enhancements = Arc::new(
+        crate::runtime::server::enhancements::Enhancements::open(
+            pool.clone(),
+            az_plugin_enhancement::default_runtime()?,
+        )
+        .await?,
+    );
     let components = Components::open(
         pool,
         &crate::configuration::ComponentStorage {
@@ -132,6 +139,7 @@ async fn publication_preserves_running_singleton_process() -> Result<()> {
         Arc::new(super::load_keyring(&root.path().join("keys.json"))?),
         Arc::new(super::tests::TestIdentity),
         dill::Catalog::builder().build().weak_ref(),
+        enhancements,
     )
     .await?;
     let git = format!(

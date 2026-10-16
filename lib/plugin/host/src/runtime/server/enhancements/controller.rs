@@ -7,7 +7,7 @@ use axum::{
 use az_plugin_enhancement::Package;
 use serde::Deserialize;
 
-use super::store::{Head, Revision};
+use super::store::{Enhancements, Head, Revision};
 use crate::runtime::server::{
     RuntimeState, http_error::RuntimeError, request_context::authenticate_manager,
 };
@@ -44,8 +44,7 @@ async fn head(
     let session = authenticate_manager(&state, &headers).await?;
     Ok(Json(
         state
-            .components()?
-            .enhancements
+            .service::<Enhancements>()?
             .head(&session.tenant_id)
             .await?,
     ))
@@ -58,8 +57,7 @@ async fn revisions(
     let session = authenticate_manager(&state, &headers).await?;
     Ok(Json(
         state
-            .components()?
-            .enhancements
+            .service::<Enhancements>()?
             .revisions(&session.tenant_id)
             .await?,
     ))
@@ -73,8 +71,7 @@ async fn package(
     let session = authenticate_manager(&state, &headers).await?;
     Ok(Json(
         state
-            .components()?
-            .enhancements
+            .service::<Enhancements>()?
             .package(&session.tenant_id, &revision)
             .await?,
     ))
@@ -87,8 +84,7 @@ async fn propose(
 ) -> Result<Json<serde_json::Value>, RuntimeError> {
     let session = authenticate_manager(&state, &headers).await?;
     let revision = state
-        .components()?
-        .enhancements
+        .service::<Enhancements>()?
         .propose(&session.tenant_id, &session.user_id, package)
         .await?;
     Ok(Json(serde_json::json!({"revision": revision})))
@@ -118,8 +114,7 @@ async fn change(
 ) -> Result<Json<Head>, RuntimeError> {
     let session = authenticate_manager(&state, &headers).await?;
     let head = state
-        .components()?
-        .enhancements
+        .service::<Enhancements>()?
         .activate(
             &session.tenant_id,
             &session.user_id,

@@ -14,7 +14,7 @@ use super::super::{
     components::Components, process::ProcessManager, repository::RepositoryInstaller,
     store::PluginStore, wasm::WasmManager,
 };
-use super::{Resource, RuntimeAssembly};
+use super::{EnhancementServicePlugin, Resource, RuntimeAssembly};
 use crate::configuration::HostConfig;
 
 /// 提供当前宿主拥有的数据库连接池；应用可替换连接建立方式，停止时统一关闭。
@@ -264,7 +264,11 @@ pub struct ComponentResourcesPlugin;
 
 impl Plugin<RuntimeAssembly> for ComponentResourcesPlugin {
     fn dependencies(&self) -> Vec<TypeId> {
-        vec![TypeId::of::<StorePlugin>(), TypeId::of::<KeyringPlugin>()]
+        vec![
+            TypeId::of::<StorePlugin>(),
+            TypeId::of::<KeyringPlugin>(),
+            TypeId::of::<EnhancementServicePlugin>(),
+        ]
     }
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
@@ -285,6 +289,7 @@ impl Plugin<RuntimeAssembly> for ComponentResourcesPlugin {
                         state.service::<Keyring>()?,
                         state.identity.clone(),
                         state.extensions.services.weak_ref(),
+                        state.service::<super::super::enhancements::Enhancements>()?,
                     )
                     .await?;
                     state.service::<Resource<Components>>()?.provide(components)

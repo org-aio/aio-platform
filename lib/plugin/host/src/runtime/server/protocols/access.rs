@@ -3,7 +3,10 @@ use az_plugin_contract::{
     CapabilityGrants, EnhancementRequest, EnhancementResponse, InvocationScope, RequestContext,
 };
 
-use super::super::{RuntimeState, http_error::RuntimeError, request_context::authenticate};
+use super::super::{
+    RuntimeState, enhancements::Enhancements, http_error::RuntimeError,
+    request_context::authenticate,
+};
 use crate::identity::SessionContext;
 
 /// 每个请求重新认证；传输层不能缓存上次请求的租户、角色或撤销状态。
@@ -35,8 +38,7 @@ pub(super) async fn catalog(
     session: &SessionContext,
 ) -> Result<(Option<String>, Vec<String>), RuntimeError> {
     let (revision, mut paths) = state
-        .components()?
-        .enhancements
+        .service::<Enhancements>()?
         .catalog(&session.tenant_id)
         .await?;
     paths.retain(|path| permitted(session, path));
@@ -68,8 +70,7 @@ pub(super) async fn invoke(
         },
     };
     Ok(state
-        .components()?
-        .enhancements
+        .service::<Enhancements>()?
         .invoke(&scope, request)
         .await?)
 }
