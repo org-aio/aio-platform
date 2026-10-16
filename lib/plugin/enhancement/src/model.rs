@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// 一次整体发布的增强集合；同一版本中的路径不会分批切换。
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Package {
     pub schema_version: u32,
@@ -10,7 +10,7 @@ pub struct Package {
 }
 
 /// 一个稳定能力契约及其候选实现；路径版本变化表示破坏性契约变化。
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Enhancement {
     pub path: String,
@@ -25,7 +25,7 @@ pub struct Enhancement {
     pub examples: Vec<Example>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
     Rhai,
@@ -33,7 +33,7 @@ pub enum Language {
 }
 
 /// 激活前必须通过的契约样例；升级还要通过旧版已有样例。
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Example {
     pub input: Value,

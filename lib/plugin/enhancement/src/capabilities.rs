@@ -23,7 +23,7 @@ pub struct InvocationCapabilities {
 }
 
 /// 候选样例中的一次外部调用记录；按顺序精确匹配，不连接真实服务。
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CapabilityExample {
     pub path: String,
@@ -81,7 +81,7 @@ impl CapabilityCaller for ExampleCaller {
             progress.failed = true;
             bail!("增强样例缺少宿主调用响应");
         };
-        if expected.path != path || &expected.input != input {
+        if expected.path != path || !crate::json_contract::equivalent(&expected.input, input) {
             progress.failed = true;
             bail!("增强样例的宿主调用顺序或输入不匹配: {path}");
         }

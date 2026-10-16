@@ -5,6 +5,7 @@ mod budget;
 mod capabilities;
 mod execution;
 mod invocation;
+mod json_contract;
 mod model;
 mod package;
 #[cfg(feature = "rhai")]

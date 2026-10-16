@@ -2,7 +2,7 @@
 
 `controller.rs` 是管理员 API，`store.rs` 统一负责候选验证、租户版本、激活和执行。`EnhancementServicePlugin` 初始化服务并注入同一个 `ScriptRuntime`；WIT、process broker、HTTP、MCP 和 gRPC 都使用它。PostgreSQL 是活动版本的权威源；内存只缓存已验证的不可变代码。每次调用读取一次活动版本，随后完整使用该版本。切换前已接收的调用可以完成，响应返回实际执行的 revision。
 
-只有当前租户的 `plugin:manage` 会话能够保存、查看和激活版本，请求不能指定其他租户。插件只获得清单声明的版本路径调用权，不能发布或激活脚本。以下 API 由 `EnhancementsPlugin` 提供，需要数据库与脚本执行器，不需要配置 Component 存储：
+只有当前租户的 `plugin:manage` 会话能够保存、查看和激活版本，请求不能指定其他租户。普通插件只获得清单声明的版本路径调用权。可选 `EvolutionPlugin` 将版本服务提供为独立的 runtime 能力；携带真实管理会话、逐项 runtime 授权且身份提供者支持提交前实时权限查询时，Rhai/TypeScript 策略才能保存、激活或回滚候选。以下 API 由 `EnhancementsPlugin` 提供，需要数据库与脚本执行器，不需要配置 Component 存储：
 
 | API | 行为 |
 | --- | --- |
@@ -34,4 +34,4 @@ AIO_ENHANCEMENT_TEST_DATABASE_URL=postgresql://test@127.0.0.1:5432/kernel_test \
 
 MCP/gRPC 用户必须同时拥有 `enhancement:<增强路径>`（或已有增强管理权限）及每项 `runtime:<宿主能力路径>`。`plugin:manage` 不授予 runtime 权限。Wasm 插件声明 `[plugin.capabilities].runtime`，与交互用户的 runtime 权限求交集；交互请求结束、成员或会话撤销后拒绝调用。Sidecar 保存进程创建时的 runtime 能力快照；交互处理时向 `/enhancements/invoke` 回传宿主下发的 `x-aio-context`，运行时验证请求来源、租户和有效期，再与用户的显式 runtime 权限求交集。跨插件调用派生绑定目标来源的新上下文，上游请求结束即失效。不带上下文的后台调用只有租户和来源身份，不能调用要求交互会话的设备能力；无效上下文直接拒绝，不回退为后台调用。脚本输入或 `x-aio-user-id` 不能补出用户身份。使用新能力的整包应要求 `host_version = ">=2026.10.16"`。
 
-`protocols::tests::capabilities` 使用真实 PostgreSQL、MCP SDK 和 gRPC 客户端验收样例无副作用、跨语言设备调用、幂等提交、未知字段拒绝、租户隔离、升级回滚、权限撤销、移除插件及取消异步等待。Sidecar broker 与真实 Wasm WIT 用例另行验证能力快照及撤权。外部 MCP 和 unary gRPC 服务可通过可选的 [RemoteCapabilitiesPlugin](../remote/README.md) 导入同一能力目录；目录、激活和调用都检查租户绑定。AI 模型生成策略仍未实现。
+`protocols::tests::capabilities` 使用真实 PostgreSQL、MCP SDK 和 gRPC 客户端验收样例无副作用、跨语言设备调用、幂等提交、未知字段拒绝、租户隔离、升级回滚、权限撤销、移除插件及取消异步等待。Sidecar broker 与真实 Wasm WIT 用例另行验证能力快照及撤权。外部 MCP 和 unary gRPC 服务可通过可选的 [RemoteCapabilitiesPlugin](../remote/README.md) 导入同一能力目录；目录、激活和调用都检查租户绑定。[双语言演进策略](../../../../../../../docs/plugin/evolution/README.md) 已接入版本服务、按激活代数隔离的调用计数和提交审计；策略可更新自身。当前模型生成器仅在控制链测试中替换，真实模型接入与无人值守执行尚未验收。

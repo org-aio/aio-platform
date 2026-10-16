@@ -1,0 +1,187 @@
+{
+  "bootstrap": {
+    "path": "/v1/evolution/bootstrap",
+    "capabilities": [
+      "/v1/runtime/enhancements/head",
+      "/v1/runtime/enhancements/package",
+      "/v1/runtime/enhancements/catalog",
+      "/v1/runtime/enhancements/propose",
+      "/v1/runtime/enhancements/activate",
+      "/v1/model/enhancement/source"
+    ],
+    "examples": [
+      {
+        "input": {
+          "expected_generation": 1,
+          "requirement": "sample",
+          "target": {
+            "path": "/v1/math/double",
+            "language": "typescript",
+            "source": "",
+            "calls": [],
+            "capabilities": [],
+            "examples": [
+              {
+                "input": 3,
+                "output": 6
+              }
+            ]
+          }
+        },
+        "output": {
+          "revision": "after",
+          "generation": 2
+        },
+        "capabilities": [
+          {
+            "path": "/v1/runtime/enhancements/head",
+            "input": {},
+            "output": {
+              "revision": "before",
+              "generation": 1
+            }
+          },
+          {
+            "path": "/v1/runtime/enhancements/package",
+            "input": {
+              "revision": "before"
+            },
+            "output": {
+              "schema_version": 1,
+              "enhancements": []
+            }
+          },
+          {
+            "path": "/v1/runtime/enhancements/catalog",
+            "input": {
+              "paths": []
+            },
+            "output": []
+          },
+          {
+            "path": "/v1/model/enhancement/source",
+            "input": {
+              "requirement": "sample",
+              "target": {
+                "path": "/v1/math/double",
+                "language": "typescript",
+                "source": "",
+                "calls": [],
+                "capabilities": [],
+                "examples": [
+                  {
+                    "input": 3,
+                    "output": 6
+                  }
+                ]
+              },
+              "available": []
+            },
+            "output": {
+              "source": "export function invoke(input: number) { return input * 2; }"
+            }
+          },
+          {
+            "path": "/v1/runtime/enhancements/propose",
+            "input": {
+              "schema_version": 1,
+              "enhancements": [
+                {
+                  "path": "/v1/math/double",
+                  "language": "typescript",
+                  "source": "export function invoke(input: number) { return input * 2; }",
+                  "calls": [],
+                  "capabilities": [],
+                  "examples": [
+                    {
+                      "input": 3,
+                      "output": 6
+                    }
+                  ]
+                }
+              ]
+            },
+            "output": {
+              "revision": "after"
+            }
+          },
+          {
+            "path": "/v1/runtime/enhancements/activate",
+            "input": {
+              "revision": "after",
+              "expected_generation": 1
+            },
+            "output": {
+              "revision": "after",
+              "generation": 2
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "observe": {
+    "path": "/v1/evolution/observe",
+    "capabilities": [
+      "/v1/runtime/enhancements/head",
+      "/v1/runtime/enhancements/observe",
+      "/v1/runtime/enhancements/rollback"
+    ],
+    "examples": [
+      {
+        "input": {
+          "revision": "after",
+          "expected_generation": 2,
+          "path": "/v1/math/double",
+          "previous_revision": "before",
+          "minimum_completed": 1,
+          "failure_ratio": 1.0
+        },
+        "output": {
+          "rolled_back": true,
+          "head": {
+            "revision": "before",
+            "generation": 3
+          }
+        },
+        "capabilities": [
+          {
+            "path": "/v1/runtime/enhancements/head",
+            "input": {},
+            "output": {
+              "revision": "after",
+              "generation": 2
+            }
+          },
+          {
+            "path": "/v1/runtime/enhancements/observe",
+            "input": {
+              "revision": "after",
+              "generation": 2
+            },
+            "output": [
+              {
+                "path": "/v1/math/double",
+                "started": 1,
+                "succeeded": 0,
+                "failed": 1,
+                "updated_at": 0
+              }
+            ]
+          },
+          {
+            "path": "/v1/runtime/enhancements/rollback",
+            "input": {
+              "revision": "before",
+              "expected_generation": 2
+            },
+            "output": {
+              "revision": "before",
+              "generation": 3
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -243,7 +243,16 @@ async fn exercise(fixture: &Fixture) -> Result<()> {
     assert_eq!(workers.tasks(&owner).await?.len(), 1);
     let service = fixture.state.service::<Enhancements>()?;
     service
-        .activate(&owner.tenant_id, "manager", Some(&first), 2, true)
+        .activate(
+            &owner.tenant_id,
+            "manager",
+            crate::runtime::server::enhancements::Activation {
+                revision: Some(first.clone()),
+                expected_generation: 2,
+            },
+            true,
+            async { Ok(()) },
+        )
         .await?
         .context("回滚失败")?;
     let result = mcp.call_tool(tool(input("list", json!({})))).await?;

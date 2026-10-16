@@ -1,3 +1,10 @@
+use super::{
+    model::{Activation, Head, Revision},
+    store::Enhancements,
+};
+use crate::runtime::server::{
+    RuntimeState, http_error::RuntimeError, request_context::authenticate_manager,
+};
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Path, State},
@@ -5,19 +12,6 @@ use axum::{
     routing::{get, post, put},
 };
 use az_plugin_enhancement::Package;
-use serde::Deserialize;
-
-use super::store::{Enhancements, Head, Revision};
-use crate::runtime::server::{
-    RuntimeState, http_error::RuntimeError, request_context::authenticate_manager,
-};
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Activation {
-    revision: Option<String>,
-    expected_generation: i64,
-}
 
 pub(in crate::runtime::server) fn router() -> Router<RuntimeState> {
     Router::new()
@@ -106,7 +100,12 @@ async fn propose(
     let session = authenticate_manager(&state, &headers).await?;
     let revision = state
         .service::<Enhancements>()?
-        .propose(&session.tenant_id, &session.user_id, package)
+        .propose(
+            &session.tenant_id,
+            &session.user_id,
+            package,
+            authorize(&state, &headers, &session),
+        )
         .await?;
     Ok(Json(serde_json::json!({"revision": revision})))
 }
@@ -139,11 +138,32 @@ async fn change(
         .activate(
             &session.tenant_id,
             &session.user_id,
-            request.revision.as_deref(),
-            request.expected_generation,
+            request,
             rollback,
+            authorize(&state, &headers, &session),
         )
         .await?
         .ok_or_else(|| RuntimeError::conflict("增强活动版本已变化，请刷新后重新审阅"))?;
     Ok(Json(head))
+}
+
+async fn authorize(
+    state: &RuntimeState,
+    headers: &HeaderMap,
+    original: &crate::identity::SessionContext,
+) -> anyhow::Result<()> {
+    let current = authenticate_manager(state, headers)
+        .await
+        .map_err(|_| anyhow::anyhow!("增强管理权限已撤销"))?;
+    anyhow::ensure!(
+        current.session_id == original.session_id
+            && current.tenant_id == original.tenant_id
+            && current.user_id == original.user_id
+            && state
+                .identity
+                .session_active(&current.session_id, &current.tenant_id, &current.user_id)
+                .await?,
+        "增强管理会话已变化或撤销"
+    );
+    Ok(())
 }

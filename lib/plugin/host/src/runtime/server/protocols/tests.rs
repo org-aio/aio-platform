@@ -17,6 +17,8 @@ use support::*;
 mod capabilities;
 #[path = "composition_tests.rs"]
 mod composition;
+#[path = "evolution_tests.rs"]
+mod evolution;
 #[cfg(feature = "remote")]
 #[path = "remote_tests.rs"]
 mod remote;
@@ -172,7 +174,16 @@ async fn exercise(fixture: &Fixture) -> Result<()> {
     fixture
         .state
         .service::<super::super::enhancements::Enhancements>()?
-        .activate(&fixture.identity.tenant, "test", None, 3, false)
+        .activate(
+            &fixture.identity.tenant,
+            "test",
+            crate::runtime::server::enhancements::Activation {
+                revision: None,
+                expected_generation: 3,
+            },
+            false,
+            async { Ok(()) },
+        )
         .await?
         .context("停用失败")?;
     assert!(manager.list_all_tools().await?.is_empty());

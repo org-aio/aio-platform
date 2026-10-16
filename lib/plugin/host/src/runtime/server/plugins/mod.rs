@@ -5,6 +5,7 @@ mod builtins;
 mod component_execution;
 mod component_resources;
 mod enhancement_execution;
+mod evolution;
 mod infrastructure;
 #[cfg(test)]
 mod infrastructure_tests;
@@ -35,6 +36,7 @@ pub use builtins::*;
 pub use component_execution::*;
 pub use component_resources::*;
 pub use enhancement_execution::*;
+pub use evolution::EvolutionPlugin;
 pub use infrastructure::*;
 use lifecycle::{HookPlan, Lifecycle};
 pub use process_execution::{

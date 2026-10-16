@@ -14,7 +14,7 @@ use serde_json::Value;
 use crate::identity::{IdentityProvider, SessionContext};
 
 /// 宿主能力的副作用约定；幂等写操作必须以业务标识拒绝不同输入的重复请求。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityEffect {
     Read,
@@ -24,7 +24,7 @@ pub enum CapabilityEffect {
 }
 
 /// 跨语言能力契约。路径用于业务路由，原生提供者仍按具体 TypeId 校验身份。
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeCapability {
     pub path: String,

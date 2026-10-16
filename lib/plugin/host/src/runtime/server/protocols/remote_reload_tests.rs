@@ -128,7 +128,16 @@ async fn exercise_updates(fixture: &Fixture, first: &Upstream, second: &Upstream
                     (&other_tenant, other_generation),
                 ] {
                     service
-                        .activate(tenant, "test", None, previous, false)
+                        .activate(
+                            tenant,
+                            "test",
+                            crate::runtime::server::enhancements::Activation {
+                                revision: None,
+                                expected_generation: previous,
+                            },
+                            false,
+                            async { Ok(()) },
+                        )
                         .await?
                         .context("停用失败")?;
                 }
@@ -142,15 +151,20 @@ async fn exercise_updates(fixture: &Fixture, first: &Upstream, second: &Upstream
                 .await?;
             generation += 1;
             let revision = service
-                .propose(&other_tenant, "test", twice(protocol, typescript)?)
+                .propose(&other_tenant, "test", twice(protocol, typescript)?, async {
+                    Ok(())
+                })
                 .await?;
             service
                 .activate(
                     &other_tenant,
                     "test",
-                    Some(&revision),
-                    other_generation,
+                    crate::runtime::server::enhancements::Activation {
+                        revision: Some(revision.clone()),
+                        expected_generation: other_generation,
+                    },
                     false,
+                    async { Ok(()) },
                 )
                 .await?
                 .context("激活失败")?;

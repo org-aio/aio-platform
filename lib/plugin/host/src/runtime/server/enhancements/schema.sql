@@ -22,3 +22,16 @@ CREATE TABLE IF NOT EXISTS runtime_enhancement_events (
     PRIMARY KEY (tenant_id, generation),
     FOREIGN KEY (tenant_id, revision) REFERENCES runtime_enhancement_revisions(tenant_id, revision)
 );
+CREATE TABLE IF NOT EXISTS runtime_enhancement_observations (
+    tenant_id TEXT NOT NULL,
+    revision TEXT NOT NULL,
+    generation BIGINT NOT NULL,
+    path TEXT NOT NULL,
+    started BIGINT NOT NULL DEFAULT 0,
+    succeeded BIGINT NOT NULL DEFAULT 0,
+    failed BIGINT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, generation, path),
+    FOREIGN KEY (tenant_id, generation) REFERENCES runtime_enhancement_events(tenant_id, generation),
+    FOREIGN KEY (tenant_id, revision) REFERENCES runtime_enhancement_revisions(tenant_id, revision)
+);

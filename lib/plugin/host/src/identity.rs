@@ -27,6 +27,18 @@ pub trait IdentityProvider: Send + Sync {
     async fn session_active(&self, session: &str, tenant: &str, user: &str)
     -> anyhow::Result<bool>;
 
+    /// 高权限能力提交前重新查询角色授权；不支持实时查询的身份插件默认拒绝。
+    /// 会话、租户和用户由宿主绑定，permissions 是业务权限，不是插件注册身份。
+    async fn session_has_permissions(
+        &self,
+        _session: &str,
+        _tenant: &str,
+        _user: &str,
+        _permissions: &[String],
+    ) -> anyhow::Result<bool> {
+        Ok(false)
+    }
+
     /// 代表进程插件上报用量。默认不支持，宿主按需覆盖。
     ///
     /// 返回值 `Ok(None)` 表示该宿主未接入计费，调用方不应视为失败。

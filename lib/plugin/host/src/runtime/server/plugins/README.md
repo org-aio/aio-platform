@@ -155,3 +155,5 @@ assembly.services
 两者的 `open(&ComponentStorage)` 分别返回 `Arc<dyn ComponentDatabase>` 和 `Arc<dyn ObjectStorage>`。Provider 只负责异步创建，返回后的关闭由组件生命周期负责，不要重复登记关闭钩子。实现契约位于 `az-plugin-runtime`；原生实现身份仍使用 TypeId，来源/租户属于独立业务身份。读取顺序是本目录 `component_resources.rs` → `components/resources.rs` → runtime 的 `component_database.rs` / `storage.rs`。
 
 `WorkerCapabilitiesPlugin` 将已装配的设备服务提供给 Rhai/TypeScript，不依赖某个默认 `WorkerService` 实现。其他原生插件将自己的实现绑定到 `CapabilityProvider` 即可贡献版本化路径、schema 和受控异步调用；目录在异步资源初始化完成后校验，开发宿主同样执行。详见 [宿主能力与脚本自举](../enhancements/README.md#宿主能力与脚本自举)。
+
+`EvolutionPlugin` 依赖同一个 `EnhancementServicePlugin`，通过 `CapabilityProvider` 提供候选、激活、回滚、观察和审计。可以省略该插件；身份提供者未实现实时权限查询时默认拒绝演进。策略由 Rhai/TypeScript 普通增强实现，模型通过独立能力提供，详见[脚本演进](../../../../../../../docs/plugin/evolution/README.md)。

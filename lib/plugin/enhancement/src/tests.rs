@@ -163,11 +163,44 @@ fn documented_package_is_executable() -> Result<()> {
 }
 
 #[test]
+fn numeric_contracts_survive_language_roundtrips_without_rounding_large_integers() -> Result<()> {
+    let mut previous = package(Language::Rhai, "fn invoke(input, context) { input * 2 }");
+    previous.enhancements[0].examples[0].input = json!(3.0);
+    previous.enhancements[0].examples[0].output = json!(6.0);
+    let candidate = default_runtime()?.prepare(package(
+        Language::TypeScript,
+        "export function invoke(input) { return input * 2; }",
+    ))?;
+    candidate.check_examples(&previous)?;
+    for input in [
+        json!(9007199254740993_u64),
+        json!(i64::MAX),
+        json!(u64::MAX),
+    ] {
+        let mut lossy = package(
+            Language::TypeScript,
+            "export function invoke(input) { return input; }",
+        );
+        lossy.enhancements[0].examples[0].input = input.clone();
+        lossy.enhancements[0].examples[0].output = input;
+        assert!(
+            default_runtime()?.prepare(lossy).is_err(),
+            "不能把大整数舍入视为契约等价"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn scripts_cannot_exceed_container_or_js_memory_limits() -> Result<()> {
     for (language, source) in [
         (
             Language::Rhai,
             "fn invoke(input, context) { let value = [0]; for i in 0..30 { value = [value, value]; } 6 }",
+        ),
+        (
+            Language::Rhai,
+            "fn invoke(input, context) { let value = #{x:0}; for i in 0..30 { value = #{left:value,right:value}; } 6 }",
         ),
         (
             Language::TypeScript,

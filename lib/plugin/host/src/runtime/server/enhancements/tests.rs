@@ -60,6 +60,26 @@ fn database() -> Result<String> {
 
 #[tokio::test]
 #[ignore = "需要独立本机 PostgreSQL"]
+async fn candidate_authorization_failure_leaves_no_durable_revision() -> Result<()> {
+    let pool = PgPool::connect(&database()?).await?;
+    let runtime = Enhancements::open(pool, az_plugin_enhancement::default_runtime()?, None).await?;
+    let tenant = uuid::Uuid::new_v4().to_string();
+    let result = runtime
+        .propose(
+            &tenant,
+            "revoked",
+            package(Language::Rhai, "fn invoke(input, context) { input * 2 }"),
+            async { anyhow::bail!("提交前授权已撤销") },
+        )
+        .await;
+    assert!(result.is_err());
+    assert!(runtime.revisions(&tenant).await?.is_empty());
+    assert_eq!(runtime.head(&tenant).await?.generation, 0);
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "需要独立本机 PostgreSQL"]
 async fn enhancements_survive_restart_reject_stale_publish_and_rollback() -> Result<()> {
     let pool = PgPool::connect(&database()?).await?;
     let runtime = Enhancements::open(
@@ -75,6 +95,7 @@ async fn enhancements_survive_restart_reject_stale_publish_and_rollback() -> Res
             &tenant,
             actor,
             package(Language::Rhai, "fn invoke(input, context) { input * 2 }"),
+            async { Ok(()) },
         )
         .await?;
     assert!(runtime.head(&tenant).await?.revision.is_none());
@@ -85,7 +106,16 @@ async fn enhancements_survive_restart_reject_stale_publish_and_rollback() -> Res
             .is_err()
     );
     runtime
-        .activate(&tenant, actor, Some(&first), 0, false)
+        .activate(
+            &tenant,
+            actor,
+            crate::runtime::server::enhancements::Activation {
+                revision: Some(first.clone()),
+                expected_generation: 0,
+            },
+            false,
+            async { Ok(()) },
+        )
         .await?
         .context("首次激活失败")?;
     assert_eq!(
@@ -106,23 +136,57 @@ async fn enhancements_survive_restart_reject_stale_publish_and_rollback() -> Res
     );
     assert!(
         runtime
-            .activate("other-tenant", actor, Some(&first), 0, false)
+            .activate(
+                "other-tenant",
+                actor,
+                crate::runtime::server::enhancements::Activation {
+                    revision: Some(first.clone()),
+                    expected_generation: 0
+                },
+                false,
+                async { Ok(()) }
+            )
             .await
             .is_err()
     );
     let mut bad = package(Language::Rhai, "fn invoke(input, context) { input * 3 }");
-    assert!(runtime.propose(&tenant, actor, bad.clone()).await.is_err());
-    bad.enhancements[0].examples[0].output = json!(9);
-    let bad = runtime.propose(&tenant, actor, bad).await?;
     assert!(
         runtime
-            .activate(&tenant, actor, Some(&bad), 1, false)
+            .propose(&tenant, actor, bad.clone(), async { Ok(()) })
+            .await
+            .is_err()
+    );
+    bad.enhancements[0].examples[0].output = json!(9);
+    let bad = runtime
+        .propose(&tenant, actor, bad, async { Ok(()) })
+        .await?;
+    assert!(
+        runtime
+            .activate(
+                &tenant,
+                actor,
+                crate::runtime::server::enhancements::Activation {
+                    revision: Some(bad.clone()),
+                    expected_generation: 1
+                },
+                false,
+                async { Ok(()) }
+            )
             .await
             .is_err()
     );
     assert!(
         runtime
-            .activate(&tenant, actor, Some(&bad), 1, true)
+            .activate(
+                &tenant,
+                actor,
+                crate::runtime::server::enhancements::Activation {
+                    revision: Some(bad.clone()),
+                    expected_generation: 1
+                },
+                true,
+                async { Ok(()) }
+            )
             .await
             .is_err()
     );
@@ -138,11 +202,30 @@ async fn enhancements_survive_restart_reject_stale_publish_and_rollback() -> Res
                 Language::TypeScript,
                 "export function invoke(input: number) { return input * 2; }",
             ),
+            async { Ok(()) },
         )
         .await?;
     let (left, right) = tokio::join!(
-        runtime.activate(&tenant, actor, Some(&second), 1, false),
-        runtime.activate(&tenant, actor, Some(&second), 1, false)
+        runtime.activate(
+            &tenant,
+            actor,
+            crate::runtime::server::enhancements::Activation {
+                revision: Some(second.clone()),
+                expected_generation: 1
+            },
+            false,
+            async { Ok(()) }
+        ),
+        runtime.activate(
+            &tenant,
+            actor,
+            crate::runtime::server::enhancements::Activation {
+                revision: Some(second.clone()),
+                expected_generation: 1
+            },
+            false,
+            async { Ok(()) }
+        )
     );
     assert_eq!(
         usize::from(left?.is_some()) + usize::from(right?.is_some()),
@@ -154,7 +237,16 @@ async fn enhancements_survive_restart_reject_stale_publish_and_rollback() -> Res
     assert_eq!(response.revision, second);
     assert_eq!(response.output, json!(14));
     restored
-        .activate(&tenant, actor, Some(&first), 2, true)
+        .activate(
+            &tenant,
+            actor,
+            crate::runtime::server::enhancements::Activation {
+                revision: Some(first.clone()),
+                expected_generation: 2,
+            },
+            true,
+            async { Ok(()) },
+        )
         .await?
         .context("回滚失败")?;
     assert_eq!(
@@ -166,12 +258,30 @@ async fn enhancements_survive_restart_reject_stale_publish_and_rollback() -> Res
     );
     assert!(
         runtime
-            .activate(&tenant, actor, Some(&second), 1, false)
+            .activate(
+                &tenant,
+                actor,
+                crate::runtime::server::enhancements::Activation {
+                    revision: Some(second.clone()),
+                    expected_generation: 1
+                },
+                false,
+                async { Ok(()) }
+            )
             .await?
             .is_none()
     );
     restored
-        .activate(&tenant, actor, None, 3, false)
+        .activate(
+            &tenant,
+            actor,
+            crate::runtime::server::enhancements::Activation {
+                revision: None,
+                expected_generation: 3,
+            },
+            false,
+            async { Ok(()) },
+        )
         .await?
         .context("停用失败")?;
     assert!(

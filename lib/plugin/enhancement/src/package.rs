@@ -141,14 +141,13 @@ impl PreparedPackage {
                 .iter()
                 .find(|candidate| candidate.path == enhancement.path)
                 .with_context(|| format!("升级不能删除已有能力: {}", enhancement.path))?;
-            ensure!(
-                enhancement
+            let preserved = enhancement.examples.iter().all(|example| {
+                candidate
                     .examples
                     .iter()
-                    .all(|example| candidate.examples.contains(example)),
-                "升级不能删除已有契约样例: {}",
-                enhancement.path
-            );
+                    .any(|candidate| same_example(example, candidate))
+            });
+            ensure!(preserved, "升级不能删除已有契约样例: {}", enhancement.path);
             for (index, example) in enhancement.examples.iter().enumerate() {
                 let grants = self.required_paths(&enhancement.path)?;
                 let caller = Arc::new(crate::capabilities::ExampleCaller::new(
@@ -162,7 +161,7 @@ impl PreparedPackage {
                 let output = invocation.invoke(&enhancement.path, &example.input)?;
                 caller.finish()?;
                 ensure!(
-                    output == example.output,
+                    crate::json_contract::equivalent(&output, &example.output),
                     "增强契约样例未通过: {} #{}",
                     enhancement.path,
                     index + 1
@@ -171,6 +170,22 @@ impl PreparedPackage {
         }
         Ok(())
     }
+}
+
+fn same_example(left: &crate::Example, right: &crate::Example) -> bool {
+    use crate::json_contract::equivalent;
+    equivalent(&left.input, &right.input)
+        && equivalent(&left.output, &right.output)
+        && left.capabilities.len() == right.capabilities.len()
+        && left
+            .capabilities
+            .iter()
+            .zip(&right.capabilities)
+            .all(|(left, right)| {
+                left.path == right.path
+                    && equivalent(&left.input, &right.input)
+                    && equivalent(&left.output, &right.output)
+            })
 }
 
 fn validate(enhancement: &Enhancement) -> Result<()> {

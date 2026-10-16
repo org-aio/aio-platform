@@ -37,7 +37,9 @@ fn engine() -> Engine {
     engine.set_max_functions(64);
     engine.set_max_string_size(crate::MAX_VALUE_BYTES);
     engine.set_max_array_size(4096);
-    engine.set_max_map_size(256);
+    // Rhai 对整个嵌套树累计属性；能力 schema 和自举契约需要容纳多层对象。
+    // 与数组保持相同元素上限，JSON 字节、累计传输和运算配额仍由调用链约束。
+    engine.set_max_map_size(4096);
     engine.disable_symbol("eval");
     engine.on_print(|_| {});
     engine.on_debug(|_, _, _| {});

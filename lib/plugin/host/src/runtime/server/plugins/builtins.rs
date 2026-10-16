@@ -204,6 +204,7 @@ pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
         .add::<TypeScriptPlugin>()
         .add::<ScriptRuntimePlugin>()
         .add::<EnhancementServicePlugin>()
+        .add::<super::EvolutionPlugin>()
         .add::<WorkerServicePlugin>()
         .add::<super::WorkerCapabilitiesPlugin>()
         .add::<WorkerWebviewServicePlugin>()

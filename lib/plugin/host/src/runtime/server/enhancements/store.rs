@@ -8,9 +8,10 @@ use az_plugin_contract::{EnhancementRequest, EnhancementResponse, InvocationScop
 use az_plugin_enhancement::{
     Package, PreparedPackage, ScriptContext, ScriptInvocation, ScriptRuntime,
 };
-use serde::Serialize;
 use sqlx::PgPool;
 use tokio::sync::Semaphore;
+
+use super::model::{Activation, Head, Revision};
 
 /// 租户内增强版本的唯一持久化与执行入口；传输适配器不维护自己的版本指针。
 pub(in crate::runtime::server) struct Enhancements {
@@ -28,19 +29,6 @@ impl Drop for CancelInvocation {
     fn drop(&mut self) {
         self.0.cancel();
     }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, sqlx::FromRow)]
-pub(in crate::runtime::server) struct Head {
-    pub revision: Option<String>,
-    pub generation: i64,
-}
-
-#[derive(Serialize, sqlx::FromRow)]
-pub(in crate::runtime::server) struct Revision {
-    pub revision: String,
-    pub author: String,
-    pub created_at: i64,
 }
 
 impl Enhancements {
@@ -123,11 +111,16 @@ impl Enhancements {
         tenant: &str,
         author: &str,
         package: Package,
+        authorize: impl std::future::Future<Output = Result<()>>,
     ) -> Result<String> {
         let prepared = self.prepare(package).await?;
+        let mut transaction = self.pool.begin().await?;
         sqlx::query("INSERT INTO runtime_enhancement_revisions(tenant_id,revision,package,author) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING")
             .bind(tenant).bind(prepared.revision()).bind(serde_json::to_value(prepared.package())?).bind(author)
-            .execute(&self.pool).await?;
+            .execute(&mut *transaction).await?;
+        // 编译和数据库行锁等待都可能耗时；提交前重新核验，失败不保存候选。
+        authorize.await?;
+        transaction.commit().await?;
         self.remember(tenant, prepared.clone())?;
         Ok(prepared.revision().into())
     }
@@ -171,10 +164,12 @@ impl Enhancements {
         &self,
         tenant: &str,
         actor: &str,
-        revision: Option<&str>,
-        expected_generation: i64,
+        request: Activation,
         rollback: bool,
+        authorize: impl std::future::Future<Output = Result<()>>,
     ) -> Result<Option<Head>> {
+        let revision = request.revision.as_deref();
+        let expected_generation = request.expected_generation;
         ensure!(expected_generation >= 0, "活动代数无效");
         let previous = self.head(tenant).await?;
         if previous.generation != expected_generation {
@@ -231,6 +226,8 @@ impl Enhancements {
         };
         sqlx::query("INSERT INTO runtime_enhancement_events(tenant_id,generation,revision,actor,action) VALUES($1,$2,$3,$4,$5)")
             .bind(tenant).bind(next.generation).bind(revision).bind(actor).bind(action).execute(&mut *transaction).await?;
+        // 最后一次校验放在 CAS 和行锁等待之后；撤权或取消会回滚整个指针与审计事务。
+        authorize.await?;
         transaction.commit().await?;
         Ok(Some(next))
     }
@@ -251,12 +248,10 @@ impl Enhancements {
             .as_deref()
             .filter(|value| !value.is_empty())
             .context("增强调用缺少租户")?;
-        let revision = self
-            .head(tenant)
-            .await?
-            .revision
-            .context("当前租户未激活增强")?;
+        let head = self.head(tenant).await?;
+        let revision = head.revision.context("当前租户未激活增强")?;
         let prepared = self.load(tenant, &revision).await?;
+        prepared.required_paths(&request.path)?;
         let context = ScriptContext {
             tenant_id: tenant.into(),
             source_id: scope.source_id.clone(),
@@ -272,6 +267,8 @@ impl Enhancements {
             .map(|environment| environment.bind(scope))
             .transpose()?
             .unwrap_or_default();
+        let path = request.path.clone();
+        super::observations::started(&self.pool, tenant, &revision, head.generation, &path).await?;
         let invocation = prepared.invocation(
             context,
             scope.grants.enhancements.clone(),
@@ -285,8 +282,36 @@ impl Enhancements {
             invocation.invoke(&request.path, &request.input)
         })
         .await
-        .context("等待增强执行失败")??;
+        .context("等待增强执行失败")
+        .and_then(|output| output);
+        // 协议对外隐藏内部错误；测试失败时保留根因，且不输出请求数据。
+        #[cfg(test)]
+        if let Err(error) = &output {
+            eprintln!("增强测试调用错误: {error:#}");
+        }
+        super::observations::finished(&self.pool, tenant, head.generation, &path, output.is_ok())
+            .await
+            .context("增强执行已结束，但观察计数保存失败")?;
+        let output = output?;
         Ok(EnhancementResponse { revision, output })
+    }
+
+    pub(super) async fn history(&self, tenant: &str) -> Result<Vec<super::model::Event>> {
+        Ok(sqlx::query_as("SELECT generation,revision,actor,action,(extract(epoch FROM created_at)*1000)::bigint AS created_at FROM runtime_enhancement_events WHERE tenant_id=$1 ORDER BY generation DESC LIMIT 50")
+            .bind(tenant).fetch_all(&self.pool).await?)
+    }
+
+    pub(super) async fn observe(
+        &self,
+        tenant: &str,
+        revision: &str,
+        generation: i64,
+    ) -> Result<Vec<super::model::Observation>> {
+        // 先校验版本归属，不能用观察查询探测其他租户的摘要。
+        let known: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM runtime_enhancement_events WHERE tenant_id=$1 AND revision=$2 AND generation=$3)")
+            .bind(tenant).bind(revision).bind(generation).fetch_one(&self.pool).await?;
+        ensure!(known, "当前租户没有该版本与代数的激活记录");
+        super::observations::list(&self.pool, tenant, generation).await
     }
 
     async fn prepare(&self, package: Package) -> Result<Arc<PreparedPackage>> {

@@ -88,7 +88,16 @@ async fn exercise(fixture: &Fixture, remote: &Upstream) -> Result<()> {
                 fixture
                     .state
                     .service::<crate::runtime::server::enhancements::Enhancements>()?
-                    .activate(&fixture.identity.tenant, "test", None, generation, false)
+                    .activate(
+                        &fixture.identity.tenant,
+                        "test",
+                        crate::runtime::server::enhancements::Activation {
+                            revision: None,
+                            expected_generation: generation,
+                        },
+                        false,
+                        async { Ok(()) },
+                    )
                     .await?
                     .context("停用失败")?;
                 generation += 1;
@@ -309,10 +318,21 @@ async fn tenant_bindings_restore_from_configuration_and_stateful_mcp_cancels() -
     };
     let service = fixture.state.service::<Enhancements>()?;
     let revision = service
-        .propose(&second_tenant, "test", package("mcp", true)?)
+        .propose(&second_tenant, "test", package("mcp", true)?, async {
+            Ok(())
+        })
         .await?;
     service
-        .activate(&second_tenant, "test", Some(&revision), 0, false)
+        .activate(
+            &second_tenant,
+            "test",
+            crate::runtime::server::enhancements::Activation {
+                revision: Some(revision.clone()),
+                expected_generation: 0,
+            },
+            false,
+            async { Ok(()) },
+        )
         .await?
         .context("激活失败")?;
     fixture.publish(package("mcp", false)?, 0).await?;

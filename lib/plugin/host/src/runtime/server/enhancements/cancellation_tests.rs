@@ -67,10 +67,21 @@ async fn aborted_callers_cancel_workers_and_restore_execution_capacity() -> Resu
     let service = Arc::new(Enhancements::open(pool.clone(), runtime, None).await?);
     let tenant = uuid::Uuid::new_v4().to_string();
     let revision = service
-        .propose(&tenant, "test", package(Language::Rhai, "fixture"))
+        .propose(&tenant, "test", package(Language::Rhai, "fixture"), async {
+            Ok(())
+        })
         .await?;
     service
-        .activate(&tenant, "test", Some(&revision), 0, false)
+        .activate(
+            &tenant,
+            "test",
+            crate::runtime::server::enhancements::Activation {
+                revision: Some(revision.clone()),
+                expected_generation: 0,
+            },
+            false,
+            async { Ok(()) },
+        )
         .await?
         .context("未激活")?;
     let mut tasks = Vec::new();

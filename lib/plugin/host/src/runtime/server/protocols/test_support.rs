@@ -25,6 +25,7 @@ pub(super) struct Identity {
     pub tenant: String,
     pub revoked: AtomicBool,
     pub runtime_allowed: AtomicBool,
+    pub management_allowed: AtomicBool,
 }
 
 #[async_trait::async_trait]
@@ -71,6 +72,25 @@ impl IdentityProvider for Identity {
             .into_iter()
             .map(str::to_owned)
             .collect(),
+            "evolution" | "evolution-reader" => {
+                let mut permissions = vec![
+                    "enhancement:/v1/evolution/bootstrap".into(),
+                    "enhancement:/v1/evolution/observe".into(),
+                    "enhancement:/v1/evolution/control".into(),
+                    format!("enhancement:{PATH}"),
+                    "runtime:/v1/model/enhancement/source".into(),
+                ];
+                if actor == "evolution" && self.management_allowed.load(Ordering::SeqCst) {
+                    permissions.push("plugin:manage".into());
+                }
+                for operation in [
+                    "head", "package", "catalog", "propose", "activate", "rollback", "history",
+                    "observe",
+                ] {
+                    permissions.push(format!("runtime:/v1/runtime/enhancements/{operation}"));
+                }
+                permissions
+            }
             _ => return Ok(None),
         };
         if !self.runtime_allowed.load(Ordering::SeqCst) {
@@ -94,13 +114,30 @@ impl IdentityProvider for Identity {
         Ok(true)
     }
     async fn session_active(&self, session: &str, _: &str, _: &str) -> Result<bool> {
-        Ok(
-            !matches!(session, "limited" | "composed" | "capable" | "remote")
-                || !self.revoked.load(Ordering::SeqCst),
-        )
+        Ok(!matches!(
+            session,
+            "limited" | "composed" | "capable" | "remote" | "evolution"
+        ) || !self.revoked.load(Ordering::SeqCst))
     }
     async fn can_publish(&self, _: &SessionContext) -> Result<bool> {
         Ok(false)
+    }
+    async fn session_has_permissions(
+        &self,
+        session: &str,
+        tenant: &str,
+        user: &str,
+        permissions: &[String],
+    ) -> Result<bool> {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("authorization", format!("Bearer {session}").parse()?);
+        Ok(self.authenticate(&headers).await?.is_some_and(|current| {
+            current.tenant_id == tenant
+                && current.user_id == user
+                && permissions
+                    .iter()
+                    .all(|permission| current.permissions.contains(permission))
+        }))
     }
 }
 
@@ -163,6 +200,7 @@ impl Fixture {
             tenant: uuid::Uuid::new_v4().to_string(),
             revoked: AtomicBool::new(false),
             runtime_allowed: AtomicBool::new(true),
+            management_allowed: AtomicBool::new(true),
         });
         let remote_capabilities = if let Some(mut imports) = imports {
             for import in &mut imports {
