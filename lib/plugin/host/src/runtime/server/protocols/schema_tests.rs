@@ -13,7 +13,7 @@ fn typed(language: Language) -> Result<Package> {
     let mut value = package(language);
     value.enhancements[0].input_schema = Some(
         json!({
-            "$defs":{"number":{"type":"integer","minimum":0}}, "$ref":"#/$defs/number"
+            "$id":"input", "$defs":{"number":{"type":"integer","minimum":0}}, "$ref":"input#/$defs/number"
         })
         .try_into()?,
     );

@@ -158,25 +158,26 @@ fn envelope(
     let bytes = serde_json::to_vec(&value)
         .map_err(|_| ErrorData::internal_error("编码增强 schema 失败", None))?;
     let digest = format!("{:x}", Sha256::digest(bytes));
-    let base = reqwest::Url::parse(&format!(
+    let mut base = reqwest::Url::parse(&format!(
         "https://schemas.aio.invalid/enhancements/{digest}/{field}"
     ))
     .map_err(|_| ErrorData::internal_error("增强 schema 地址无效", None))?;
     if let Value::Object(object) = &mut value {
-        let same_resource = object
+        if let Some(id) = object
             .get("$id")
             .and_then(Value::as_str)
-            .map(|id| {
-                base.join(id).map(|mut resolved| {
-                    resolved.set_fragment(None);
-                    resolved == base
-                })
-            })
-            .transpose()
-            .map_err(|_| ErrorData::internal_error("增强 schema 标识无效", None))?
-            .unwrap_or(true);
-        // 空 id、空片段以及解析后等于外层的相对 id 也必须建立独立资源。
-        if same_resource {
+            .filter(|id| !id.is_empty() && *id != "#")
+        {
+            let mut resolved = base
+                .join(id)
+                .map_err(|_| ErrorData::internal_error("增强 schema 标识无效", None))?;
+            resolved.set_fragment(None);
+            if resolved == base {
+                // 保留业务 id 及指向它的相对引用，只移动同目录中的外层地址。
+                base.set_path(&format!("{}.mcp.json", base.path()));
+            }
+        } else {
+            // 缺失或空 id 不能建立子资源；为局部片段引用补充独立地址。
             object.insert("$id".into(), json!(format!("{field}.schema.json")));
         }
     }
@@ -209,19 +210,25 @@ mod tests {
             Some("relative.json"),
             Some("https://example.test/input"),
         ] {
-            let mut schema = json!({"$defs":{"value":{"type":"integer"}},"$ref":"#/$defs/value"});
-            if let Some(id) = id {
-                schema["$id"] = json!(id);
+            let mut references = vec!["#/$defs/value".to_owned()];
+            if let Some(id) = id.filter(|id| !id.is_empty() && *id != "#") {
+                references.push(format!("{id}#/$defs/value"));
             }
-            let original = jsonschema::options().offline().build(&schema)?;
-            assert!(original.is_valid(&json!(3)));
-            let wrapped = envelope("input", schema.try_into()?)?;
-            let validator = jsonschema::options().offline().build(&json!(wrapped))?;
-            assert!(validator.is_valid(&json!({"input":3})), "schema id: {id:?}");
-            assert!(
-                !validator.is_valid(&json!({"input":"wrong"})),
-                "schema id: {id:?}"
-            );
+            for reference in references {
+                let mut schema = json!({"$defs":{"value":{"type":"integer"}},"$ref":reference});
+                if let Some(id) = id {
+                    schema["$id"] = json!(id);
+                }
+                let original = jsonschema::options().offline().build(&schema)?;
+                assert!(original.is_valid(&json!(3)));
+                let wrapped = envelope("input", schema.try_into()?)?;
+                let validator = jsonschema::options().offline().build(&json!(wrapped))?;
+                assert!(validator.is_valid(&json!({"input":3})), "schema id: {id:?}");
+                assert!(
+                    !validator.is_valid(&json!({"input":"wrong"})),
+                    "schema id: {id:?}"
+                );
+            }
         }
         Ok(())
     }
