@@ -74,11 +74,18 @@ pub(super) async fn tick(state: &RuntimeState) -> Result<()> {
     Ok(())
 }
 
-pub(super) async fn run(state: RuntimeState) {
-    loop {
+pub(super) async fn run(
+    state: RuntimeState,
+    cancellation: tokio_util::sync::CancellationToken,
+) -> Result<()> {
+    while !cancellation.is_cancelled() {
         if let Err(error) = tick(&state).await {
             eprintln!("插件自动升级失败: {error:#}");
         }
-        tokio::time::sleep(Duration::from_secs(15)).await;
+        tokio::select! {
+            _ = cancellation.cancelled() => break,
+            _ = tokio::time::sleep(Duration::from_secs(15)) => {}
+        }
     }
+    Ok(())
 }

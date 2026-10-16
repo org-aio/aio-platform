@@ -68,7 +68,7 @@ impl Processes {
                 token: config.ingress_token,
                 client,
                 resources: Arc::new(Resources {
-                    _jobs: jobs,
+                    jobs: tokio::sync::Mutex::new(jobs),
                     _socket_alias: Some(alias),
                 }),
             }),

@@ -187,6 +187,24 @@ async fn exercise(fixture: &Fixture) -> Result<()> {
     denied.cancel().await?;
     other.cancel().await?;
     fixture.check_omitted_plugins().await?;
+    fixture.state.shutdown().await?;
+    assert!(fixture.state.store.pool.is_closed());
+    assert_eq!(
+        grpc.list(auth(ListRequest {}, "manager")?)
+            .await
+            .err()
+            .context("关闭后仍可调用 gRPC")?
+            .code(),
+        Code::Unavailable
+    );
+    assert_eq!(
+        reqwest::Client::new()
+            .post(format!("{}/api/runtime/mcp", fixture.base))
+            .send()
+            .await?
+            .status(),
+        503
+    );
     Ok(())
 }
 

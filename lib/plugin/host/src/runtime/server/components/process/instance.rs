@@ -53,6 +53,7 @@ impl Processes {
             root,
             supervisor,
             instances: Default::default(),
+            owned: Default::default(),
             pending: Default::default(),
         }
     }
@@ -91,10 +92,12 @@ impl Processes {
             token: config.ingress_token,
             client,
             resources: Arc::new(super::model::Resources {
-                _jobs: jobs,
+                jobs: tokio::sync::Mutex::new(jobs),
                 _socket_alias: None,
             }),
         });
+        // stop_id 已移除旧实例；从发出 start 前起负责此次启动的外部资源。
+        self.owned.lock().await.push(start.id());
         let result = async {
             let response = self
                 .supervisor
@@ -137,8 +140,14 @@ impl Processes {
         match result {
             Ok(description) => Ok((instance, description)),
             Err(error) => {
-                let _ = self.stop_id(&start.id()).await;
-                Err(error)
+                let cleanup = self.stop_id(&start.id()).await;
+                instance.resources.shutdown().await;
+                match cleanup {
+                    Ok(()) => Err(error),
+                    Err(cleanup) => {
+                        Err(error.context(format!("启动 process 失败且清理失败: {cleanup:#}")))
+                    }
+                }
             }
         }
     }
@@ -152,6 +161,7 @@ impl Processes {
             .await
             .context("停止 process 失败")?;
         ensure!(response.status().is_success(), "监督器拒绝停止 process");
+        self.owned.lock().await.retain(|owned| owned != id);
         Ok(())
     }
 
@@ -159,8 +169,30 @@ impl Processes {
         let mut instances = self.instances.lock().await;
         if let Some(instance) = instances.get(&(source, tenant.into())) {
             self.stop_id(&instance.start.id()).await?;
+            instance.resources.shutdown().await;
         }
         instances.remove(&(source, tenant.into()));
+        Ok(())
+    }
+
+    pub async fn shutdown(&self) -> Result<()> {
+        let owned = self.owned.lock().await.clone();
+        let mut errors = Vec::new();
+        for id in owned.iter().rev() {
+            if let Err(error) = self.stop_id(id).await {
+                errors.push(format!("{id}: {error:#}"));
+            }
+        }
+        let instances = std::mem::take(&mut *self.instances.lock().await);
+        let pending = std::mem::take(&mut *self.pending.lock().await);
+        for instance in instances.into_values().chain(pending.into_values()) {
+            instance.resources.shutdown().await;
+        }
+        ensure!(
+            errors.is_empty(),
+            "停止 Component process 失败: {}",
+            errors.join("; ")
+        );
         Ok(())
     }
 

@@ -44,6 +44,7 @@ jobs:
           psql "$AIO_ENHANCEMENT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'REVOKE ALL ON SCHEMA public FROM PUBLIC;'
           cargo test -p az-plugin-host --features server enhancements::tests -- --ignored --test-threads=1
           cargo test -p az-plugin-host --features server plugins::tests -- --ignored --test-threads=1
+          cargo test -p az-plugin-host --features server plugins::lifecycle_tests -- --ignored --test-threads=1
           cargo test -p az-plugin-host --features server --test service_plugins -- --ignored
           cargo test -p az-plugin-host --features server protocols::tests -- --ignored
         env:
@@ -54,6 +55,17 @@ jobs:
           cargo test -p az-plugin-host --features server webview_channel_roundtrip_isolation_and_revocation -- --ignored
         env:
           AIO_TEST_DATABASE_URL: postgresql://postgres:channel-test@127.0.0.1:5432/channel_test
+      - name: 验证 sidecar 关闭释放资源并保留安装状态
+        run: |
+          psql "$AIO_ENHANCEMENT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE component_market_test;'
+          psql "$AIO_COMPONENT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'REVOKE ALL ON SCHEMA public FROM PUBLIC;'
+          export AIO_PROCESS_ROOT="$(mktemp -d)"
+          export AIO_PLUGIN_SUPERVISOR_SOCKET="$AIO_PROCESS_ROOT/supervisor.sock"
+          trap 'rm -rf "$AIO_PROCESS_ROOT"' EXIT
+          cargo test -p az-plugin-host --features server publication_preserves_running_singleton_process -- --ignored
+        env:
+          AIO_ENHANCEMENT_TEST_DATABASE_URL: postgresql://postgres:channel-test@127.0.0.1:5432/channel_test
+          AIO_COMPONENT_TEST_DATABASE_URL: postgresql://postgres:channel-test@127.0.0.1:5432/component_market_test
       - run: cargo build --manifest-path lib/plugin/runtime/tests/fixture/Cargo.toml --locked --release --target wasm32-wasip2 --target-dir target/fixture/healthy
       - run: cargo build --manifest-path lib/plugin/runtime/tests/fixture/Cargo.toml --locked --release --target wasm32-wasip2 --features unhealthy --target-dir target/fixture/unhealthy
       - run: cargo build --manifest-path lib/plugin/runtime/tests/fixture/Cargo.toml --locked --release --target wasm32-wasip2 --features enhancements --target-dir target/fixture/enhancements

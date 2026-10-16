@@ -38,7 +38,12 @@ pub fn router(state: RuntimeState) -> Router {
     for factory in &state.extensions.routes {
         router = router.merge(factory(&state));
     }
-    router.with_state(state)
+    router
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            super::plugins::admit,
+        ))
+        .with_state(state)
 }
 
 pub(super) fn frontend() -> Router<RuntimeState> {

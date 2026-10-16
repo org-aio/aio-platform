@@ -180,9 +180,11 @@ impl RuntimeState {
             sqlx::query("DELETE FROM tenant_plugin_bindings WHERE tenant_id='development'")
                 .execute(&state.store.pool)
                 .await?;
-            return Ok(state);
         }
-        state.extensions.start(&state).await?;
+        state
+            .extensions
+            .start(&state, state.config.development.is_none())
+            .await?;
         Ok(state)
     }
 
@@ -211,24 +213,31 @@ impl RuntimeState {
         Ok(lock)
     }
 
-    fn start_publish_job(&self, job: publisher_store::PublishJob) {
+    fn start_publish_job(&self, job: publisher_store::PublishJob) -> Result<()> {
         if job.state != PublishState::Queued {
-            return;
+            return Ok(());
         }
         let state = self.clone();
-        tokio::spawn(async move {
-            let Ok(_permit) = state.publication_slots.clone().acquire_owned().await else {
-                return;
+        let tasks = self.plugin_tasks::<plugins::ManagementPlugin>()?;
+        let cancellation = tasks.cancellation();
+        tasks.spawn(async move {
+            let _permit = tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => return Ok(()),
+                permit = state.publication_slots.clone().acquire_owned() => permit?,
             };
+            if cancellation.is_cancelled() {
+                return Ok(());
+            }
             let claimed = match state.store.claim_publish_job(&job.id).await {
                 Ok(claimed) => claimed,
                 Err(error) => {
                     eprintln!("领取插件发布任务失败: {}", error);
-                    return;
+                    return Err(error);
                 }
             };
             if !claimed {
-                return;
+                return Ok(());
             }
             let _ = state
                 .store
@@ -285,7 +294,7 @@ impl RuntimeState {
                 .finish_publish_job(&job.id, publish_state, &detail, page_count)
                 .await
             {
-                eprintln!("记录插件发布任务结果失败: {}", error);
+                return Err(error.context("记录插件发布任务结果失败"));
             }
             if let Err(error) = state
                 .store
@@ -293,13 +302,15 @@ impl RuntimeState {
                 .await
             {
                 eprintln!("记录插件发布生命周期失败: {}", error);
+                return Err(error);
             }
-        });
+            Ok(())
+        })
     }
 
     async fn resume_published_jobs(&self) -> Result<()> {
         for job in self.store.resume_publish_jobs().await? {
-            self.start_publish_job(job);
+            self.start_publish_job(job)?;
         }
         Ok(())
     }

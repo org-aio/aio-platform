@@ -184,7 +184,39 @@ async fn publication_preserves_running_singleton_process() -> Result<()> {
             .status()
             .is_success()
     );
-    components.change("default", source, "uninstall").await?;
+    let broker_socket = root.join(original.id()).join("broker/gateway.sock");
+    let broker = tokio::net::UnixStream::connect(&broker_socket).await?;
+    drop(broker);
+    components.shutdown().await?;
+    assert!(supervisor.running.lock().await.is_empty());
+    assert!(
+        components
+            .processes
+            .bundle(source, "default")
+            .await
+            .is_none()
+    );
+    assert!(
+        tokio::net::UnixStream::connect(&broker_socket)
+            .await
+            .is_err()
+    );
+    // 停止只释放执行资源，安装状态与摘要必须完整保留。
+    let enabled: bool = sqlx::query_scalar(
+        "SELECT enabled FROM component_installations WHERE source_id=$1 AND tenant_id='default'",
+    )
+    .bind(source)
+    .fetch_one(&components.pool)
+    .await?;
+    assert!(enabled);
+    assert_eq!(
+        components
+            .installed_bundle("default", source)
+            .await?
+            .context("关闭删除了安装记录")?
+            .digest,
+        first.digest
+    );
     server.abort();
     Ok(())
 }

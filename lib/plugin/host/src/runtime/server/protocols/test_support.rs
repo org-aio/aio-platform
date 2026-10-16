@@ -140,6 +140,7 @@ impl Fixture {
             )
             .await?,
         );
+        state.extensions.start(&state, false).await?;
         let router = crate::runtime::server::router(state.clone());
         let server = tokio::spawn(async move { axum::serve(listener, router).await });
         Ok(Self {

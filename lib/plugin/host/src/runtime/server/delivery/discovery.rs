@@ -182,59 +182,79 @@ async fn request_marker(client: &Client, repository: &str, branch: &str) -> Resu
     az_plugin_delivery::parse(&response.error_for_status()?.text().await?).map(|_| true)
 }
 
-pub(super) async fn run(state: RuntimeState) {
+pub(super) async fn run(
+    state: RuntimeState,
+    cancellation: tokio_util::sync::CancellationToken,
+) -> Result<()> {
     let Some(config) = &state.config.delivery else {
-        return;
+        return Ok(());
     };
     let owner = &config.owner;
     if !owner
         .bytes()
         .all(|b| b.is_ascii_alphanumeric() || b == b'-')
     {
-        eprintln!("自动发现 owner 无效");
-        return;
+        anyhow::bail!("自动发现 owner 无效");
     }
     let client = Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(30))
         .build()
-        .expect("构建发现客户端");
-    tokio::join!(discover(&state, &client, owner), poll(&state, &client));
+        .context("构建发现客户端失败")?;
+    tokio::join!(
+        discover(
+            &state,
+            &client,
+            owner,
+            config.discovery_interval_seconds,
+            &cancellation
+        ),
+        poll(
+            &state,
+            &client,
+            config.revision_interval_seconds,
+            &cancellation
+        )
+    );
+    Ok(())
 }
 
-async fn discover(state: &RuntimeState, client: &Client, owner: &str) {
+async fn discover(
+    state: &RuntimeState,
+    client: &Client,
+    owner: &str,
+    seconds: u64,
+    cancellation: &tokio_util::sync::CancellationToken,
+) {
     let mut etags = std::collections::HashMap::new();
-    let mut interval = tokio::time::interval(Duration::from_secs(
-        state
-            .config
-            .delivery
-            .as_ref()
-            .expect("交付配置")
-            .discovery_interval_seconds
-            .max(1),
-    ));
+    let mut interval = tokio::time::interval(Duration::from_secs(seconds.max(1)));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
-        interval.tick().await;
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => break,
+            _ = interval.tick() => {}
+        }
         if let Err(error) = scan(state, client, owner, &mut etags).await {
             eprintln!("扫描插件仓库失败: {error:#}");
         }
     }
 }
 
-async fn poll(state: &RuntimeState, client: &Client) {
-    let mut interval = tokio::time::interval(Duration::from_secs(
-        state
-            .config
-            .delivery
-            .as_ref()
-            .expect("交付配置")
-            .revision_interval_seconds
-            .max(1),
-    ));
+async fn poll(
+    state: &RuntimeState,
+    client: &Client,
+    seconds: u64,
+    cancellation: &tokio_util::sync::CancellationToken,
+) {
+    let mut interval = tokio::time::interval(Duration::from_secs(seconds.max(1)));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
-        interval.tick().await;
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => break,
+            _ = interval.tick() => {}
+        }
         let result = async {
             let rows = sqlx::query("SELECT git,branch FROM delivery_sources WHERE enabled")
                 .fetch_all(&state.store.pool)

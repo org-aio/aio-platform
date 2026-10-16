@@ -58,6 +58,13 @@ pub(super) struct Gateway {
 }
 
 pub(in crate::runtime::server::components) struct Resources {
-    pub _jobs: JoinSet<()>,
+    pub jobs: tokio::sync::Mutex<JoinSet<()>>,
     pub _socket_alias: Option<super::development::SocketAlias>,
+}
+
+impl Resources {
+    // broker 与数据库代理只属于当前实例，关闭并等待它们真正结束。
+    pub async fn shutdown(&self) {
+        self.jobs.lock().await.shutdown().await;
+    }
 }

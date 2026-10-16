@@ -19,6 +19,10 @@ pub fn router(state: RuntimeState) -> anyhow::Result<Router> {
         .route("/api/development/prepare", post(prepare))
         .route("/api/development/status", get(status).post(update_status))
         .route("/api/development/events", get(events))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            super::super::plugins::admit,
+        ))
         .with_state(state))
 }
 

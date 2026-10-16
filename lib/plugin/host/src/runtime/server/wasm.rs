@@ -113,6 +113,16 @@ impl WasmManager {
         }
     }
 
+    /// 释放内存实例与编译缓存引用，不修改数据库中的活动版本。
+    pub(super) fn shutdown(&self) -> Result<()> {
+        self.instances()?.clear();
+        self.components
+            .lock()
+            .map_err(|_| anyhow!("Wasm 编译缓存锁已损坏"))?
+            .clear();
+        Ok(())
+    }
+
     pub fn deactivate(&self, tenant_id: &str, source_id: &str, revision: &str) -> Result<bool> {
         let key = InstanceKey::new(tenant_id, source_id, revision);
         Ok(self.instances()?.remove(&key).is_some())

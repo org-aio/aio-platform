@@ -15,6 +15,7 @@ mod process_lifecycle;
 #[cfg(test)]
 mod process_publication_tests;
 mod services;
+mod shutdown;
 mod store;
 #[cfg(test)]
 mod tests;

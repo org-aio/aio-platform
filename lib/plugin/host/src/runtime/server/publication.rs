@@ -57,7 +57,7 @@ pub(super) async fn publish(
         )
         .await;
     if job.state == PublishState::Queued {
-        state.start_publish_job(job.clone());
+        state.start_publish_job(job.clone())?;
     }
     Ok(Json(RuntimeResponse {
         data: PublishedPluginView {

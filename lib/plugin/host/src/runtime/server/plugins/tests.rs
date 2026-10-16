@@ -10,7 +10,7 @@ trait Probe: Any + Send + Sync {
     fn value(&self) -> &'static str;
 }
 
-struct NoIdentity;
+pub(super) struct NoIdentity;
 
 #[async_trait::async_trait]
 impl crate::identity::IdentityProvider for NoIdentity {
@@ -52,7 +52,7 @@ impl Plugin<RuntimeAssembly> for ProbePlugin {
                 .bind::<dyn Probe, Replacement>();
             assembly.require_service::<dyn Probe>();
             assembly.services.add_value(Trace::default());
-            assembly.on_start(|state| {
+            assembly.on_start::<Self>(|state, _tasks| {
                 Box::pin(async move {
                     let trace = state.service::<Trace>()?;
                     trace
@@ -63,7 +63,7 @@ impl Plugin<RuntimeAssembly> for ProbePlugin {
                     Ok(())
                 })
             });
-            assembly.on_ready(|state| {
+            assembly.on_ready::<Self>(|state, _tasks| {
                 Box::pin(async move {
                     let trace = state.service::<Trace>()?;
                     let mut events = trace
@@ -87,7 +87,9 @@ async fn probe(
     Ok(state.service::<dyn Probe>()?.value().into())
 }
 
-async fn extensions(plugins: Vec<DynPlugin<RuntimeAssembly>>) -> Result<Arc<RuntimeExtensions>> {
+pub(super) async fn extensions(
+    plugins: Vec<DynPlugin<RuntimeAssembly>>,
+) -> Result<Arc<RuntimeExtensions>> {
     let root = tempfile::tempdir()?;
     let keyring = super::super::components::load_keyring(&root.path().join("keyring.json"))?;
     let pool = sqlx::postgres::PgPoolOptions::new()

@@ -30,3 +30,5 @@ Rust 和 Kotlin SDK 的 WASI 仅开放受限 I/O、时间、安全随机及空�
 `DatabaseProvisioner::component_slot` 提供 `PersistentComponentSlot`，在宿主数据库保存整包、授权、活动摘要和激活历史。恢复时重新校验整包和当前宿主授权；发布前校验候选，再以本地锁和 PostgreSQL 行锁排空在途请求，提交活动版本后切换实例。其他宿主上的旧版本调用被数据库记录拒绝。详情见 `src/registry/README.md`。
 
 `Keyring` 以版本化 AES-256-GCM 信封绑定插件、租户和用途，支持保留旧密钥后轮换活动密钥。只有运行阶段且授予 cryptography 的实例可以调用；数据库凭据不进入插件。宿主不得启用包含动态角色密码的 SQL 语句日志。
+
+宿主停止时，持久化槽调用 `unload()` 释放执行实例，保留活动版本；全部槽与后台工作退出后调用 `DatabaseProvisioner::close()` 关闭所持连接池。`deactivate()` 会改变持久化激活状态，只用于明确停用插件。

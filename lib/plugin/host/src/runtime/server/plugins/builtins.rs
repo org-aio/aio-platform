@@ -68,14 +68,21 @@ impl Plugin<RuntimeAssembly> for ManagementPlugin {
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
             assembly.add_routes(|state| super::super::routes::management(state.clone()));
-            assembly.on_start(|state| {
+            assembly.on_start::<Self>(|state, _tasks| {
                 Box::pin(async move {
                     state.ensure_default_plugins().await?;
                     state.reconcile_wasm().await?;
                     state.reconcile_processes().await
                 })
             });
-            assembly.on_ready(|state| Box::pin(async move { state.resume_published_jobs().await }));
+            assembly.on_ready::<Self>(|state, _tasks| {
+                Box::pin(async move { state.resume_published_jobs().await })
+            });
+            assembly
+                .on_stop::<Self>(|state, _tasks| Box::pin(async move { state.wasm.shutdown() }));
+            assembly.on_stop::<Self>(|state, _tasks| {
+                Box::pin(async move { state.process.shutdown().await })
+            });
             Ok(())
         })
     }
@@ -90,10 +97,18 @@ impl Plugin<RuntimeAssembly> for ComponentsPlugin {
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
             assembly.add_routes(|state| super::super::components::router(state.clone()));
-            assembly.on_start(|state| {
+            assembly.on_start::<Self>(|state, _tasks| {
                 Box::pin(async move {
                     if let Some(components) = &state.components {
                         components.restore().await?;
+                    }
+                    Ok(())
+                })
+            });
+            assembly.on_stop::<Self>(|state, _tasks| {
+                Box::pin(async move {
+                    if let Some(components) = &state.components {
+                        components.shutdown().await?;
                     }
                     Ok(())
                 })
@@ -118,9 +133,9 @@ impl Plugin<RuntimeAssembly> for DeliveryPlugin {
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
             assembly.add_routes(|_| super::super::delivery::router());
-            assembly.on_ready(|state| {
+            assembly.on_ready::<Self>(|state, tasks| {
                 Box::pin(async move {
-                    super::super::delivery::start(state);
+                    super::super::delivery::start(state, tasks)?;
                     Ok(())
                 })
             });

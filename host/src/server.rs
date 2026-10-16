@@ -92,7 +92,7 @@ pub async fn run() -> Result<()> {
         .merge(az_plugin_host::runtime::server::development::router(
             state.clone(),
         )?)
-        .merge(az_plugin_host::runtime::server::router(state))
+        .merge(az_plugin_host::runtime::server::router(state.clone()))
         .fallback_service(application)
         .layer(axum::middleware::from_fn(
             move |mut request: axum::extract::Request, next: axum::middleware::Next| {
@@ -136,11 +136,13 @@ pub async fn run() -> Result<()> {
     println!("AIO Sandbox {origin}");
     use std::future::IntoFuture;
     // SSE 长连接不等待浏览器关闭；退出时回收路由、任务和开发服务授权。
-    tokio::select! {
-        result = axum::serve(listener, router).into_future() => result?,
-        _ = shutdown() => {}
-    }
-    Ok(())
+    let result = tokio::select! {
+        result = axum::serve(listener, router).into_future() => result,
+        _ = shutdown() => Ok(())
+    };
+    let cleanup = state.shutdown().await;
+    result?;
+    cleanup
 }
 
 async fn shutdown() {

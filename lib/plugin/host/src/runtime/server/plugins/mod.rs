@@ -1,35 +1,43 @@
 //! 宿主能力装配入口；插件统一复用核心的 TypeId 身份、依赖排序和 Dill。
 
+mod admission;
 mod builtins;
+mod lifecycle;
+#[cfg(test)]
+mod lifecycle_tests;
+mod tasks;
 #[cfg(test)]
 mod tests;
 
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{any::TypeId, future::Future, pin::Pin, sync::Arc};
 
 use anyhow::{Context, Result};
 use axum::Router;
-use az_plugin_core::{App, DynPlugin};
+use az_plugin_core::{App, DynPlugin, Plugin};
 use az_plugin_runtime::Keyring;
 use dill::{Catalog, CatalogBuilder};
 use sqlx::PgPool;
 
 use super::RuntimeState;
 
+pub(super) use admission::admit;
 pub use builtins::*;
+use lifecycle::{HookPlan, Lifecycle};
+pub use tasks::PluginTasks;
 
 /// 插件贡献的 HTTP 路由；认证仍由各能力的正式入口执行。
 pub type RouteFactory = fn(&RuntimeState) -> Router<RuntimeState>;
 
-/// 插件的异步恢复动作；基础设施已连接，但宿主还未开始接受请求。
-pub type StartupHook = fn(RuntimeState) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
+/// 插件的启动、就绪或停止动作；任务作用域按具体插件类型共享。
+pub type LifecycleHook =
+    fn(RuntimeState, Arc<PluginTasks>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 
 /// 启动插件只向现有 Dill 容器和路由集合贡献能力，不创建第二套服务注册表。
 pub struct RuntimeAssembly {
     pub services: CatalogBuilder,
     routes: Vec<RouteFactory>,
     requirements: Vec<fn(&Catalog) -> Result<()>>,
-    startup: Vec<StartupHook>,
-    ready: Vec<StartupHook>,
+    lifecycle: Vec<HookPlan>,
 }
 
 impl RuntimeAssembly {
@@ -38,14 +46,36 @@ impl RuntimeAssembly {
         self.routes.push(routes);
     }
 
-    /// 恢复该插件拥有的持久状态，按插件依赖顺序执行。
-    pub fn on_start(&mut self, hook: StartupHook) {
-        self.startup.push(hook);
+    /// 恢复插件拥有的状态；停止动作在调用前已经登记，必须能处理部分启动。
+    pub fn on_start<P: Plugin<Self>>(&mut self, hook: LifecycleHook) {
+        self.hooks::<P>().start.push(hook);
     }
 
-    /// 所有恢复动作成功后才开始后台工作，避免在依赖未就绪时接收任务。
-    pub fn on_ready(&mut self, hook: StartupHook) {
-        self.ready.push(hook);
+    /// 全部恢复成功后才开始后台工作；后台任务必须交给传入的任务作用域。
+    pub fn on_ready<P: Plugin<Self>>(&mut self, hook: LifecycleHook) {
+        self.hooks::<P>().ready.push(hook);
+    }
+
+    /// 按依赖反序释放本次宿主持有的资源，不删除持久化安装状态。
+    pub fn on_stop<P: Plugin<Self>>(&mut self, hook: LifecycleHook) {
+        self.hooks::<P>().stop.push(hook);
+    }
+
+    fn hooks<P: Plugin<Self>>(&mut self) -> &mut HookPlan {
+        let owner = TypeId::of::<P>();
+        let index = match self.lifecycle.iter().position(|plan| plan.owner == owner) {
+            Some(index) => index,
+            None => {
+                self.lifecycle.push(HookPlan {
+                    owner,
+                    start: Vec::new(),
+                    ready: Vec::new(),
+                    stop: Vec::new(),
+                });
+                self.lifecycle.len() - 1
+            }
+        };
+        &mut self.lifecycle[index]
     }
 
     /// 路由依赖接口而不是某个默认实现；所有插件注册完成后检查唯一绑定。
@@ -63,16 +93,29 @@ impl RuntimeAssembly {
 pub(crate) struct RuntimeExtensions {
     pub services: Catalog,
     pub routes: Vec<RouteFactory>,
-    startup: Vec<StartupHook>,
-    ready: Vec<StartupHook>,
+    lifecycle: Lifecycle,
 }
 
 impl RuntimeExtensions {
-    pub(super) async fn start(&self, state: &RuntimeState) -> Result<()> {
-        for hook in self.startup.iter().chain(&self.ready) {
-            hook(state.clone()).await?;
-        }
-        Ok(())
+    pub(super) async fn start(&self, state: &RuntimeState, run_hooks: bool) -> Result<()> {
+        Lifecycle::start(state, run_hooks).await
+    }
+}
+
+impl RuntimeState {
+    /// 按插件的 TypeId 获取相同的任务作用域，供请求入口创建受管理的工作。
+    pub fn plugin_tasks<P: Plugin<RuntimeAssembly>>(&self) -> Result<Arc<PluginTasks>> {
+        self.extensions.lifecycle.tasks(TypeId::of::<P>())
+    }
+
+    /// 停止接收运行时请求，等待正在提交的工作，再反序释放资源；可重复调用。
+    /// 停止是协作式的，插件必须在安全边界响应取消；调用方也应停止监听器。
+    pub async fn shutdown(&self) -> Result<()> {
+        self.extensions.lifecycle.cancellation.cancel();
+        let state = self.clone();
+        tokio::spawn(async move { state.extensions.lifecycle.stop(&state).await })
+            .await
+            .context("插件停止任务未正常结束")?
     }
 }
 
@@ -87,11 +130,21 @@ pub(super) async fn assemble(
         services,
         routes: Vec::new(),
         requirements: Vec::new(),
-        startup: Vec::new(),
-        ready: Vec::new(),
+        lifecycle: Vec::new(),
     });
     app.add_plugins(plugins).await?;
+    let installed = app.plugin_order().to_vec();
     let mut assembly = app.into_inner();
+    anyhow::ensure!(
+        assembly
+            .lifecycle
+            .iter()
+            .all(|plan| installed.contains(&plan.owner)),
+        "生命周期声明引用了未安装的插件类型"
+    );
+    assembly
+        .lifecycle
+        .sort_by_key(|plan| installed.iter().position(|owner| *owner == plan.owner));
     assembly
         .services
         .validate()
@@ -103,7 +156,6 @@ pub(super) async fn assemble(
     Ok(Arc::new(RuntimeExtensions {
         services,
         routes: assembly.routes,
-        startup: assembly.startup,
-        ready: assembly.ready,
+        lifecycle: Lifecycle::new(assembly.lifecycle),
     }))
 }

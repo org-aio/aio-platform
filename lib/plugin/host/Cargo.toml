@@ -41,6 +41,8 @@ sha2 = { version = "0.10.9", optional = true }
 sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "runtime-tokio-rustls", "json"], optional = true }
 tar = { version = "0.4.44", optional = true }
 tokio = { version = "1.47.1", features = ["fs", "macros", "net", "process", "rt-multi-thread", "sync", "time"], optional = true }
+tokio-util = { version = "0.7", features = ["rt"], optional = true }
+http-body = { version = "1", optional = true }
 toml = { version = "0.9.5", optional = true }
 tower-http = { version = "0.6.2", features = ["fs", "compression-gzip", "compression-br"], optional = true }
 uuid = { version = "1.18.1", features = ["v4", "v5"], optional = true }
@@ -54,7 +56,7 @@ default = []
 ui = ["dep:dioxus", "dep:dioxus-icons", "dep:az-dioxus-admin-shell", "dep:az-ui-components"]
 web = ["ui", "dioxus/web", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
 desktop = ["ui", "dioxus/desktop", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
-server = ["dep:jsonwebtoken","components", "az-plugin-manifest/validation", "az-plugin-contract/grpc", "dep:rmcp", "dep:tonic", "axum/http2", "dep:az-plugin-package", "dep:axum", "dep:flate2", "dep:kuchikiki", "dep:mime_guess", "dep:reqwest", "dep:sha2", "dep:sqlx", "dep:tar", "dep:tokio", "dep:toml", "dep:tower-http", "dep:uuid", "dep:wasmtime"]
+server = ["dep:tokio-util", "dep:http-body", "dep:jsonwebtoken","components", "az-plugin-manifest/validation", "az-plugin-contract/grpc", "dep:rmcp", "dep:tonic", "axum/http2", "dep:az-plugin-package", "dep:axum", "dep:flate2", "dep:kuchikiki", "dep:mime_guess", "dep:reqwest", "dep:sha2", "dep:sqlx", "dep:tar", "dep:tokio", "dep:toml", "dep:tower-http", "dep:uuid", "dep:wasmtime"]
 
 [lints.rust]
 unsafe_code = "forbid"

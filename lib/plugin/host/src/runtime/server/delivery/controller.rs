@@ -203,7 +203,7 @@ async fn complete(
         .await?;
     sqlx::query("UPDATE delivery_jobs SET state='publishing',lease_until=NULL,updated_at=now() WHERE id=$1 AND lease=$2")
         .bind(id).bind(report.lease).execute(&state.store.pool).await?;
-    state.start_publish_job(publication);
+    state.start_publish_job(publication)?;
     Ok(StatusCode::NO_CONTENT)
 }
 

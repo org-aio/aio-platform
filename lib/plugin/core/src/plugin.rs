@@ -38,6 +38,7 @@ pub trait Plugin<T>: Any + Send + Sync {
 pub struct App<T> {
     state: T,
     unique_plugin_types: HashSet<TypeId>,
+    plugin_order: Vec<TypeId>,
 }
 
 impl<T: 'static> App<T> {
@@ -46,6 +47,7 @@ impl<T: 'static> App<T> {
         Self {
             state,
             unique_plugin_types: HashSet::new(),
+            plugin_order: Vec::new(),
         }
     }
 
@@ -67,6 +69,7 @@ impl<T: 'static> App<T> {
                 }
             })?;
             self.unique_plugin_types.insert(type_id);
+            self.plugin_order.push(type_id);
         }
         Ok(())
     }
@@ -117,6 +120,11 @@ impl<T: 'static> App<T> {
             ordered.push(plugin);
         }
         Ok(ordered)
+    }
+
+    /// 返回已经构建成功的具体插件类型顺序，供宿主按依赖反序释放资源。
+    pub fn plugin_order(&self) -> &[TypeId] {
+        &self.plugin_order
     }
 
     #[must_use]

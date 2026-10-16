@@ -1,4 +1,4 @@
-use std::{env, net::IpAddr, path::PathBuf, time::Duration};
+use std::{env, net::IpAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{Context as _, Result, bail, ensure};
 use az_plugin_manifest::PageDefinition;
@@ -10,9 +10,14 @@ use super::supervisor::{
 
 const MAX_PROCESS_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 
+#[cfg(test)]
+#[path = "process_shutdown_tests.rs"]
+mod shutdown_tests;
+
 #[derive(Clone)]
 pub struct ProcessManager {
     local: bool,
+    owned: Arc<tokio::sync::Mutex<Vec<String>>>,
     supervisor: reqwest::Client,
     runtime: reqwest::Client,
 }
@@ -40,6 +45,7 @@ impl ProcessManager {
             .context("创建 process 插件代理客户端失败")?;
         Ok(Self {
             local: false,
+            owned: Default::default(),
             supervisor,
             runtime,
         })
@@ -52,6 +58,7 @@ impl ProcessManager {
             .build()?;
         Ok(Self {
             local: true,
+            owned: Default::default(),
             supervisor: runtime.clone(),
             runtime,
         })
@@ -85,7 +92,11 @@ impl ProcessManager {
             .send()
             .await
             .context("请求启动 process 插件失败")?;
-        decode_supervisor_response(response).await
+        let instance = decode_supervisor_response(response).await?;
+        if instance.created {
+            self.owned.lock().await.push(instance.instance_id.clone());
+        }
+        Ok(instance)
     }
 
     pub async fn stop(&self, instance_id: &str) -> Result<()> {
@@ -99,9 +110,27 @@ impl ProcessManager {
             .await
             .context("请求停止 process 插件失败")?;
         if response.status().is_success() {
+            self.owned.lock().await.retain(|id| id != instance_id);
             return Ok(());
         }
         bail!("停止 process 插件失败: {}", response_text(response).await);
+    }
+
+    /// 仅释放本次宿主确实创建的实例，监督器返回的既有实例不属于本次清理。
+    pub(super) async fn shutdown(&self) -> Result<()> {
+        let owned = self.owned.lock().await.clone();
+        let mut errors = Vec::new();
+        for id in owned.iter().rev() {
+            if let Err(error) = self.stop(id).await {
+                errors.push(format!("{id}: {error:#}"));
+            }
+        }
+        ensure!(
+            errors.is_empty(),
+            "停止宿主 process 失败: {}",
+            errors.join("; ")
+        );
+        Ok(())
     }
 
     pub(super) async fn reconcile(&self, instances: Vec<StartProcessRequest>) -> Result<()> {
@@ -309,6 +338,7 @@ mod tests {
             .build()?;
         let manager = ProcessManager {
             local: false,
+            owned: Default::default(),
             supervisor: client.clone(),
             runtime: client,
         };

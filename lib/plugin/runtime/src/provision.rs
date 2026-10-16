@@ -23,6 +23,11 @@ pub struct DatabaseProvisioner {
 }
 
 impl DatabaseProvisioner {
+    /// 宿主卸载执行器后关闭本次连接池，不删除租户 schema 或持久化授权。
+    pub async fn close(&self) {
+        self.pool.close().await;
+    }
+
     pub async fn connect(url: &str) -> Result<Self> {
         let connection = PgConnectOptions::from_str(url)
             .context("数据库地址无效")?
