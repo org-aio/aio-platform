@@ -1,10 +1,13 @@
 use anyhow::{Context, Result, ensure};
 use az_plugin_bundle::Bundle;
 use sha2::{Digest, Sha256};
-use std::{os::unix::fs::PermissionsExt, path::PathBuf};
+use std::{
+    os::unix::fs::{FileTypeExt, PermissionsExt},
+    path::{Path, PathBuf},
+};
 
 use super::model::{Start, Stop};
-use crate::runtime::server::supervisor::docker_output;
+use crate::runtime::server::supervisor::{docker_output, ignore_missing};
 
 fn root() -> Result<PathBuf> {
     Ok(std::env::var_os("AIO_PROCESS_ROOT")
@@ -75,6 +78,8 @@ pub(in crate::runtime::server) async fn start(request: &Start) -> Result<()> {
     docker_output(["image", "inspect", &process.image])
         .await
         .context("process 镜像尚未预置")?;
+    // 已确认没有存活容器；回滚、重启或强杀后不能复用旧进程留下的监听文件。
+    clear_stale_socket(&directory.join("runtime/service.sock")).await?;
     let args = arguments(&directory, &name, &process.image)?;
     docker_output(args.iter().map(String::as_str))
         .await
@@ -88,9 +93,23 @@ pub(in crate::runtime::server) async fn stop(request: &Stop) -> Result<()> {
         "process 实例 ID 无效"
     );
     let name = format!("{}{}", prefix()?, request.id);
-    if docker_output(["inspect", &name]).await.is_ok() {
-        docker_output(["rm", "--force", &name]).await?;
-    }
+    // 先发送 SIGTERM 等待请求排空，超时由 Docker 强制终止；仅忽略已经退出的容器。
+    ignore_missing(docker_output(["stop", "--time", "15", &name]).await)?;
+    ignore_missing(docker_output(["rm", "--force", &name]).await)?;
+    Ok(())
+}
+
+async fn clear_stale_socket(socket: &Path) -> Result<()> {
+    let metadata = match tokio::fs::symlink_metadata(socket).await {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    ensure!(
+        metadata.file_type().is_socket(),
+        "process 监听路径不是 Unix socket"
+    );
+    tokio::fs::remove_file(socket).await?;
     Ok(())
 }
 
@@ -169,6 +188,31 @@ fn arguments(directory: &std::path::Path, name: &str, image: &str) -> Result<Vec
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn stale_socket_can_rebind_without_removing_files_or_following_links() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let socket = root.path().join("service.sock");
+        drop(tokio::net::UnixListener::bind(&socket)?);
+        clear_stale_socket(&socket).await?;
+        drop(tokio::net::UnixListener::bind(&socket)?);
+        clear_stale_socket(&socket).await?;
+        clear_stale_socket(&socket).await?;
+
+        tokio::fs::write(&socket, b"keep").await?;
+        assert!(clear_stale_socket(&socket).await.is_err());
+        assert_eq!(tokio::fs::read(&socket).await?, b"keep");
+        let link = root.path().join("alias.sock");
+        std::os::unix::fs::symlink(&socket, &link)?;
+        assert!(clear_stale_socket(&link).await.is_err());
+        assert!(
+            tokio::fs::symlink_metadata(link)
+                .await?
+                .file_type()
+                .is_symlink()
+        );
+        Ok(())
+    }
     #[test]
     fn container_has_no_network_or_host_credentials_in_arguments() -> Result<()> {
         let args = arguments(

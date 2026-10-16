@@ -489,7 +489,7 @@ pub(super) async fn docker_output<'a>(
     Ok(stdout)
 }
 
-fn ignore_missing(result: Result<String>) -> Result<()> {
+pub(super) fn ignore_missing(result: Result<String>) -> Result<()> {
     match result {
         Ok(_) => Ok(()),
         Err(error) if missing_docker_object(&error) => Ok(()),
