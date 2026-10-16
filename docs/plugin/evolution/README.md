@@ -2,7 +2,9 @@
 
 `bootstrap.rhai` 和 `bootstrap.ts` 实现同一策略：读取活动代数、确认所需宿主能力、请求模型填写源码、保存已验证候选、按原代数提交。`observe.rhai` 和 `observe.ts` 根据指定版本、激活代数及增强路径的完成计数决定是否恢复先前版本。策略是普通增强，可以通过相同流程更换语言或更新自身；执行中的策略始终使用旧版本快照。
 
-这套策略要求 `EvolutionPlugin`，以及提供 `/v1/model/enhancement/source` 的模型插件。默认宿主组合包含演进机制；精简宿主可以省略。平台没有内置模型客户端或模型密钥，模型能力可以由原生 Provider 或已授权的 MCP/gRPC 导入提供。当前仓库用可控候选生成器验证控制链；真实模型接入、生成质量与无人值守调度尚未完成验收。
+这套策略要求 `EvolutionPlugin`，以及提供 `/v1/model/enhancement/source` 的模型插件。默认宿主组合包含演进机制；精简宿主可以省略。平台没有内置模型客户端或模型密钥，模型能力可以由原生 Provider 或已授权的 MCP/gRPC 导入提供。[Agent 的 MCP 模型适配器](https://github.com/org-aio/aio-plugin-agent/tree/main/backend/src/generated/enhancement) 已提供源码生成工具，复用加密模型配置、Responses 引擎、受控出站和共享配额；部署方明确绑定租户及模型额度所有者，不转发任意用户身份。
+
+产品集成验收已使用实际 Agent 进程与 MCP 导入完成双语言、MCP/gRPC 入口、激活、观察回滚、策略自更新、提交前撤权和重启恢复。只有最终上游模型使用受控 SSE 替身；真实模型生成质量、生产绑定、无人值守调度和完整失败审计尚未完成验收。
 
 ## 安装策略
 
@@ -65,4 +67,4 @@ PY
 
 `/v1/runtime/enhancements/history` 返回最近 50 次指针提交及真实操作人，候选作者和不可变源码沿用现有版本记录。取消可能发生在数据库提交响应之前，调用方必须读取 head/history 确认结果；不能把超时视为事务必定未提交。
 
-`protocols::tests::evolution` 使用真实 PostgreSQL、MCP SDK 和 gRPC 客户端验证双语言升级、策略自更新、观察回滚、并发版本条件、撤权、取消和插件缺省。模型生成器在测试中被明确替换，不能据此宣称真实模型自举已上线。
+`protocols::tests::evolution` 使用真实 PostgreSQL、MCP SDK 和 gRPC 客户端验证双语言升级、策略自更新、观察回滚、并发版本条件、撤权、取消和插件缺省。平台单元集成测试替换模型生成器；Agent 的集成测试验证实际模型适配器与 Responses 引擎，只替换最终上游 HTTP/SSE 服务。两者都不能据此宣称真实模型自举已上线。

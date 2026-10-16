@@ -76,7 +76,7 @@ cargo run -p az-plugin-enhancement --example verify -- \
   lib/plugin/enhancement/examples/dual-language.json
 ```
 
-管理员 API 与事务行为见 [宿主增强入口](../../lib/plugin/host/src/runtime/server/enhancements/README.md)。AI 生成候选与激活候选是两个独立操作。可选 `EvolutionPlugin` 已允许双语言策略通过受控能力保存、激活、观察和回滚；提交前重新核验管理会话及逐项 runtime 授权。策略自身也可被更新，示例与边界见[脚本演进](evolution/README.md)。当前未绑定真实 AI 模型，未启动无人值守批准或调度。
+管理员 API 与事务行为见 [宿主增强入口](../../lib/plugin/host/src/runtime/server/enhancements/README.md)。AI 生成候选与激活候选是两个独立操作。可选 `EvolutionPlugin` 已允许双语言策略通过受控能力保存、激活、观察和回滚；提交前重新核验管理会话及逐项 runtime 授权。策略自身也可被更新，示例与边界见[脚本演进](evolution/README.md)。Agent 的可选 MCP 模型工具复用现有 Responses 引擎和授权配置，已通过实际产品链路验收；最终上游模型仍为 SSE 替身，尚未完成真实模型质量与生产绑定验收，也未启动无人值守调度。
 
 候选及升级重放使用有序的 `{path,input,output}` 宿主调用记录，路径、输入、顺序或次数不匹配均失败；验证不提交真实任务。执行时复用已有 `WorkerService` 的列表、提交、查询与取消，任务 UUID 保证重复提交幂等并拒绝冲突输入。能力目录提供输入输出 schema 与副作用类型；目录可见性不授予调用权限。
 
