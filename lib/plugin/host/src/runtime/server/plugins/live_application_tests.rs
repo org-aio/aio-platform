@@ -104,7 +104,12 @@ async fn application_requests_drain_before_resources_close() -> Result<()> {
     fixture.trace.started_request.notified().await;
     let host = fixture.host.clone();
     let change = tokio::spawn(async move { host.restart::<ValuePlugin>().await });
-    tokio::time::sleep(Duration::from_millis(30)).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while fixture.host.is_available() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await?;
     assert!(!change.is_finished());
     assert_eq!(fixture.trace.stopped.load(Ordering::SeqCst), 0);
     fixture.trace.release_request.notify_one();
