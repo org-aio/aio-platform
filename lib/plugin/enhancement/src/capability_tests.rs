@@ -213,33 +213,69 @@ fn host_waiting_preserves_compute_budget_and_cancellation() -> Result<()> {
 
 #[test]
 fn catching_host_errors_cannot_reset_shared_call_or_transfer_limits() -> Result<()> {
-    let package: Package = serde_json::from_value(json!({"schema_version":1,"enhancements":[{
-        "path":ROOT,"language":"typescript","source":"export function invoke(input) { for(let i=0;i<input.count;i++){ try {call_capability('/v1/service/echo', input.payload);} catch(_){} } return input.count; }",
-        "capabilities":[SERVICE],"examples":[{"input":{"count":1,"payload":null},"output":1,"capabilities":[{"path":SERVICE,"input":null,"output":null}]}]
-    }]}))?;
-    let prepared = crate::default_runtime()?.prepare(package)?;
-    for input in [
-        json!({"count":100,"payload":null}),
-        json!({"count":16,"payload":"x".repeat(60_000)}),
+    for (language, source) in [
+        (
+            "typescript",
+            "export function invoke(input) { for(let i=0;i<(input ? 4:1);i++){ try {call_capability('/v1/service/echo', null);} catch(_){} } return input; }",
+        ),
+        (
+            "rhai",
+            "fn invoke(input, context) { let count = if input { 4 } else { 1 }; for i in 0..count { try { call_capability(\"/v1/service/echo\", ()); } catch (error) {} } input }",
+        ),
     ] {
-        let caller = Arc::new(Echo {
-            calls: AtomicUsize::new(0),
-            delay: std::time::Duration::ZERO,
-        });
-        let invocation = prepared.invocation(
-            ScriptContext::default(),
-            vec![ROOT.into()],
-            InvocationCapabilities {
-                grants: vec![SERVICE.into()],
-                caller: Some(caller.clone()),
-            },
-        );
-        let error = invocation
-            .invoke(ROOT, &input)
-            .err()
-            .context("宿主调用未受共享配额限制")?;
-        assert!(format!("{error:#}").contains("预算已耗尽"), "{error:#}");
-        assert!(caller.calls.load(Ordering::SeqCst) <= 63);
+        let package: Package = serde_json::from_value(json!({"schema_version":1,"enhancements":[{
+            "path":ROOT,"language":language,"source":source,
+            "capabilities":[SERVICE],"examples":[{"input":false,"output":false,"capabilities":[{"path":SERVICE,"input":null,"output":null}]}]
+        }]}))?;
+        let prepared = crate::default_runtime()?.prepare(package)?;
+        for transfer in [false, true] {
+            let caller = Arc::new(NearlyExhausted {
+                calls: AtomicUsize::new(0),
+                transfer,
+            });
+            let invocation = prepared.invocation(
+                ScriptContext::default(),
+                vec![ROOT.into()],
+                InvocationCapabilities {
+                    grants: vec![SERVICE.into()],
+                    caller: Some(caller.clone()),
+                },
+            );
+            let error = invocation
+                .invoke(ROOT, &json!(true))
+                .err()
+                .context("宿主调用未受共享配额限制")?;
+            assert!(format!("{error:#}").contains("预算已耗尽"), "{error:#}");
+            assert_eq!(caller.calls.load(Ordering::SeqCst), 2);
+            assert!(invocation.check().is_err());
+            assert!(invocation.invoke(ROOT, &json!(false)).is_err());
+            assert_eq!(caller.calls.load(Ordering::SeqCst), 2);
+        }
     }
     Ok(())
+}
+
+// 先消耗同一调用链的大部分配额，再由真实脚本越界，避免大量 JSON 转换与 100ms 超时竞争。
+struct NearlyExhausted {
+    calls: AtomicUsize,
+    transfer: bool,
+}
+
+impl CapabilityCaller for NearlyExhausted {
+    fn available(&self, path: &str) -> bool {
+        path == SERVICE
+    }
+
+    fn call(&self, _: &str, input: &Value, control: &InvocationControl) -> Result<Value> {
+        if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+            if self.transfer {
+                control.transfer(1024 * 1024 - 16)?;
+            } else {
+                for _ in 0..61 {
+                    control.call()?;
+                }
+            }
+        }
+        Ok(input.clone())
+    }
 }

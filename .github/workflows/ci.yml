@@ -8,6 +8,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # 超时测试会故意占用解释器；串行执行，避免其他用例因调度等待耗尽 100ms 预算。
+    env:
+      RUST_TEST_THREADS: '1'
     services:
       postgres:
         image: postgres:16-bookworm

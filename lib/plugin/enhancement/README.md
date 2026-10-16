@@ -30,4 +30,4 @@
 
 可运行示例见 `examples/worker-list.json`。平台宿主通过 `CapabilityProvider` 与 Dill 接入原生服务，默认 `WorkerCapabilitiesPlugin` 提供设备列表和任务提交、查询、取消；它不赋予直接文件、SQL、网络或进程访问。任意外部 MCP/gRPC 服务导入、流式任务与通用副作用协调仍待实现。
 
-验证：`cargo test -p az-plugin-enhancement`；`cargo test -p az-plugin-enhancement --no-default-features` 验证没有内置引擎时仍可通过注入实现执行、校验候选及拒绝缺失或冲突实现。
+验证：`cargo test -p az-plugin-enhancement -- --test-threads=1`；`cargo test -p az-plugin-enhancement --no-default-features -- --test-threads=1` 验证没有内置引擎时仍可通过注入实现执行、校验候选及拒绝缺失或冲突实现。超时测试会故意占用解释器，需串行运行以免其他用例因调度等待耗尽计算预算；测试与正式运行使用相同限额。
