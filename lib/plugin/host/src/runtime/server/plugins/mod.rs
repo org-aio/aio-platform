@@ -24,6 +24,9 @@ mod live;
 mod live_tests;
 #[cfg(test)]
 mod optional_tests;
+mod platform_services;
+#[cfg(test)]
+mod platform_services_tests;
 pub(super) mod process_execution;
 #[cfg(any(feature = "remote-mcp", feature = "remote-grpc"))]
 mod remote_capabilities;
@@ -58,6 +61,7 @@ pub use evolution::EvolutionPlugin;
 pub use infrastructure::*;
 use lifecycle::{HookPlan, Lifecycle};
 pub use live::RuntimeHost;
+pub use platform_services::*;
 pub use process_execution::{
     ProcessExecutor, ProcessInstance, ProcessResponse, StartProcessRequest,
 };

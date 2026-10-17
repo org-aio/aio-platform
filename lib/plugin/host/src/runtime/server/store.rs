@@ -122,26 +122,6 @@ impl PluginStore {
         super::delivery::migrate(&self.pool).await?;
         page_state::migrate(&self.pool).await?;
         super::navigation::migrate(&self.pool).await?;
-        sqlx::Executor::execute(
-            &self.pool,
-            sqlx::raw_sql(include_str!("../../generated/worker/schema.sql")),
-        )
-        .await?;
-        sqlx::Executor::execute(
-            &self.pool,
-            sqlx::raw_sql(include_str!("../../generated/personal_config/schema.sql")),
-        )
-        .await?;
-        sqlx::Executor::execute(
-            &self.pool,
-            sqlx::raw_sql(include_str!("../../generated/worker_webview/schema.sql")),
-        )
-        .await?;
-        sqlx::Executor::execute(
-            &self.pool,
-            sqlx::raw_sql(include_str!("../../generated/clipboard/schema.sql")),
-        )
-        .await?;
         self.migrate_published_source_ids().await?;
         Ok(())
     }

@@ -8,6 +8,7 @@ use dill::CatalogBuilder;
 
 use super::{
     CapabilityServicePlugin, RuntimeAssembly, enhancement_execution::*, infrastructure::*,
+    platform_services::*,
 };
 use crate::generated::{clipboard, personal_config, worker, worker_webview};
 
@@ -196,51 +197,6 @@ impl Plugin<RuntimeAssembly> for DeliveryPlugin {
         })
     }
 }
-
-// 默认实现独立于路由插件；应用可省略它并绑定同一接口的替代实现。
-macro_rules! service_plugin {
-    ($name:ident, $implementation:ty, $interface:ty, [$($dependency:ty),*]) => {
-        /// 为宿主注册该服务的默认持久化实现，不绑定 HTTP 路由。
-        #[dill::component]
-        #[dill::interface(dyn Plugin<RuntimeAssembly>)]
-        pub struct $name;
-        impl Plugin<RuntimeAssembly> for $name {
-            fn dependencies(&self) -> Vec<TypeId> { vec![$(TypeId::of::<$dependency>()),*] }
-            fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
-                Box::pin(async move {
-                    assembly.services.add::<$implementation>();
-                    assembly.require_service::<$interface>();
-                    Ok(())
-                })
-            }
-        }
-    };
-}
-
-service_plugin!(
-    WorkerServicePlugin,
-    worker::WorkerServiceImpl,
-    dyn worker::WorkerService,
-    [StorePlugin]
-);
-service_plugin!(
-    WorkerWebviewServicePlugin,
-    worker_webview::WorkerWebviewServiceImpl,
-    dyn worker_webview::WorkerWebviewService,
-    [StorePlugin]
-);
-service_plugin!(
-    PersonalConfigServicePlugin,
-    personal_config::PersonalConfigServiceImpl,
-    dyn personal_config::PersonalConfigService,
-    [StorePlugin, KeyringPlugin]
-);
-service_plugin!(
-    ClipboardServicePlugin,
-    clipboard::ClipboardServiceImpl,
-    dyn clipboard::ClipboardService,
-    [StorePlugin, KeyringPlugin]
-);
 
 /// 默认平台组合；精简宿主或定制宿主可以从自己的 Dill Catalog 解析其他组合。
 pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {

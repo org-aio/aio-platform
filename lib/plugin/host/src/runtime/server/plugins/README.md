@@ -159,7 +159,10 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 | --- | --- |
 | `DatabasePlugin` | 从唯一 `DatabaseProvider` 取得宿主拥有的 `PgPool`，停止时关闭；默认 `PostgresPlugin` 提供连接实现 |
 | `KeyringPlugin` | 从唯一 `KeyringProvider` 加载共享密钥；默认 `FileKeyringPlugin` 读取文件 |
-| `StorePlugin` | 依赖数据库，迁移平台表及清理开发会话的旧绑定 |
+| `StorePlugin` | 依赖数据库，迁移旧版插件目录及交付表、清理开发会话旧绑定；不创建设备、网页通道、配置或剪贴板表 |
+| `WorkerServicePlugin` | 依赖数据库，初始化设备配对、任务、终端及归档密钥表 |
+| `WorkerWebviewServicePlugin` | 依赖默认设备存储，初始化网页通道会话表 |
+| `PersonalConfigServicePlugin` / `ClipboardServicePlugin` | 依赖默认设备存储及密钥，分别初始化个人配置与剪贴板表 |
 | `RepositoryPlugin` | 提供包缓存与仓库能力 |
 | `ProcessPlugin` / `WasmPlugin` | 持有旧进程 / Wasm 执行资源，并负责停止 |
 | `RhaiPlugin` / `TypeScriptPlugin` | 向 Dill 提供对应的 `ScriptExecutor`，省略后不接受该语言 |
@@ -219,3 +222,18 @@ assembly.services
 ### 整包目录
 
 `PostgresComponentCatalogPlugin` 是默认 v2 目录提供者，依赖 `StorePlugin` 准备正式表。替换它时绑定 `dyn ComponentCatalog`，保留资源与执行器组合；默认实现不会作为缺失绑定的回退。文件目录夹具证明最小组合无需连接 PostgreSQL，公共管理路由的 v1 目录仍需数据库。持久化、并发提交及生命周期约束见 [ComponentCatalog](../component_catalog/README.md)。
+
+## 业务服务的持久化归属
+
+默认业务服务的装配入口是 `platform_services.rs`，每项服务在自己的初始化钩子中执行对应 `generated/<feature>/schema.sql`。一项迁移在同一事务内完成，失败回滚并使本代启动失败；停止和重新装配保留业务记录。先迁移依赖的设备表，再迁移引用它的网页和配置表，不依赖插件列表顺序。
+
+只运行配对 API 时装配 `PostgresPlugin`、`DatabasePlugin`、`WorkerServicePlugin`、`WorkersPlugin` 及身份提供者即可，不需要 `StorePlugin`、市场、执行器、密钥或包缓存。增加设备网页服务、个人配置或剪贴板时显式装配对应服务插件；仅有 `StorePlugin` 不再隐式准备这些业务表。默认网页、个人配置和剪贴板实现直接查询 PostgreSQL 设备表，所以依赖 `WorkerServicePlugin`。替换存储时应同时替换这些直接关联的默认实现；路由仍消费原有服务接口。
+
+真实数据库验收：
+
+```sh
+AIO_SERVICE_TEST_DATABASE_URL=postgresql://.../service_test \
+  cargo test -p az-plugin-host --no-default-features --features server --lib plugins::platform_services_tests -- --ignored --test-threads=1
+```
+
+测试使用隔离 schema 验证未装配服务不建表、无旧版目录的配对与加密内容持久化、租户隔离、重启恢复和故障迁移回滚。v1 目录本身及交付存储仍使用 PostgreSQL，此改动不等于它们已经可替换。

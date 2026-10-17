@@ -15,8 +15,7 @@ use az_plugin_host::{
         RuntimeState,
         http_error::RuntimeError,
         plugins::{
-            ClipboardPlugin, DatabasePlugin, PostgresPlugin, RuntimeAssembly, StorePlugin,
-            WorkerServicePlugin,
+            ClipboardPlugin, DatabasePlugin, PostgresPlugin, RuntimeAssembly, WorkerServicePlugin,
         },
     },
 };
@@ -119,7 +118,6 @@ async fn external_plugin_replaces_builtin_service_without_replacing_authenticati
     let plugins: Vec<DynPlugin<RuntimeAssembly>> = vec![
         Arc::new(ClipboardPlugin),
         Arc::new(WorkerServicePlugin),
-        Arc::new(StorePlugin),
         Arc::new(DatabasePlugin),
         Arc::new(PostgresPlugin),
         Arc::new(ReplacementPlugin),
