@@ -1,15 +1,17 @@
 mod access;
-#[cfg(test)]
+#[cfg(all(test, feature = "postgres"))]
 mod access_tests;
 mod backends;
 pub(in crate::runtime::server) mod bootstrap;
 mod catalog;
 mod controller;
+#[cfg(feature = "postgres")]
 mod delivery;
-#[cfg(test)]
+#[cfg(all(test, feature = "postgres"))]
 mod delivery_tests;
 mod development;
 #[cfg(all(test, feature = "wasm", feature = "sidecar"))]
+#[cfg(feature = "postgres")]
 mod development_tests;
 mod dispatch;
 pub(in crate::runtime::server) mod execution;
@@ -18,16 +20,19 @@ mod frontend;
 mod frontend_images;
 mod frontend_management;
 #[cfg(all(test, feature = "wasm", feature = "sidecar"))]
+#[cfg(feature = "postgres")]
 mod host_access_tests;
 mod installation;
 mod management;
 #[cfg(all(test, feature = "wasm", feature = "sidecar"))]
+#[cfg(feature = "postgres")]
 mod management_tests;
 mod model;
 mod permissions;
 #[cfg(feature = "sidecar")]
 pub(in crate::runtime::server) mod process;
 #[cfg(all(test, feature = "sidecar"))]
+#[cfg(feature = "postgres")]
 mod process_publication_tests;
 mod resources;
 pub(in crate::runtime::server) mod services;

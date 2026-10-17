@@ -216,7 +216,10 @@ async fn changes(
         tokio::time::Instant::now() + std::time::Duration::from_secs(u64::from(request.wait));
     loop {
         if let Some(device) = &owner.device {
-            let active:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM worker_devices WHERE id=$1 AND tenant_id=$2 AND user_id=$3 AND state='active' AND capabilities ? 'config.sync')").bind(device).bind(&owner.tenant).bind(&owner.user).fetch_one(state.service::<sqlx::PgPool>()?.as_ref()).await?;
+            let active = state
+                .service::<dyn crate::generated::worker::WorkerService>()?
+                .capability_active(&owner.tenant, &owner.user, device, "config.sync")
+                .await?;
             if !active {
                 return Err(RuntimeError::forbidden("设备未启用个人配置同步"));
             }

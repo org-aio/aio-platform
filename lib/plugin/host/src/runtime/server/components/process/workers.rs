@@ -199,6 +199,10 @@ fn validate_application(application: &str) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "postgres"))]
 #[path = "workers_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "worker_validation_tests.rs"]
+mod validation_tests;

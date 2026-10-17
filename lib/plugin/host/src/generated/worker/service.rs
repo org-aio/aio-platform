@@ -11,6 +11,18 @@ pub trait WorkerService: Any + Send + Sync {
     async fn approve(&self, session: &SessionContext, code: &str) -> Result<()>;
     async fn poll(&self, token: &str) -> Result<String>;
     async fn identity(&self, token: &str) -> Result<DeviceIdentity>;
+    /// 实时复核设备归属、活动状态与显式能力，供长轮询在等待期间检查撤权。
+    async fn capability_active(
+        &self,
+        tenant: &str,
+        user: &str,
+        device: &str,
+        capability: &str,
+    ) -> Result<bool>;
+    /// 设备凭据只允许为自身开关 Skill 同步。
+    async fn skills_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()>;
+    /// 原子选定用户的归档密钥密文；并发请求必须返回同一密文，不覆盖已有值。
+    async fn archive_key(&self, device: &DeviceIdentity, candidate: Vec<u8>) -> Result<Vec<u8>>;
     async fn list(&self, session: &SessionContext) -> Result<Vec<Worker>>;
     async fn revoke(&self, session: &SessionContext, id: &str) -> Result<()>;
     async fn enqueue(&self, session: &SessionContext, request: SubmitTask) -> Result<Task>;
@@ -88,3 +100,14 @@ pub trait WorkerService: Any + Send + Sync {
         request: CompleteTask,
     ) -> Result<()>;
 }
+
+/// 提供者用此错误上下文标记可重试的后端故障，协议层不判断具体数据库类型。
+#[derive(Debug)]
+pub struct WorkerServiceUnavailable;
+
+impl std::fmt::Display for WorkerServiceUnavailable {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("设备服务后端暂不可用")
+    }
+}
+impl std::error::Error for WorkerServiceUnavailable {}

@@ -70,6 +70,6 @@ pub(super) async fn invoke(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "postgres"))]
 #[path = "enhancements_tests.rs"]
 mod tests;

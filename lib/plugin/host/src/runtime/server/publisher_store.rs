@@ -35,26 +35,6 @@ CREATE SEQUENCE IF NOT EXISTS plugin_publish_requests_seq;
 ALTER TABLE plugin_publish_jobs ADD COLUMN IF NOT EXISTS request_order BIGINT NOT NULL DEFAULT nextval('plugin_publish_requests_seq');
 "#;
 
-/// 持久发布任务，由管理插件恢复和执行。
-#[derive(Clone)]
-pub struct PublishJob {
-    pub id: String,
-    pub tenant_id: String,
-    pub source_id: String,
-    pub git: String,
-    pub revision: String,
-    pub runtime: PluginRuntime,
-    pub page_count: usize,
-    pub state: PublishState,
-    pub detail: String,
-}
-
-/// 发布凭据的租户与来源绑定。
-pub struct PublisherBinding {
-    pub tenant_id: String,
-    pub git: String,
-}
-
 pub(super) async fn migrate(pool: &PgPool) -> Result<()> {
     sqlx::Executor::execute(pool, sqlx::raw_sql(SCHEMA))
         .await

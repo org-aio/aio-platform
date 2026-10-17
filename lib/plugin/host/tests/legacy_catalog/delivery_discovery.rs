@@ -155,6 +155,7 @@ async fn discovery_survives_etags_rejects_stale_responses_and_unloads_without_st
     let mut selected = selection(catalog.clone(), true);
     selected.push(server.plugin());
     let mut host = Host::start_configured(configured(root.path()), selected.clone()).await?;
+    #[cfg(feature = "postgres")]
     assert!(host.state.service::<sqlx::PgPool>().is_err());
     let a = source_when(&catalog, |s| {
         s.enabled && s.source_revision == "a".repeat(40)
@@ -302,6 +303,7 @@ async fn discovery_requires_one_source_provider_and_rebuilds_it_online() -> Resu
     .await?;
     let old = source_when(&first, |s| s.enabled).await?;
     assert!(host.state.service::<dyn DeliveryService>().is_err());
+    #[cfg(feature = "postgres")]
     assert!(host.state.service::<sqlx::PgPool>().is_err());
     *server.api.revision.lock().await = "b".repeat(40);
     host.reconfigure(vec![

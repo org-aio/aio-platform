@@ -109,7 +109,7 @@ pub(crate) async fn device(
         .identity(&token(headers)?)
         .await
         .map_err(|error| {
-            if error.downcast_ref::<sqlx::Error>().is_some() {
+            if error.is::<super::WorkerServiceUnavailable>() {
                 RuntimeError::unavailable("设备认证服务暂不可用")
             } else {
                 RuntimeError::unauthorized("设备尚未配对或已撤销")
@@ -257,7 +257,7 @@ async fn claim(
 }
 
 fn worker_error(error: anyhow::Error) -> RuntimeError {
-    if error.downcast_ref::<sqlx::Error>().is_some() {
+    if error.is::<super::WorkerServiceUnavailable>() {
         RuntimeError::unavailable("设备任务服务暂不可用")
     } else {
         error.into()
@@ -604,4 +604,30 @@ async fn complete(
         .await
         .map_err(worker_error)?;
     Ok(response(()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::response::IntoResponse;
+    #[tokio::test]
+    async fn provider_failure_is_retryable_without_exposing_storage_details() -> anyhow::Result<()>
+    {
+        let error = anyhow::anyhow!("private backend connection")
+            .context(crate::generated::worker::WorkerServiceUnavailable);
+        let response = worker_error(error).into_response();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::SERVICE_UNAVAILABLE
+        );
+        let bytes = axum::body::to_bytes(response.into_body(), 1024).await?;
+        assert!(!String::from_utf8(bytes.to_vec())?.contains("private backend"));
+        assert_eq!(
+            worker_error(anyhow::anyhow!("任务租约失效"))
+                .into_response()
+                .status(),
+            axum::http::StatusCode::BAD_REQUEST
+        );
+        Ok(())
+    }
 }

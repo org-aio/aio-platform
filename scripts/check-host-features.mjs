@@ -3,10 +3,13 @@ import { execFileSync } from 'node:child_process';
 
 // 只核对生产与构建依赖，测试客户端不应改变发布宿主的编译边界。
 const profiles = [
-  'components', 'server', 'sidecar', 'wasm', 'rhai', 'typescript', 'mcp', 'grpc',
+  'components', 'server', 'postgres', 'sidecar', 'wasm', 'rhai', 'typescript', 'mcp', 'grpc',
   'remote-mcp', 'remote-grpc', 'remote', 'wasm,sidecar,rhai,typescript,mcp,grpc,remote',
+  'postgres,wasm,sidecar,rhai,typescript,mcp,grpc,remote',
 ];
 const implementations = [
+  { features: ['postgres'], packages: /^sqlx($|-)/ },
+  { features: ['postgres'], packages: /^sqlparser$/ },
   { features: ['wasm'], packages: /^(wasmtime|cranelift)(-|$)/ },
   { features: ['rhai'], packages: /^rhai$/ },
   { features: ['typescript'], packages: /^(rquickjs($|-)|oxc_)/ },
@@ -24,9 +27,9 @@ for (const profile of profiles) {
   ], { encoding: 'utf8' });
   const dependencies = [...new Set(tree.split('\n').map(line => line.split(' ')[0]))];
   const selected = new Set(profile.split(','));
-  if (profile === 'components') {
+  if (!selected.has('postgres')) {
     assert.equal(dependencies.some(name => /^(sqlx($|-)|sqlparser$)/.test(name)), false,
-      'components contracts must not select a database implementation');
+      `${profile}: must not select a database implementation`);
   }
   for (const { features, packages } of implementations) {
     const enabled = features.some(feature => selected.has(feature));

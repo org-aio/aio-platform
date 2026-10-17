@@ -17,9 +17,9 @@ use super::{
     frontend_document,
     frontend_model::{FrontendRequest, MountRequest, MountResponse},
     http_error::RuntimeError,
+    plugin_catalog::PageBinding,
     request_context::{authenticate, permitted},
     service_dispatch::{ServiceCall, dispatch},
-    store::PageBinding,
 };
 use crate::runtime::{PageBody, RuntimeResponse};
 

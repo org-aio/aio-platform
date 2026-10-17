@@ -49,6 +49,7 @@ impl Fixture {
         let host =
             RuntimeHost::initialize_with_router(configuration, plugins.clone(), |state, router| {
                 assert!(state.service::<ScriptRuntime>().is_err());
+                #[cfg(feature = "postgres")]
                 assert!(state.service::<sqlx::PgPool>().is_err());
                 assert!(state.service::<az_plugin_runtime::Keyring>().is_err());
                 Ok(router)
@@ -100,14 +101,19 @@ impl Drop for Fixture {
 #[tokio::test]
 async fn protocol_only_defaults_do_not_install_script_services_and_identity_is_required()
 -> Result<()> {
-    let plugins = default_plugins()?;
-    if !cfg!(any(feature = "rhai", feature = "typescript")) {
-        assert!(
-            !plugins
-                .iter()
-                .any(|plugin| plugin.as_ref().type_id() == TypeId::of::<ScriptRuntimePlugin>())
-        );
-        assert!(!plugins.iter().any(|plugin| plugin.as_ref().type_id() == TypeId::of::<EnhancementServicePlugin>()));
+    #[cfg(feature = "postgres")]
+    {
+        let plugins = default_plugins()?;
+        if !cfg!(any(feature = "rhai", feature = "typescript")) {
+            assert!(
+                !plugins
+                    .iter()
+                    .any(|plugin| plugin.as_ref().type_id() == TypeId::of::<ScriptRuntimePlugin>())
+            );
+            assert!(!plugins.iter().any(
+                |plugin| plugin.as_ref().type_id() == TypeId::of::<EnhancementServicePlugin>()
+            ));
+        }
     }
     let root = tempfile::tempdir()?;
     let mut anonymous: Vec<DynPlugin<RuntimeAssembly>> = vec![Arc::new(CapabilityServicePlugin)];

@@ -1,8 +1,11 @@
 //! 增强持久化契约；语言运行时、演进策略及所有传输共享同一个提供者。
 
 mod model;
+#[cfg(feature = "postgres")]
 mod observations;
+#[cfg(feature = "postgres")]
 mod postgres;
+#[cfg(feature = "postgres")]
 mod postgres_rows;
 
 use std::{any::Any, future::Future, pin::Pin};
@@ -11,6 +14,7 @@ use anyhow::Result;
 use az_plugin_enhancement::Package;
 
 pub use model::{Activation, Event, Head, Observation, Revision};
+#[cfg(feature = "postgres")]
 pub use postgres::PostgresEnhancementCatalog;
 
 /// 宿主创建的提交前复核；存储取得写锁并完成校验后必须等待它，再提交事务。

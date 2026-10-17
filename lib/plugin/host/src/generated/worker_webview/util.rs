@@ -1,6 +1,8 @@
 use anyhow::{Result, ensure};
+#[cfg(feature = "postgres")]
 use sha2::{Digest, Sha256};
 
+#[cfg(feature = "postgres")]
 pub(super) fn digest(value: &str) -> String {
     format!("{:x}", Sha256::digest(value.as_bytes()))
 }

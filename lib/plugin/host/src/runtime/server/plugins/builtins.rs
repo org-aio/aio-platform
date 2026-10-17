@@ -1,16 +1,21 @@
-#[cfg(any(feature = "wasm", feature = "sidecar"))]
+#[cfg(all(feature = "postgres", any(feature = "wasm", feature = "sidecar")))]
 use super::{component_execution::*, component_resources::*};
 use std::any::TypeId;
 
+#[cfg(feature = "postgres")]
 use anyhow::Result;
-use az_plugin_core::{DynPlugin, Plugin, PluginFuture};
+#[cfg(feature = "postgres")]
+use az_plugin_core::DynPlugin;
+use az_plugin_core::{Plugin, PluginFuture};
+#[cfg(feature = "postgres")]
 use dill::CatalogBuilder;
 
 use super::super::plugin_catalog::PluginCatalog;
 use super::{
     CapabilityServicePlugin, RuntimeAssembly, enhancement_execution::*, infrastructure::*,
-    platform_services::*,
 };
+#[cfg(feature = "postgres")]
+use super::{platform_services::*, postgres::*};
 use crate::generated::{clipboard, personal_config, worker, worker_webview};
 
 // 每项能力声明自己的服务、路由和具体类型依赖；宏只展开同一套注册步骤。
@@ -74,9 +79,11 @@ route_plugin!(NavigationPlugin, [], [dyn PluginCatalog], |_| {
     super::super::navigation::router()
 });
 /// 默认工具业务跨表查询，显式依赖 PostgreSQL 目录提供者。
+#[cfg(feature = "postgres")]
 #[dill::component]
 #[dill::interface(dyn Plugin<RuntimeAssembly>)]
 pub struct ToolsPlugin;
+#[cfg(feature = "postgres")]
 impl Plugin<RuntimeAssembly> for ToolsPlugin {
     fn dependencies(&self) -> Vec<TypeId> {
         vec![
@@ -198,6 +205,7 @@ route_plugin!(DeliveryPlugin, [], [dyn super::super::delivery::DeliveryService, 
 route_plugin!(DocumentationPlugin, [], [], optional[dyn super::super::delivery::PluginDocumentation, dyn super::super::delivery::DeliveryService, super::super::components::Components], |_| super::super::delivery::documents::router());
 
 /// 默认平台组合；精简宿主或定制宿主可以从自己的 Dill Catalog 解析其他组合。
+#[cfg(feature = "postgres")]
 pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
     let mut catalog = CatalogBuilder::new();
     catalog

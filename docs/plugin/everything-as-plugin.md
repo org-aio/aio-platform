@@ -29,7 +29,7 @@
 - 数据库、共享密钥、包缓存、进程、Wasm 与组件执行环境由所选插件初始化和关闭；自定义 HTTP 宿主可使用无效数据库配置启动，不读取密钥或创建引擎。数据库连接及密钥来源有可替换 Provider。
 - 组件环境可完全省略增强服务，照常安装、恢复和执行组件；缺失服务时拒绝增强调用。可选服务通过同一 Dill 容器解析，参与初始化排序与在线依赖重建，重复绑定和构造失败仍返回错误。
 - 组件数据库与对象后端由独立 Provider 创建，默认 PostgreSQL 和文件实现可以省略。Wasm、Sidecar 数据库和外部执行器共用租户资源校验；对象命名空间与大小限制保留在运行时，资源关闭包含部分初始化失败及 panic 补偿。
-- 执行运行时的租户数据库、事务值模型和发布记录已改为中立契约：`DatabaseBackend`、`DatabaseTransaction`、`ComponentReleases` 与版本读租约。`wasm` 不引入 SQLx/SQL parser，`postgres` 不引入 Wasmtime；默认 PostgreSQL 实现沿用角色隔离、受控迁移、原发布表及审计。运行时统一执行配额、取消、失败回滚及来源/租户校验；Sidecar 消费后端声明的专属连接及 TCP/Unix 代理信息。真实 SQLite 测试替代数据和发布存储，覆盖 WIT 读写、独立连接的并发激活、取消排空、重启恢复及提交失败，生产默认仍为 PostgreSQL。宿主平台安装与发布目录自身仍使用 SQLx/PostgreSQL。
+- 执行运行时的租户数据库、事务值模型和发布记录已改为中立契约：`DatabaseBackend`、`DatabaseTransaction`、`ComponentReleases` 与版本读租约。`wasm` 不引入 SQLx/SQL parser，`postgres` 不引入 Wasmtime；默认 PostgreSQL 实现沿用角色隔离、受控迁移、原发布表及审计。运行时统一执行配额、取消、失败回滚及来源/租户校验；Sidecar 消费后端声明的专属连接及 TCP/Unix 代理信息。真实 SQLite 测试替代数据和发布存储，覆盖 WIT 读写、独立连接的并发激活、取消排空、重启恢复及提交失败，生产默认仍为 PostgreSQL。宿主默认安装与发布目录仍使用 PostgreSQL，编译由独立 `postgres` feature 控制。
 - 身份、发布与实时权限策略、可选计费通过三个独立 Provider 向 Dill 绑定。启动器只接收插件组合，匿名自定义宿主不需要空身份实现；缺失或重复提供者在初始化前拒绝。HTTP、MCP、gRPC、增强和 Sidecar 共享身份实例，业务策略仍保留提交前撤权校验。原生提供者可通过 `RuntimeHost` 在线重建；此项不等于产品系统插件动态交付。
 - 宿主生命周期包含部分启动失败补偿、协作取消、后台任务等待、请求关闭和反序资源释放；停止保留安装记录与活动版本，清理错误会汇总返回。
 - `aio-idea` 已使用 `RuntimeHost` 在线组合，部署方文件可启停 Rhai、TypeScript、Wasm、Sidecar、MCP、gRPC、演进控制及文件、权限、租户服务，重建真实身份服务和数据库。系统 Service、Controller 与运行时使用同一个 Dill 容器；每代按依赖初始化，停用关闭连接池并移除路由，重新启用创建新实例并保留数据。身份重启会重建依赖它的系统服务及适配器，会话保持有效。字典和市场已移除宿主编译依赖；其余系统实现和 UI 仍静态装配。
@@ -40,13 +40,15 @@
 - 市场已从 `aio-idea` 的静态前后端依赖、账户入口和原生服务组合中移出，以 v2 Wasm 整包动态贡献工作区及账户页面。真实产品、PostgreSQL 和 Chromium 覆盖固定摘要首次引导、安装/指定版本/升级/回滚、自升级/自停用、跨重启停用及显式恢复，宿主二进制摘要不变。另覆盖文档图片、逐字节下载、设置、分享/刷新/前后退/滚动及桌面/手机布局；CLI 的正式任务链使用模拟设备回报，本机助手只验收协议动作，未执行实际软件安装。见[市场整包验收](https://github.com/org-aio/aio-plugin-marketplace/blob/main/tests/README.md)。
 - Sidecar 停止先排空再等待容器清理，重启前只清理确认无存活容器的旧 Unix socket；普通文件和符号链接被拒绝。重新启用恢复已选摘要并保留回滚排除记录，不能隐式升级；真实权限、前端版本和数据库记录共同验收。
 
-- v2 整包目录通过 `ComponentCatalog` 独立装配，发布、安装、回滚、停用、首次引导、权限索引、Sidecar 密钥与用户记录、升级选择不再直接访问 PostgreSQL。默认实现保留正式表与交付同事务语义，安装提交检查代数。文件持久化夹具验证完全不连接 PostgreSQL 的最小自举/重启/卸载，以及不创建整包表的真实 HTTP 生命周期和失败补偿；默认实现另有跨连接并发验收。设备业务表、默认交付存储及 host 编译依赖仍未脱离 PostgreSQL，文件夹具不是生产提供者。见 [目录契约](../../lib/plugin/host/src/runtime/server/component_catalog/README.md)。
+- v2 整包目录通过 `ComponentCatalog` 独立装配，发布、安装、回滚、停用、首次引导、权限索引、Sidecar 密钥与用户记录、升级选择不再直接访问 PostgreSQL。默认实现保留正式表与交付同事务语义，安装提交检查代数。文件持久化夹具验证完全不连接 PostgreSQL 的最小自举/重启/卸载，以及不创建整包表的真实 HTTP 生命周期和失败补偿；默认实现另有跨连接并发验收。默认设备业务表和交付存储仍采用 PostgreSQL，host 的中立组合不编译该实现，文件夹具不是生产提供者。见 [目录契约](../../lib/plugin/host/src/runtime/server/component_catalog/README.md)。
 
-- v1 目录已通过 `PluginCatalog` 统一注入，公共管理、前端、安装恢复和发布任务不再取得具体目录连接池；包、安装、页面状态、发布顺序及导航偏好由同一提供者保证一致性。文件持久化夹具以无效数据库配置验证真实 HTTP 生命周期、重启恢复、撤权及提交失败后的执行器补偿。默认 PostgreSQL 交付和 CLI 工具仍明确依赖 `StorePlugin`；交付协议与文档入口已可独立替换，默认跨业务表查询和编译依赖仍待解耦。见 [旧版目录契约](../../lib/plugin/host/src/runtime/server/plugin_catalog/README.md)。
+- v1 目录已通过 `PluginCatalog` 统一注入，公共管理、前端、安装恢复和发布任务不再取得具体目录连接池；包、安装、页面状态、发布顺序及导航偏好由同一提供者保证一致性。文件持久化夹具以无效数据库配置验证真实 HTTP 生命周期、重启恢复、撤权及提交失败后的执行器补偿。默认 PostgreSQL 交付和 CLI 工具仍明确依赖 `StorePlugin`；交付协议与文档入口已可独立替换，默认跨业务表查询仍需进一步拆分；它们仅由 `postgres` feature 编译。见 [旧版目录契约](../../lib/plugin/host/src/runtime/server/plugin_catalog/README.md)。
 
 - 交付协议通过 `DeliveryService` 装配，文档通过 `PluginDocumentation` 装配；`DeliveryPlugin` 和 `DocumentationPlugin` 不再直接取得数据库。默认 PostgreSQL 协调器与文档实现各自拥有独立插件；发现、发布推进和滚动升级由独立插件按生命周期启动和排空。无数据库文件夹具覆盖真实 HTTP 构建领取、页面发布安装、重启恢复、文档图片、管理权限、提交失败和在线替换；默认实现保留跨表事务，v1 发布任务与构建完成状态现在原子提交，过期租约不能复活任务。GitHub 发现器消费中立 `DeliverySources` 契约，来源代数、撤销墓碑、任务入队及旧租约取消原子提交；可独立移除发现器或替换存储，已有构建仍能完成。默认自动升级独立于发布推进，停用自动升级仍可发布新包。真实 HTTP 替身、文件存储和 PostgreSQL 覆盖陈旧响应、故障回滚、重启与在线替换；队列租约、退避和默认时钟仍属各默认实现内部策略。见 [交付装配](../../lib/plugin/host/src/runtime/server/delivery/README.md)。
 
-- 增强版本持久化通过 `EnhancementCatalog` 独立装配，默认 PostgreSQL 提供者负责表初始化与原子提交。公共增强服务、双语言、演进策略和协议不再直接取得连接池；锁后授权复核、CAS、回滚资格、历史 schema 与审计保留事务语义。文件夹具覆盖无数据库配置的真实 HTTP/MCP/gRPC、在线提供者替换、重启、提交失败及停用恢复；共同事务验收使用文件提供者与独立 PostgreSQL 连接。正式默认仍为 PostgreSQL，宿主其他业务的 SQLx 编译依赖尚未移除。见[增强存储契约](../../lib/plugin/host/src/runtime/server/enhancement_catalog/README.md)。
+- 增强版本持久化通过 `EnhancementCatalog` 独立装配，默认 PostgreSQL 提供者负责表初始化与原子提交。公共增强服务、双语言、演进策略和协议不再直接取得连接池；锁后授权复核、CAS、回滚资格、历史 schema 与审计保留事务语义。文件夹具覆盖无数据库配置的真实 HTTP/MCP/gRPC、在线提供者替换、重启、提交失败及停用恢复；共同事务验收使用文件提供者与独立 PostgreSQL 连接。正式默认仍为 PostgreSQL，宿主默认业务的 SQLx 实现由独立 `postgres` feature 选择。见[增强存储契约](../../lib/plugin/host/src/runtime/server/enhancement_catalog/README.md)。
+
+- 宿主 PostgreSQL 实现由显式 `postgres` feature 编译，`server`、Rhai、TypeScript、Wasm、Sidecar 与 MCP/gRPC 入站/出站组合不引入 SQLx 或 SQL parser。公共模型、包恢复与 GitHub 发现器保留在中立边界；设备长轮询、Skill 授权与归档密钥改用服务契约。文件夹具直接运行 v1/v2 真实 HTTP 安装、升级、回滚和重启；默认提供者保留事务与可重试故障语义。正式产品与开发宿主仍显式选择 PostgreSQL，不把文件夹具当生产存储。
 
 这些进展不代表以下完整验收已经通过。
 
@@ -54,7 +56,7 @@
 
 | 要求 | 完成所需证据 | 当前缺口 |
 | --- | --- | --- |
-| 最小内核只负责契约与机制 | 依赖图证明内核不依赖业务和具体基础设施；启动一个精简宿主 | 最小核心与无数据库 HTTP 宿主已覆盖；Wasm/Sidecar、双语言及入站/出站协议编译边界已分开；组件可不装配增强服务，组件资源与执行槽发布存储已可替换，独立执行运行时可完全省略 PostgreSQL 驱动；宿主 crate 的数据库、HTTP 管理及其余基础设施编译依赖仍需拆分 |
+| 最小内核只负责契约与机制 | 依赖图证明内核不依赖业务和具体基础设施；启动一个精简宿主 | 最小核心与无数据库 HTTP 宿主已覆盖；Wasm/Sidecar、双语言及入站/出站协议编译边界已分开；组件可不装配增强服务，组件资源与执行槽发布存储已可替换，独立执行运行时与宿主 crate 的 server、双语言、执行器和协议组合均可省略 PostgreSQL 驱动；其余 HTTP 管理及基础设施编译边界仍需拆分 |
 | 平台服务可替换 | 身份、授权策略、数据、对象存储、调度、观测均能替换实现；所有入口消费同一实例 | 已统一四类服务、路由、数据库连接与密钥来源；身份、发布与实时授权、可选计费及组件数据库与对象后端已可替换；执行槽数据和发布存储已通过真实替代后端验收；v2 整包目录及发布索引已可替换，v1 目录也已通过统一契约接入，交付与文档接口已可替换，增强版本存储也已独立装配；默认队列及业务数据模型仍要求 PostgreSQL，其余服务待迁移 |
 | 完整生命周期 | 缺失依赖、循环、部分启动失败、取消、逆序停用与资源释放的故障验收 | 已覆盖启动失败、等待取消、反序关闭、任务清理及协议收尾；RuntimeHost 已实现原生组合在线卸载、按类型重启及依赖重建，覆盖无关单例/任务保留、请求排空、初始化和路由装配失败后的恢复与 MCP/gRPC 连续调用；产品系统服务资源、应用路由及持久启动组合已接入，宿主内未协作原生插件的外部强制终止仍待实现 |
 | 执行器也是插件 | Wasm、sidecar、Rhai、TypeScript 通过执行器契约接入；新增执行器不改核心分支 | Rhai/TypeScript 与 Wasm/Sidecar 均可通过执行器契约替换；外部实现覆盖正式发布、HTTP、跨执行器升级与回滚、提交失败和重新初始化恢复。内置实现按 feature 分离；v1 的校验与执行共用已选提供者，替代实现无需编译 Wasmtime。替身验证契约替换性，未将其作为额外生产引擎发布 |

@@ -1,18 +1,24 @@
+use super::model;
+#[cfg(all(feature = "postgres", any(feature = "wasm", feature = "sidecar")))]
 use super::*;
+#[cfg(feature = "postgres")]
 use anyhow::Result;
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "postgres", feature = "wasm"))]
 use anyhow::ensure;
+#[cfg(feature = "postgres")]
 use az_plugin_bundle::Bundle;
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "postgres", feature = "wasm"))]
 use sqlx::PgPool;
+#[cfg(feature = "postgres")]
 use std::fs;
+#[cfg(feature = "postgres")]
 use std::path::Path;
 
-#[cfg(any(feature = "wasm", feature = "sidecar"))]
+#[cfg(all(feature = "postgres", any(feature = "wasm", feature = "sidecar")))]
 pub(super) fn default_executors() -> Result<Arc<ComponentExecutors>> {
     use super::execution::ComponentExecutor;
     let mut catalog = dill::CatalogBuilder::new();
-    #[cfg(feature = "wasm")]
+    #[cfg(all(feature = "postgres", feature = "wasm"))]
     {
         use super::executors::WasmComponentExecutor;
         catalog
@@ -32,8 +38,10 @@ pub(super) fn default_executors() -> Result<Arc<ComponentExecutors>> {
         .get::<dill::OneOf<ComponentExecutors>>()?)
 }
 
+#[cfg(feature = "postgres")]
 #[derive(Default)]
 pub(super) struct TestIdentity;
+#[cfg(feature = "postgres")]
 #[async_trait::async_trait]
 impl crate::identity::IdentityProvider for TestIdentity {
     async fn authenticate(
@@ -50,6 +58,7 @@ impl crate::identity::IdentityProvider for TestIdentity {
     }
 }
 
+#[cfg(feature = "postgres")]
 #[async_trait::async_trait]
 impl crate::authorization::AuthorizationProvider for TestIdentity {
     async fn can_publish(&self, _: &crate::identity::SessionContext) -> anyhow::Result<bool> {
@@ -57,6 +66,7 @@ impl crate::authorization::AuthorizationProvider for TestIdentity {
     }
 }
 
+#[cfg(feature = "postgres")]
 pub(super) fn package(
     root: &Path,
     git: &str,
@@ -90,7 +100,7 @@ pub(super) fn package(
     )
 }
 
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "postgres", feature = "wasm"))]
 #[tokio::test]
 #[ignore = "需要独立本机 PostgreSQL 和已构建 WIT Component"]
 async fn published_components_install_optionally_and_restore() -> Result<()> {

@@ -53,11 +53,11 @@ fn retain_installed_or_listed(removed: &HashSet<String>, entries: &mut Vec<Marke
     entries.retain(|entry| entry.installed || !removed.contains(&entry.git));
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "postgres"))]
 #[path = "marketplace_removal_tests.rs"]
 mod tests;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "postgres"))]
 mod unit_tests {
     use super::*;
 

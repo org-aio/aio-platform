@@ -8,6 +8,7 @@ use az_plugin_host::{
     runtime::server::{RuntimeState, plugins::*},
 };
 use serde_json::{Value, json};
+#[cfg(feature = "postgres")]
 use sqlx::PgPool;
 use std::{
     collections::HashMap,
@@ -25,6 +26,7 @@ pub struct Probe {
     pub context: Mutex<Option<ExecutionContext>>,
     pub active: Mutex<HashMap<(Uuid, String), Arc<VerifiedBundle>>>,
     pub events: Mutex<Vec<&'static str>>,
+    #[cfg(feature = "postgres")]
     pub pool: Mutex<Option<Arc<PgPool>>>,
     pub fail_activate: AtomicBool,
     pub pause_activate: AtomicBool,
@@ -51,12 +53,15 @@ impl<const ID: u8> ComponentExecutor for Replacement<ID> {
     async fn initialize(&self, context: ExecutionContext) -> Result<()> {
         *self.0.context.lock().await = Some(context.clone());
         self.0.events.lock().await.push("initialize");
-        let services = context.services()?;
-        *self.0.pool.lock().await = if services.builders_for::<PgPool>().count() == 0 {
-            None
-        } else {
-            Some(services.get_one::<PgPool>()?)
-        };
+        #[cfg(feature = "postgres")]
+        {
+            let services = context.services()?;
+            *self.0.pool.lock().await = if services.builders_for::<PgPool>().count() == 0 {
+                None
+            } else {
+                Some(services.get_one::<PgPool>()?)
+            };
+        }
         self.0.entered.notify_one();
         match self.0.initialization.load(Ordering::SeqCst) {
             1 => anyhow::bail!("测试初始化失败"),
@@ -264,14 +269,19 @@ pub fn config(root: &Path, database: &str, origin: &str) -> HostConfig {
 pub fn plugins(probes: [Arc<Probe>; 2], surfaces: bool) -> Vec<DynPlugin<RuntimeAssembly>> {
     let mut plugins: Vec<DynPlugin<RuntimeAssembly>> = vec![
         Arc::new(ComponentsPlugin),
+        #[cfg(feature = "postgres")]
         Arc::new(PostgresComponentCatalogPlugin),
         Arc::new(ComponentResourcesPlugin),
+        #[cfg(feature = "postgres")]
         Arc::new(PostgresComponentPlugin),
         Arc::new(FileObjectStoragePlugin),
         Arc::new(ComponentExecutionPlugin),
         Arc::new(Replacements(probes)),
+        #[cfg(feature = "postgres")]
         Arc::new(StorePlugin),
+        #[cfg(feature = "postgres")]
         Arc::new(DatabasePlugin),
+        #[cfg(feature = "postgres")]
         Arc::new(PostgresPlugin),
         Arc::new(KeyringPlugin),
         Arc::new(FileKeyringPlugin),
@@ -287,7 +297,7 @@ pub fn plugins(probes: [Arc<Probe>; 2], surfaces: bool) -> Vec<DynPlugin<Runtime
     }
     plugins
 }
-
+#[cfg(feature = "postgres")]
 pub async fn database() -> Result<String> {
     let database = std::env::var("AIO_COMPONENT_TEST_DATABASE_URL")?;
     let url = reqwest::Url::parse(&database)?;
@@ -336,6 +346,7 @@ pub struct Host {
     server: tokio::task::JoinHandle<std::io::Result<()>>,
 }
 impl Host {
+    #[cfg(feature = "postgres")]
     pub async fn start(
         root: &Path,
         database: &str,
@@ -344,6 +355,7 @@ impl Host {
     ) -> Result<Self> {
         Self::start_with_identity(root, database, Arc::new(Identity(tenant.into())), probes).await
     }
+    #[cfg(feature = "postgres")]
     pub async fn start_with_identity<P>(
         root: &Path,
         database: &str,
@@ -479,7 +491,7 @@ pub async fn success(response: reqwest::Response) -> Result<Value> {
     ensure!(status.is_success(), "HTTP {status}: {text}");
     Ok(serde_json::from_str(&text)?)
 }
-
+#[cfg(feature = "postgres")]
 pub async fn committed_failure(pool: &PgPool, bundle: &Bundle) -> Result<()> {
     // 延迟约束在 COMMIT 才失败，验证候选已上线但安装事务无法提交时的补偿。
     let sql = format!(
@@ -489,7 +501,7 @@ pub async fn committed_failure(pool: &PgPool, bundle: &Bundle) -> Result<()> {
     sqlx::raw_sql(&sql).execute(pool).await?;
     Ok(())
 }
-
+#[cfg(feature = "postgres")]
 pub async fn clear_failure(pool: &PgPool) -> Result<()> {
     sqlx::raw_sql("DROP TRIGGER reject_executor_commit ON component_installations; DROP FUNCTION reject_executor_commit();").execute(pool).await?;
     Ok(())

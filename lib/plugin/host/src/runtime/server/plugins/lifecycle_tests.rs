@@ -383,6 +383,7 @@ async fn shutdown_rejects_new_http_requests_and_drains_handlers_and_streams() ->
 
 #[tokio::test]
 #[ignore = "需要独立本机 PostgreSQL"]
+#[cfg(feature = "postgres")]
 async fn shutdown_leaves_unclaimed_publications_durable() -> Result<()> {
     let database = std::env::var("AIO_ENHANCEMENT_TEST_DATABASE_URL")?;
     anyhow::ensure!(

@@ -53,11 +53,12 @@ jobs:
       - name: 验证精简宿主与独立执行器编译边界
         run: |
           node scripts/check-host-features.mjs
-          for executor_profile in components server wasm sidecar rhai typescript mcp grpc remote-mcp remote-grpc remote; do
+          for executor_profile in components server postgres wasm,sidecar,rhai,typescript,mcp,grpc,remote postgres,wasm,sidecar,rhai,typescript,mcp,grpc,remote wasm sidecar rhai typescript mcp grpc remote-mcp remote-grpc remote; do
             cargo clippy -p az-plugin-host --no-default-features --features "$executor_profile" --lib -- -D warnings
             cargo clippy -p az-plugin-host --no-default-features --features "$executor_profile" --all-targets -- -D warnings
           done
           cargo test -p az-plugin-host --no-default-features --features server
+          cargo test -p az-plugin-host --no-default-features --features rhai,typescript,mcp,grpc --test enhancement_catalog
           for language_profile in rhai typescript; do
             cargo test -p az-plugin-host --no-default-features --features "$language_profile" --test executor_plugins
           done
@@ -80,17 +81,18 @@ jobs:
       - name: 验证增强持久化、隔离、并发激活与回滚
         run: |
           psql "$AIO_ENHANCEMENT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'REVOKE ALL ON SCHEMA public FROM PUBLIC;'
-          cargo test -p az-plugin-host --lib --features server,wasm,sidecar,rhai,typescript,mcp,grpc enhancements::tests -- --ignored --test-threads=1
-          cargo test -p az-plugin-host --lib --features server,wasm,sidecar,rhai,typescript,mcp,grpc plugins::tests -- --test-threads=1
-          cargo test -p az-plugin-host --lib --features server,wasm,sidecar,rhai,typescript,mcp,grpc plugins::infrastructure_tests -- --include-ignored --test-threads=1
-          cargo test -p az-plugin-host --lib --features server,wasm,sidecar,rhai,typescript,mcp,grpc plugins::lifecycle_tests -- --ignored --test-threads=1
-          cargo test -p az-plugin-host --features server,wasm,sidecar,rhai,typescript,mcp,grpc --test service_plugins -- --ignored
+          cargo test -p az-plugin-host --features postgres,rhai,typescript,mcp,grpc --test enhancement_catalog -- --include-ignored --test-threads=1
+          cargo test -p az-plugin-host --lib --features postgres,server,wasm,sidecar,rhai,typescript,mcp,grpc enhancements::tests -- --ignored --test-threads=1
+          cargo test -p az-plugin-host --lib --features postgres,server,wasm,sidecar,rhai,typescript,mcp,grpc plugins::tests -- --test-threads=1
+          cargo test -p az-plugin-host --lib --features postgres,server,wasm,sidecar,rhai,typescript,mcp,grpc plugins::infrastructure_tests -- --include-ignored --test-threads=1
+          cargo test -p az-plugin-host --lib --features postgres,server,wasm,sidecar,rhai,typescript,mcp,grpc plugins::lifecycle_tests -- --ignored --test-threads=1
+          cargo test -p az-plugin-host --features postgres,server,wasm,sidecar,rhai,typescript,mcp,grpc --test service_plugins -- --ignored
           for protocol_profile in mcp grpc; do
-            cargo test -p az-plugin-host --no-default-features --features "$protocol_profile" --test executor_plugins -- --include-ignored
+            cargo test -p az-plugin-host --no-default-features --features "postgres,$protocol_profile" --test executor_plugins -- --include-ignored
           done
           cargo build -p az-plugin-host --no-default-features --features remote --example mcp-stdio-fixture
-          cargo test -p az-plugin-host --lib --no-default-features --features remote,mcp,grpc,rhai,typescript protocols::tests -- --ignored --test-threads=1
-          cargo test -p az-plugin-host --lib --no-default-features --features sidecar,rhai,typescript sidecar_enhancements_bind_identity_grants_and_active_revision -- --ignored
+          cargo test -p az-plugin-host --lib --no-default-features --features postgres,remote,mcp,grpc,rhai,typescript protocols::tests -- --ignored --test-threads=1
+          cargo test -p az-plugin-host --lib --no-default-features --features postgres,sidecar,rhai,typescript sidecar_enhancements_bind_identity_grants_and_active_revision -- --ignored
         env:
           AIO_ENHANCEMENT_TEST_DATABASE_URL: postgresql://postgres:channel-test@127.0.0.1:5432/channel_test
           AIO_REMOTE_TEST_CREDENTIAL: remote-test
@@ -98,13 +100,15 @@ jobs:
           AIO_MCP_STDIO_TEST_TOKEN: stdio-test
           AIO_MCP_STDIO_HOST_SECRET: must-not-inherit
       - name: 验证业务服务独立持久化与失败恢复
-        run: cargo test -p az-plugin-host --no-default-features --features server --lib plugins::platform_services_tests -- --ignored --test-threads=1
+        run: cargo test -p az-plugin-host --no-default-features --features postgres,server --lib plugins::platform_services_tests -- --ignored --test-threads=1
         env:
           AIO_SERVICE_TEST_DATABASE_URL: postgresql://postgres:channel-test@127.0.0.1:5432/channel_test
       - name: 验证 sidecar 任务、设备视图消息、资源及撤权
         run: |
-          cargo test -p az-plugin-host --lib --features server,wasm,sidecar,rhai,typescript,mcp,grpc workspace_access_cancel_and_bridge_isolation -- --ignored
-          cargo test -p az-plugin-host --lib --features server,wasm,sidecar,rhai,typescript,mcp,grpc worker_webview -- --include-ignored
+          cargo test -p az-plugin-host --lib --features postgres,server,wasm,sidecar,rhai,typescript,mcp,grpc workspace_access_cancel_and_bridge_isolation -- --ignored
+          cargo test -p az-plugin-host --lib --features postgres,server,wasm,sidecar,rhai,typescript,mcp,grpc worker_webview -- --include-ignored
+          cargo test -p az-plugin-host --lib --features postgres,server,wasm,sidecar,rhai,typescript,mcp,grpc device_storage_contract_preserves_scope_atomic_keys_and_backend_errors -- --ignored
+          cargo test -p az-plugin-host --lib --features postgres,server,wasm,sidecar,rhai,typescript,mcp,grpc skill_grants_require_device_identity_preserve_other_capabilities_and_revoke -- --ignored
         env:
           AIO_TEST_DATABASE_URL: postgresql://postgres:channel-test@127.0.0.1:5432/channel_test
       - run: cargo build --manifest-path lib/plugin/runtime/tests/fixture/Cargo.toml --locked --release --target wasm32-wasip2 --target-dir target/fixture/healthy
@@ -115,26 +119,26 @@ jobs:
           psql "$AIO_ENHANCEMENT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE wasm_component_market_test;'
           psql "$AIO_COMPONENT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'REVOKE ALL ON SCHEMA public FROM PUBLIC;'
           psql "$AIO_WASM_COMPONENT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'REVOKE ALL ON SCHEMA public FROM PUBLIC;'
-          cargo test -p az-plugin-host --no-default-features --features server --test component_executors -- --include-ignored --test-threads=1
-          cargo test -p az-plugin-host --no-default-features --features server --lib persists_leases_rejects_obsolete -- --ignored
-          cargo test -p az-plugin-host --no-default-features --features wasm,sidecar --test component_executors resources:: -- --include-ignored --test-threads=1
+          cargo test -p az-plugin-host --no-default-features --features postgres,server --test component_executors -- --include-ignored --test-threads=1
+          cargo test -p az-plugin-host --no-default-features --features postgres,server --lib persists_leases_rejects_obsolete -- --ignored
+          cargo test -p az-plugin-host --no-default-features --features postgres,wasm,sidecar --test component_executors resources:: -- --include-ignored --test-threads=1
           cargo test -p az-plugin-runtime --no-default-features --features wasm --test database_backends -- --include-ignored
           AIO_TEST_DATABASE_URL="$AIO_COMPONENT_TEST_DATABASE_URL" cargo test -p az-plugin-runtime --no-default-features --features wasm,postgres --lib transaction_tests:: -- --include-ignored
           AIO_TEST_DATABASE_URL="$AIO_COMPONENT_TEST_DATABASE_URL" cargo test -p az-plugin-runtime --no-default-features --features postgres --lib database_parameters:: -- --ignored
-          AIO_TEST_DATABASE_URL="$AIO_COMPONENT_TEST_DATABASE_URL" cargo test -p az-plugin-host --no-default-features --features sidecar --lib sidecar_database_tunnel_preserves_checked_role_through_both_transports -- --ignored
+          AIO_TEST_DATABASE_URL="$AIO_COMPONENT_TEST_DATABASE_URL" cargo test -p az-plugin-host --no-default-features --features postgres,sidecar --lib sidecar_database_tunnel_preserves_checked_role_through_both_transports -- --ignored
           AIO_TEST_DATABASE_URL="$AIO_COMPONENT_TEST_DATABASE_URL" AIO_TEST_SECOND_DATABASE_URL="$AIO_WASM_COMPONENT_TEST_DATABASE_URL" cargo test -p az-plugin-runtime --no-default-features --features postgres --lib persistence:: -- --ignored --test-threads=1
           AIO_TEST_DATABASE_URL="$AIO_COMPONENT_TEST_DATABASE_URL" cargo test -p az-plugin-runtime --no-default-features --features postgres --lib postgres_database::tests -- --ignored --test-threads=1
-          AIO_COMPONENT_TEST_DATABASE_URL="$AIO_WASM_COMPONENT_TEST_DATABASE_URL" cargo test -p az-plugin-host --lib --no-default-features --features wasm published_components_install_optionally_and_restore -- --ignored
-          cargo test -p az-plugin-host --lib --no-default-features --features wasm tenant_installation_grants_members_and_menu_visibility_preserves_runtime -- --ignored
+          AIO_COMPONENT_TEST_DATABASE_URL="$AIO_WASM_COMPONENT_TEST_DATABASE_URL" cargo test -p az-plugin-host --lib --no-default-features --features postgres,wasm published_components_install_optionally_and_restore -- --ignored
+          cargo test -p az-plugin-host --lib --no-default-features --features postgres,wasm tenant_installation_grants_members_and_menu_visibility_preserves_runtime -- --ignored
           export AIO_PROCESS_ROOT="$(mktemp -d)"
           export AIO_PLUGIN_SUPERVISOR_SOCKET="$AIO_PROCESS_ROOT/supervisor.sock"
           trap 'rm -rf "$AIO_PROCESS_ROOT"' EXIT
-          cargo test -p az-plugin-host --lib --no-default-features --features sidecar publication_preserves_running_singleton_process -- --ignored
+          cargo test -p az-plugin-host --lib --no-default-features --features postgres,sidecar publication_preserves_running_singleton_process -- --ignored
           export AIO_PLUGIN_SUPERVISOR_SOCKET="$AIO_PROCESS_ROOT/combined-supervisor.sock"
-          cargo test -p az-plugin-host --lib --no-default-features --features wasm,sidecar publication_preserves_running_singleton_process -- --ignored
-          cargo test -p az-plugin-host --lib --features server,wasm,sidecar,rhai,typescript,mcp,grpc development_switch_preserves_cli_ownership_and_refreshes_frontend -- --ignored
-          cargo test -p az-plugin-host --lib --features server,wasm,sidecar,rhai,typescript,mcp,grpc protected_wasm_and_sidecar_require_live_interaction_through_the_broker -- --ignored
-          AIO_PLUGIN_SUPERVISOR_SOCKET="$AIO_PROCESS_ROOT/management-supervisor.sock" cargo test -p az-plugin-host --lib --no-default-features --features wasm,sidecar wasm_and_sidecar_management_share_trust_context_and_revocation -- --ignored
+          cargo test -p az-plugin-host --lib --no-default-features --features postgres,wasm,sidecar publication_preserves_running_singleton_process -- --ignored
+          cargo test -p az-plugin-host --lib --features postgres,server,wasm,sidecar,rhai,typescript,mcp,grpc development_switch_preserves_cli_ownership_and_refreshes_frontend -- --ignored
+          cargo test -p az-plugin-host --lib --features postgres,server,wasm,sidecar,rhai,typescript,mcp,grpc protected_wasm_and_sidecar_require_live_interaction_through_the_broker -- --ignored
+          AIO_PLUGIN_SUPERVISOR_SOCKET="$AIO_PROCESS_ROOT/management-supervisor.sock" cargo test -p az-plugin-host --lib --no-default-features --features postgres,wasm,sidecar wasm_and_sidecar_management_share_trust_context_and_revocation -- --ignored
         env:
           AIO_TEST_HEALTHY_COMPONENT: ${{ github.workspace }}/target/fixture/healthy/wasm32-wasip2/release/release_fixture.wasm
           AIO_PLUGIN_SUPERVISOR_SOCKET: /tmp/aio-component-executor-absent.sock
@@ -145,7 +149,7 @@ jobs:
           AIO_WASM_COMPONENT_TEST_DATABASE_URL: postgresql://postgres:channel-test@127.0.0.1:5432/wasm_component_market_test
       - run: cargo build --manifest-path lib/plugin/runtime/tests/fixture/Cargo.toml --locked --release --target wasm32-wasip2 --features unhealthy --target-dir target/fixture/unhealthy
       - name: 验证默认整包交付与失败回滚
-        run: cargo test -p az-plugin-host --no-default-features --features wasm --lib delivery_publishes_bundles_and_respects_tenant_choices -- --ignored
+        run: cargo test -p az-plugin-host --no-default-features --features postgres,wasm --lib delivery_publishes_bundles_and_respects_tenant_choices -- --ignored
         env:
           AIO_COMPONENT_TEST_DATABASE_URL: postgresql://postgres:channel-test@127.0.0.1:5432/component_market_test
           AIO_DELIVERY_TOKEN: isolated-delivery-ci-test-token-123456789

@@ -4,8 +4,11 @@ use crate::{
     runtime::server::http_error::RuntimeError,
 };
 use serde_json::Value;
+#[cfg(feature = "postgres")]
 use std::sync::Arc;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
+use tokio::sync::{OwnedSemaphorePermit, mpsc};
+#[cfg(feature = "postgres")]
+use tokio::sync::{Semaphore, oneshot};
 
 /// 设备长连接与网页连接的临时传输由同一服务管理；帧不落库。
 #[async_trait::async_trait]
@@ -50,11 +53,13 @@ pub trait WorkerWebviewService: std::any::Any + Send + Sync {
     async fn close(&self, owner: &ViewOwner, id: &str) -> Result<(), RuntimeError>;
 }
 
+#[cfg(feature = "postgres")]
 pub(super) struct Peer {
     pub generation: String,
     pub sender: mpsc::Sender<Value>,
 }
 
+#[cfg(feature = "postgres")]
 pub(super) struct ViewChannel {
     pub worker: String,
     pub runtime: WebviewRuntime,

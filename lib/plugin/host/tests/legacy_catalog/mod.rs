@@ -2,10 +2,13 @@
 mod delivery;
 mod delivery_discovery;
 mod delivery_http;
+#[cfg(feature = "postgres")]
 mod delivery_postgres;
+#[cfg(feature = "postgres")]
 mod delivery_rollout;
+#[cfg(feature = "postgres")]
 mod delivery_sources;
-mod file;
+pub(super) mod file;
 mod installations;
 mod publications;
 mod queries;
@@ -30,7 +33,7 @@ use std::{
     time::Duration,
 };
 
-struct FilePlugin(Arc<FileCatalog>);
+pub(super) struct FilePlugin(pub(super) Arc<FileCatalog>);
 impl Plugin<RuntimeAssembly> for FilePlugin {
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
@@ -118,7 +121,9 @@ async fn file_catalog_management_survives_restart_and_rejects_failed_commits_wit
     let catalog = FileCatalog::open(&path);
     let host =
         Host::start_selected(root.path(), "invalid database", selected(catalog.clone())).await?;
+    #[cfg(feature = "postgres")]
     assert!(host.state.service::<sqlx::PgPool>().is_err());
+    #[cfg(feature = "postgres")]
     assert!(host.state.service::<PluginStore>().is_err());
     assert!(host.state.service::<dyn ToolCatalog>().is_err());
     let first = package("1.0.0")?;
@@ -238,6 +243,7 @@ async fn file_catalog_management_survives_restart_and_rejects_failed_commits_wit
     let catalog = FileCatalog::open(&path);
     let host =
         Host::start_selected(root.path(), "invalid database", selected(catalog.clone())).await?;
+    #[cfg(feature = "postgres")]
     assert!(host.state.service::<sqlx::PgPool>().is_err());
     assert_eq!(get(&host, &call).await?["revision"], first.rev);
     assert_eq!(

@@ -25,14 +25,14 @@ assembly.services
 
 默认 PostgreSQL 实现用事务锁协调来源发布及安装竞争，并在提交内校验版本归属。代数检查保护目录中的安装选择；目录提交与执行器激活仍通过补偿和重启恢复协调，不构成跨后端分布式事务。并发测试验证的是目录提交边界，不能据此宣称多宿主执行实例切换已经具备全局原子性。它仍会读取旧版父插件与交付任务表，因此默认提供者依赖 `StorePlugin`；依赖没有泄漏到 `ComponentResourcesPlugin`。
 
-`tests/component_execution/catalog` 使用文件原子替换实现另一个落盘目录，验证无 PostgreSQL 自举、重启和卸载意图，另用真实 HTTP 验证发布、安装、跨执行器升级、回滚、提交失败补偿、租户隔离及密钥恢复。HTTP 公共管理路由仍需要旧版数据库；测试在独立 schema 中确认没有创建任何整包表。文件实现只是验收夹具，不是生产存储插件，不支持外部构建任务提交。默认 PostgreSQL 另有跨连接的安装竞争、过期删除拒绝和密钥竞争测试。
+`tests/component_execution/catalog` 使用文件原子替换实现另一个落盘目录，验证无 PostgreSQL 自举、重启和卸载意图，另用真实 HTTP 验证发布、安装、跨执行器升级、回滚、提交失败补偿、租户隔离及密钥恢复。HTTP 公共管理路由也注入 v1 文件目录，整个测试以无效数据库配置运行，且 `server` 组合不编译 SQLx。文件实现只是验收夹具，不是生产存储插件，不支持外部构建任务提交。默认 PostgreSQL 另有跨连接的安装竞争、过期删除拒绝和密钥竞争测试。
 
 运行：
 
 ```sh
-cargo test -p az-plugin-host --features server --test component_executors catalog::file_catalog
+cargo test -p az-plugin-host --no-default-features --features server --test component_executors catalog::
 AIO_COMPONENT_TEST_DATABASE_URL=postgres://.../component_market_test \
-  cargo test -p az-plugin-host --features server --test component_executors catalog:: -- --include-ignored --test-threads=1
+  cargo test -p az-plugin-host --no-default-features --features postgres --test component_executors catalog:: -- --include-ignored --test-threads=1
 ```
 
-这次边界不包含 v1 `PluginStore`、市场下架、设备业务表和交付任务持久化，也不移除 host crate 的 PostgreSQL 编译依赖。脚本和整包插件获得统一宿主行为，但不能自行替换内核持久化提供者或绕过身份授权。
+默认设备业务表和交付任务持久化仍使用 PostgreSQL，具体实现由 `postgres` feature 显式选择。脚本和整包插件获得统一宿主行为，但不能自行替换内核持久化提供者或绕过身份授权。

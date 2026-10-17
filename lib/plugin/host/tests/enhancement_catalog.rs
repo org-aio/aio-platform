@@ -59,6 +59,7 @@ async fn file_catalog_transactions_preserve_authorization_and_history() -> Resul
 }
 
 #[tokio::test]
+#[cfg(feature = "postgres")]
 #[ignore = "需要独立本机 PostgreSQL"]
 async fn postgres_catalog_transactions_work_across_connections() -> Result<()> {
     let url = std::env::var("AIO_ENHANCEMENT_TEST_DATABASE_URL")?;
@@ -77,6 +78,7 @@ async fn postgres_catalog_transactions_work_across_connections() -> Result<()> {
 }
 
 #[tokio::test]
+#[cfg(feature = "postgres")]
 #[ignore = "需要独立本机 PostgreSQL"]
 async fn postgres_commit_failure_rolls_back_candidates_heads_and_events() -> Result<()> {
     use anyhow::Context;

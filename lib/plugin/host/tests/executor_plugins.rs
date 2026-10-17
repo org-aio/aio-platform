@@ -1,6 +1,6 @@
 #![cfg(feature = "server")]
 
-#[cfg(any(feature = "mcp", feature = "grpc"))]
+#[cfg(all(feature = "postgres", any(feature = "mcp", feature = "grpc")))]
 #[path = "support/identity.rs"]
 mod identity_support;
 
@@ -9,16 +9,16 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-#[cfg(any(feature = "mcp", feature = "grpc"))]
+#[cfg(all(feature = "postgres", any(feature = "mcp", feature = "grpc")))]
 use anyhow::ensure;
 use anyhow::{Context, Result};
-#[cfg(feature = "grpc")]
+#[cfg(all(feature = "postgres", feature = "grpc"))]
 use az_plugin_contract::grpc::{InvokeRequest, enhancements_client::EnhancementsClient};
 use az_plugin_core::{Plugin, PluginFuture};
 use az_plugin_enhancement::{Language, Package, ScriptContext};
-#[cfg(feature = "grpc")]
+#[cfg(all(feature = "postgres", feature = "grpc"))]
 use az_plugin_host::runtime::server::plugins::GrpcPlugin;
-#[cfg(feature = "mcp")]
+#[cfg(all(feature = "postgres", feature = "mcp"))]
 use az_plugin_host::runtime::server::plugins::McpPlugin;
 use az_plugin_host::{
     configuration::HostConfig,
@@ -30,7 +30,7 @@ use az_plugin_host::{
         },
     },
 };
-#[cfg(any(feature = "mcp", feature = "grpc"))]
+#[cfg(all(feature = "postgres", any(feature = "mcp", feature = "grpc")))]
 use az_plugin_host::{
     identity::{IdentityProvider, SessionContext},
     runtime::server::plugins::{
@@ -83,10 +83,10 @@ impl Plugin<RuntimeAssembly> for ReplacementPlugin {
     }
 }
 
-#[cfg(any(feature = "mcp", feature = "grpc"))]
+#[cfg(all(feature = "postgres", any(feature = "mcp", feature = "grpc")))]
 struct Identity(String);
 
-#[cfg(any(feature = "mcp", feature = "grpc"))]
+#[cfg(all(feature = "postgres", any(feature = "mcp", feature = "grpc")))]
 #[async_trait::async_trait]
 impl IdentityProvider for Identity {
     async fn authenticate(
@@ -119,7 +119,7 @@ impl IdentityProvider for Identity {
     }
 }
 
-#[cfg(any(feature = "mcp", feature = "grpc"))]
+#[cfg(all(feature = "postgres", any(feature = "mcp", feature = "grpc")))]
 #[async_trait::async_trait]
 impl az_plugin_host::authorization::AuthorizationProvider for Identity {
     async fn can_publish(&self, _: &SessionContext) -> Result<bool> {
@@ -260,7 +260,7 @@ async fn typescript_can_run_without_the_rhai_plugin() -> Result<()> {
     .await
 }
 
-#[cfg(any(feature = "mcp", feature = "grpc"))]
+#[cfg(all(feature = "postgres", any(feature = "mcp", feature = "grpc")))]
 #[tokio::test]
 #[ignore = "需要独立本机 PostgreSQL"]
 async fn external_executor_handles_publication_protocol_calls_and_persisted_restoration()
@@ -292,9 +292,9 @@ async fn external_executor_handles_publication_protocol_calls_and_persisted_rest
             identity_support::with_identity(
                 identity.clone(),
                 vec![
-                    #[cfg(feature = "grpc")]
+                    #[cfg(all(feature = "postgres", feature = "grpc"))]
                     Arc::new(GrpcPlugin),
-                    #[cfg(feature = "mcp")]
+                    #[cfg(all(feature = "postgres", feature = "mcp"))]
                     Arc::new(McpPlugin),
                     Arc::new(EnhancementsPlugin),
                     Arc::new(
@@ -336,7 +336,7 @@ async fn external_executor_handles_publication_protocol_calls_and_persisted_rest
                     .await?
                     .error_for_status()?;
             }
-            #[cfg(feature = "grpc")]
+            #[cfg(all(feature = "postgres", feature = "grpc"))]
             {
                 let mut client = EnhancementsClient::connect(base.clone()).await?;
                 let mut request = tonic::Request::new(InvokeRequest {
@@ -353,7 +353,7 @@ async fn external_executor_handles_publication_protocol_calls_and_persisted_rest
                     json!(42)
                 );
             }
-            #[cfg(feature = "mcp")]
+            #[cfg(all(feature = "postgres", feature = "mcp"))]
             {
                 use rmcp::{
                     ServiceExt,

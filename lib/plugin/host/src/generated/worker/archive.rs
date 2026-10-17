@@ -1,8 +1,4 @@
-use super::{
-    controller::device,
-    model::DeviceIdentity,
-    util::{digest, secret},
-};
+use super::{controller::device, model::DeviceIdentity};
 use crate::runtime::{
     RuntimeResponse,
     server::{RuntimeState, http_error::RuntimeError},
@@ -34,12 +30,15 @@ fn root(state: &RuntimeState, identity: &DeviceIdentity) -> PathBuf {
     let base = std::env::var_os("AIO_WORKER_STORAGE_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| state.config.cache_root.join("worker-archives"));
-    base.join(digest(&format!(
-        "{}:{}:{}",
-        identity.tenant.len(),
-        identity.tenant,
-        identity.user
-    )))
+    base.join(digest_bytes(
+        format!(
+            "{}:{}:{}",
+            identity.tenant.len(),
+            identity.tenant,
+            identity.user
+        )
+        .as_bytes(),
+    ))
 }
 async fn configuration(
     State(state): State<RuntimeState>,
@@ -47,10 +46,6 @@ async fn configuration(
 ) -> Result<Response, RuntimeError> {
     let identity = device(&state, &headers).await?;
     allowed(&identity)?;
-    let mut tx = state.service::<sqlx::PgPool>()?.begin().await?;
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('worker-vault',0))")
-        .execute(&mut *tx)
-        .await?;
     let keyring = state.worker_keyring()?;
     let scope = InvocationScope {
         source_id: "aio-worker-archives".into(),
@@ -62,27 +57,15 @@ async fn configuration(
         grants: Default::default(),
     };
     let purpose = format!("archive:{}", identity.user);
-    let existing: Option<Vec<u8>> = sqlx::query_scalar(
-        "SELECT ciphertext FROM worker_vaults WHERE tenant_id=$1 AND user_id=$2",
-    )
-    .bind(&identity.tenant)
-    .bind(&identity.user)
-    .fetch_optional(&mut *tx)
-    .await?;
-    let password = if let Some(ciphertext) = existing {
-        String::from_utf8(keyring.open(&scope, &purpose, &ciphertext)?)?
-    } else {
-        let password = secret()?;
-        let ciphertext = keyring.seal(&scope, &purpose, password.as_bytes())?;
-        sqlx::query("INSERT INTO worker_vaults(tenant_id,user_id,ciphertext) VALUES($1,$2,$3)")
-            .bind(&identity.tenant)
-            .bind(&identity.user)
-            .bind(ciphertext)
-            .execute(&mut *tx)
-            .await?;
-        password
-    };
-    tx.commit().await?;
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).map_err(|_| anyhow::anyhow!("生成归档密钥失败"))?;
+    let candidate: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let ciphertext = keyring.seal(&scope, &purpose, candidate.as_bytes())?;
+    let ciphertext = state
+        .service::<dyn super::WorkerService>()?
+        .archive_key(&identity, ciphertext)
+        .await?;
+    let password = String::from_utf8(keyring.open(&scope, &purpose, &ciphertext)?)?;
     let initialized = tokio::fs::try_exists(root(&state, &identity).join("config")).await?;
     Ok((
         [(header::CACHE_CONTROL, "no-store")],

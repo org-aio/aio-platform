@@ -13,40 +13,51 @@ mod legacy_catalog;
 mod fixture;
 
 #[path = "component_execution/resources.rs"]
+#[cfg(feature = "postgres")]
 mod resources;
 
 #[path = "component_execution/access.rs"]
+#[cfg(feature = "postgres")]
 mod access;
 
 #[path = "component_execution/availability.rs"]
+#[cfg(feature = "postgres")]
 mod availability;
 
 #[path = "component_execution/bootstrap.rs"]
+#[cfg(feature = "postgres")]
 mod bootstrap;
 
 #[path = "component_execution/management.rs"]
+#[cfg(feature = "postgres")]
 mod management;
 
 #[path = "component_execution/legacy_availability.rs"]
+#[cfg(feature = "postgres")]
 mod legacy_availability;
 
 #[path = "component_execution/legacy_executor.rs"]
 mod legacy_executor;
 
 #[path = "component_execution/legacy_validation.rs"]
+#[cfg(feature = "postgres")]
 mod legacy_validation;
 
 #[path = "component_execution/legacy_development.rs"]
+#[cfg(feature = "postgres")]
 mod legacy_development;
 
-use anyhow::{Context, Result};
+#[cfg(feature = "postgres")]
+use anyhow::Context;
+use anyhow::Result;
 use az_plugin_host::runtime::server::{RuntimeState, plugins::*};
 use fixture::*;
+#[cfg(feature = "postgres")]
 use serde_json::json;
-use std::{
-    sync::{Arc, atomic::Ordering},
-    time::Duration,
-};
+use std::sync::Arc;
+#[cfg(feature = "postgres")]
+use std::{sync::atomic::Ordering, time::Duration};
+#[cfg(feature = "postgres")]
 use uuid::Uuid;
 
 #[tokio::test]
@@ -84,6 +95,7 @@ async fn component_registry_accepts_empty_and_rejects_duplicate_types_without_re
 }
 
 #[tokio::test]
+#[cfg(feature = "postgres")]
 #[ignore = "需要独立本机 PostgreSQL"]
 async fn external_components_cover_http_switch_rollback_commit_failure_and_restart() -> Result<()> {
     let database = database().await?;
@@ -213,6 +225,7 @@ async fn external_components_cover_http_switch_rollback_commit_failure_and_resta
 }
 
 #[tokio::test]
+#[cfg(feature = "postgres")]
 #[ignore = "需要独立本机 PostgreSQL"]
 async fn executor_initialization_failure_panic_and_shutdown_panic_release_all_resources()
 -> Result<()> {
@@ -254,6 +267,7 @@ async fn executor_initialization_failure_panic_and_shutdown_panic_release_all_re
 }
 
 #[tokio::test]
+#[cfg(feature = "postgres")]
 #[ignore = "需要独立本机 PostgreSQL"]
 async fn cancelled_startup_finishes_executor_cleanup_at_the_lifecycle_boundary() -> Result<()> {
     let database = database().await?;

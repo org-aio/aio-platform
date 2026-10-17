@@ -150,7 +150,7 @@ async fn machine_identity_pairing_and_deletion() -> Result<()> {
     Ok(())
 }
 
-struct Identity;
+pub(super) struct Identity;
 #[async_trait::async_trait]
 impl IdentityProvider for Identity {
     async fn authenticate(&self, headers: &HeaderMap) -> Result<Option<SessionContext>> {

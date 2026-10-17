@@ -1,5 +1,7 @@
+#[cfg(feature = "postgres")]
 mod activation_store;
 #[cfg(any(test, feature = "test-support"))]
+#[cfg(feature = "postgres")]
 mod admin_test_support;
 mod bootstrap;
 mod bootstrap_document;
@@ -26,11 +28,15 @@ mod lifecycle;
 mod management;
 mod management_dispatch;
 mod marketplace_removal;
+#[cfg(feature = "postgres")]
 mod marketplace_store;
 mod navigation;
+#[cfg(feature = "postgres")]
 mod official_market;
 mod package_repository;
+#[cfg(feature = "postgres")]
 mod package_store;
+#[cfg(feature = "postgres")]
 mod page_state;
 pub mod plugin_catalog;
 pub mod plugins;
@@ -39,6 +45,7 @@ mod process;
 mod protocols;
 mod publication;
 mod publication_validation;
+#[cfg(feature = "postgres")]
 mod publisher_store;
 mod releases;
 #[cfg(any(feature = "remote-mcp", feature = "remote-grpc"))]
@@ -48,7 +55,9 @@ mod repository;
 pub(crate) mod request_context;
 mod routes;
 mod service_dispatch;
+#[cfg(feature = "postgres")]
 mod source_migration;
+#[cfg(feature = "postgres")]
 mod store;
 #[cfg(feature = "sidecar")]
 mod supervisor;
@@ -202,7 +211,7 @@ impl RuntimeState {
         Ok(lock)
     }
 
-    fn start_publish_job(&self, job: publisher_store::PublishJob) -> Result<()> {
+    fn start_publish_job(&self, job: plugin_catalog::PublishJob) -> Result<()> {
         if job.state != PublishState::Queued {
             return Ok(());
         }

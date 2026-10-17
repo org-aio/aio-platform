@@ -346,3 +346,11 @@ pub(super) fn validate_clipboard_input(input: &serde_json::Value) -> Result<()> 
     )?;
     Ok(())
 }
+
+pub(super) fn storage_error(error: anyhow::Error) -> anyhow::Error {
+    if error.is::<sqlx::Error>() {
+        error.context(super::service::WorkerServiceUnavailable)
+    } else {
+        error
+    }
+}

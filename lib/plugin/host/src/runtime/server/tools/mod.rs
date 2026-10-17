@@ -1,63 +1,29 @@
+#[cfg(feature = "postgres")]
 mod controller;
+#[cfg(feature = "postgres")]
 mod devices;
+#[cfg(feature = "postgres")]
 mod documents;
 mod model;
+#[cfg(feature = "postgres")]
 mod publication;
-#[cfg(test)]
+#[cfg(all(test, feature = "postgres"))]
 mod registration_tests;
+#[cfg(feature = "postgres")]
 mod storage;
-#[cfg(test)]
+#[cfg(all(test, feature = "postgres"))]
 mod tests;
 
-use super::{RuntimeState, http_error::RuntimeError};
-use axum::{
-    Json, Router,
-    extract::{DefaultBodyLimit, Path, State},
-    routing::{delete, get, post},
-};
+#[cfg(feature = "postgres")]
+mod routes;
 pub(super) use model::MarketplaceItem;
-pub(super) use storage::PostgresToolCatalog;
-pub(super) use storage::migrate;
+#[cfg(feature = "postgres")]
+pub(super) use routes::router;
+#[cfg(feature = "postgres")]
+pub(super) use storage::{PostgresToolCatalog, migrate};
 
 /// CLI 工具目录贡献者；管理目录仅在已装配时聚合其条目。
 #[async_trait::async_trait]
 pub trait ToolCatalog: std::any::Any + Send + Sync {
     async fn entries(&self) -> anyhow::Result<Vec<az_tool::ToolManifest>>;
-}
-
-pub(super) fn router() -> Router<RuntimeState> {
-    Router::new()
-        .route("/api/runtime/tools/access", get(controller::access))
-        .route("/api/runtime/tools/register", post(controller::register))
-        .route("/api/runtime/tools/publish", post(publication::publish))
-        .route("/api/runtime/tools/{id}", delete(controller::remove))
-        .route("/api/runtime/tools/{id}/devices", get(devices::list))
-        .route("/api/runtime/tools/{id}/install", post(devices::install))
-        .route(
-            "/api/runtime/workers/tools/inventory",
-            post(devices::report),
-        )
-        .route(
-            "/api/runtime/tools/{id}/details",
-            get(controller::details).patch(controller::update),
-        )
-        .route("/api/runtime/tools/{id}/{version}", get(manifest))
-        .layer(DefaultBodyLimit::max(az_tool::MAX_MANIFEST_BYTES as usize))
-}
-
-async fn manifest(
-    State(state): State<RuntimeState>,
-    Path((id, version)): Path<(String, String)>,
-) -> Result<Json<az_tool::ToolManifest>, RuntimeError> {
-    az_tool::InstallLink::parse(
-        &az_tool::InstallLink {
-            id: id.clone(),
-            version: version.clone(),
-        }
-        .to_string(),
-    )?;
-    let value = storage::get(state.service::<sqlx::PgPool>()?.as_ref(), &id, &version)
-        .await?
-        .ok_or_else(|| RuntimeError::not_found("该工具版本尚未收录于插件市场"))?;
-    Ok(Json(value))
 }

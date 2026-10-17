@@ -234,7 +234,13 @@ assembly.services
 
 ```sh
 AIO_SERVICE_TEST_DATABASE_URL=postgresql://.../service_test \
-  cargo test -p az-plugin-host --no-default-features --features server --lib plugins::platform_services_tests -- --ignored --test-threads=1
+  cargo test -p az-plugin-host --no-default-features --features postgres --lib plugins::platform_services_tests -- --ignored --test-threads=1
 ```
 
 测试使用隔离 schema 验证未装配服务不建表、无旧版目录的配对与加密内容持久化、租户隔离、重启恢复和故障迁移回滚。v1 目录本身及交付存储仍使用 PostgreSQL，此改动不等于它们已经可替换。
+
+## 数据库编译边界
+
+`server` 保留中立服务、路由和生命周期；`postgres` 才编译 `postgres.rs` 的数据库插件、默认目录与四类业务服务实现。正式默认组合和 `default_plugins()` 要求显式启用 `postgres`。组件执行器、双语言与协议可独立选择，不会附带数据库驱动。
+
+设备长轮询通过 `WorkerService::capability_active` 复核授权，Skill 开关和归档密钥通过同一提供者执行。替代实现应以 `WorkerServiceUnavailable` 标记可重试后端故障；协议层不会识别 SQLx 类型。归档密钥必须原子选择已有密文，不能用新候选覆盖已有归档。

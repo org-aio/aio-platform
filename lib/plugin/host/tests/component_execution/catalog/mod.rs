@@ -1,5 +1,6 @@
 //! 目录替换验收：文件持久化、真实 HTTP 生命周期和完全不连接 PostgreSQL 的最小组合。
 mod file;
+#[cfg(feature = "postgres")]
 mod postgres;
 mod resources;
 
@@ -9,10 +10,8 @@ use az_plugin_core::{DynPlugin, Plugin, PluginFuture};
 use az_plugin_host::runtime::server::plugins::*;
 use file::FileCatalog;
 use serde_json::json;
-use std::{
-    any::TypeId,
-    sync::{Arc, atomic::Ordering},
-};
+use std::any::TypeId;
+use std::sync::{Arc, atomic::Ordering};
 use uuid::Uuid;
 
 struct CatalogPlugin(Arc<FileCatalog>);
@@ -28,24 +27,29 @@ impl Plugin<RuntimeAssembly> for CatalogPlugin {
     }
 }
 fn selected(
+    root: &std::path::Path,
     catalog: Arc<FileCatalog>,
     tenant: &str,
     probes: [Arc<Probe>; 2],
     surfaces: bool,
 ) -> Vec<DynPlugin<RuntimeAssembly>> {
     let mut selected = plugins(probes, surfaces);
+    #[cfg(feature = "postgres")]
     selected.retain(|plugin| {
-        let id = plugin.as_ref().type_id();
-        id != TypeId::of::<PostgresComponentCatalogPlugin>()
-            && id != TypeId::of::<PostgresComponentPlugin>()
-            && (surfaces
-                || ![
-                    TypeId::of::<StorePlugin>(),
-                    TypeId::of::<DatabasePlugin>(),
-                    TypeId::of::<PostgresPlugin>(),
-                ]
-                .contains(&id))
+        ![
+            TypeId::of::<PostgresComponentCatalogPlugin>(),
+            TypeId::of::<PostgresComponentPlugin>(),
+            TypeId::of::<StorePlugin>(),
+            TypeId::of::<DatabasePlugin>(),
+            TypeId::of::<PostgresPlugin>(),
+        ]
+        .contains(&plugin.as_ref().type_id())
     });
+    if surfaces {
+        selected.push(Arc::new(super::legacy_catalog::FilePlugin(
+            super::legacy_catalog::file::FileCatalog::open(&root.join("legacy.json")),
+        )));
+    }
     selected.push(Arc::new(CatalogPlugin(catalog)));
     selected.push(Arc::new(resources::NoDatabase));
     identity_support::with_identity(Arc::new(Identity(tenant.into())), selected)
@@ -77,12 +81,20 @@ async fn file_catalog_bootstraps_restarts_and_preserves_uninstall_without_postgr
     )?;
     let declaration = bootstrap(root.path(), &bundle, "tenant")?;
     let probes: [Arc<Probe>; 2] = Default::default();
-    let mut selection = selected(catalog.clone(), "tenant", probes.clone(), false);
+    let mut selection = selected(
+        root.path(),
+        catalog.clone(),
+        "tenant",
+        probes.clone(),
+        false,
+    );
     selection.push(Arc::new(ComponentBootstrapPlugin(vec![
         declaration.clone(),
     ])));
     let host = Host::start_selected(root.path(), "invalid database", selection).await?;
+    #[cfg(feature = "postgres")]
     assert!(host.state.service::<sqlx::PgPool>().is_err());
+    #[cfg(feature = "postgres")]
     assert!(probes[0].pool.lock().await.is_none());
     let source = catalog
         .source(&bundle.git)
@@ -113,7 +125,13 @@ async fn file_catalog_bootstraps_restarts_and_preserves_uninstall_without_postgr
     // 丢弃原目录实例后从磁盘重新读取，不借助进程内缓存恢复。
     drop(catalog);
     let catalog = FileCatalog::open(&path);
-    let mut selection = selected(catalog.clone(), "tenant", probes.clone(), false);
+    let mut selection = selected(
+        root.path(),
+        catalog.clone(),
+        "tenant",
+        probes.clone(),
+        false,
+    );
     selection.push(Arc::new(ComponentBootstrapPlugin(vec![
         declaration.clone(),
     ])));
@@ -139,7 +157,13 @@ async fn file_catalog_bootstraps_restarts_and_preserves_uninstall_without_postgr
     catalog.remove("tenant", source, generation, true).await?;
     drop(catalog);
     let catalog = FileCatalog::open(&path);
-    let mut selection = selected(catalog.clone(), "tenant", probes.clone(), false);
+    let mut selection = selected(
+        root.path(),
+        catalog.clone(),
+        "tenant",
+        probes.clone(),
+        false,
+    );
     selection.push(Arc::new(ComponentBootstrapPlugin(vec![declaration])));
     let host = Host::start_selected(root.path(), "invalid database", selection).await?;
     assert!(catalog.installation("tenant", source).await?.is_none());
@@ -150,18 +174,7 @@ async fn file_catalog_bootstraps_restarts_and_preserves_uninstall_without_postgr
 }
 
 #[tokio::test]
-#[ignore = "需要独立本机 PostgreSQL 供旧版公共管理路由使用"]
-async fn replacement_catalog_drives_http_lifecycle_without_component_tables() -> Result<()> {
-    let database = database().await?;
-    let pool = sqlx::PgPool::connect(&database).await?;
-    let schema = format!("catalog_test_{}", Uuid::new_v4().simple());
-    sqlx::query(&format!("CREATE SCHEMA {schema}"))
-        .execute(&pool)
-        .await?;
-    let mut database = reqwest::Url::parse(&database)?;
-    database
-        .query_pairs_mut()
-        .append_pair("options", &format!("-c search_path={schema}"));
+async fn replacement_catalog_drives_http_lifecycle_without_database() -> Result<()> {
     let root = tempfile::tempdir()?;
     let path = root.path().join("catalog.json");
     let catalog = FileCatalog::open(&path);
@@ -172,8 +185,8 @@ async fn replacement_catalog_drives_http_lifecycle_without_component_tables() ->
     let second = package(root.path(), git, 2, "2.0.0")?;
     let mut host = Host::start_selected(
         root.path(),
-        database.as_str(),
-        selected(catalog.clone(), tenant, probes.clone(), true),
+        "invalid database",
+        selected(root.path(), catalog.clone(), tenant, probes.clone(), true),
     )
     .await?;
     let source: Uuid = success(host.publish(&first).await?).await?["data"]["source_id"]
@@ -272,11 +285,8 @@ async fn replacement_catalog_drives_http_lifecycle_without_component_tables() ->
     )
     .await?;
     assert!(archived.to_string().contains(&second.digest));
-    let missing: Option<String> =
-        sqlx::query_scalar("SELECT to_regclass('component_sources')::TEXT")
-            .fetch_one(host.state.service::<sqlx::PgPool>()?.as_ref())
-            .await?;
-    assert!(missing.is_none(), "替代目录不应创建整包 PostgreSQL 表");
+    #[cfg(feature = "postgres")]
+    assert!(host.state.service::<sqlx::PgPool>().is_err());
     // 只替换目录插件，依赖它的资源和运行实例必须自动重建。
     let replacement = FileCatalog::open(&path);
     let before = probes[0].stopped.load(Ordering::SeqCst);
@@ -299,7 +309,13 @@ async fn replacement_catalog_drives_http_lifecycle_without_component_tables() ->
         &expected
     ));
     host.assert_call(source, 1, &first).await?;
-    let other = selected(catalog.clone(), "other", Default::default(), true);
+    let other = selected(
+        root.path(),
+        catalog.clone(),
+        "other",
+        Default::default(),
+        true,
+    );
     host.reconfigure(other).await?;
     assert!(host.mount(source).await.is_err());
     host.stop().await?;
@@ -307,8 +323,8 @@ async fn replacement_catalog_drives_http_lifecycle_without_component_tables() ->
     let reopened = FileCatalog::open(&path);
     let host = Host::start_selected(
         root.path(),
-        database.as_str(),
-        selected(reopened.clone(), tenant, probes, true),
+        "invalid database",
+        selected(root.path(), reopened.clone(), tenant, probes, true),
     )
     .await?;
     host.assert_call(source, 1, &first).await?;
@@ -332,9 +348,5 @@ async fn replacement_catalog_drives_http_lifecycle_without_component_tables() ->
     assert!(reopened.installation(tenant, source).await?.is_none());
     assert!(reopened.initialized(tenant, git).await?);
     host.stop().await?;
-    sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
-        .execute(&pool)
-        .await?;
-    pool.close().await;
     Ok(())
 }

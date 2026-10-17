@@ -2,10 +2,12 @@ use std::{any::Any, sync::Arc};
 
 use anyhow::Result;
 use az_plugin_core::{Plugin, PluginFuture};
-use az_plugin_runtime::{ComponentDatabase, DatabaseProvisioner, FileObjectStorage, ObjectStorage};
+use az_plugin_runtime::{ComponentDatabase, FileObjectStorage, ObjectStorage};
 
 use super::RuntimeAssembly;
 use crate::configuration::ComponentStorage;
+#[cfg(feature = "postgres")]
+use az_plugin_runtime::DatabaseProvisioner;
 
 /// 创建当前组件宿主拥有的数据库后端；打开失败时由实现清理尚未返回的资源。
 #[async_trait::async_trait]
@@ -20,11 +22,13 @@ pub trait ObjectStorageProvider: Any + Send + Sync {
 }
 
 /// 默认受控 PostgreSQL 迁移实现；应用可省略此插件并绑定替代 Provider。
+#[cfg(feature = "postgres")]
 #[dill::component]
 #[dill::interface(dyn ComponentDatabaseProvider)]
 #[dill::interface(dyn Plugin<RuntimeAssembly>)]
 pub struct PostgresComponentPlugin;
 
+#[cfg(feature = "postgres")]
 #[async_trait::async_trait]
 impl ComponentDatabaseProvider for PostgresComponentPlugin {
     async fn open(&self, config: &ComponentStorage) -> Result<Arc<dyn ComponentDatabase>> {
@@ -33,6 +37,7 @@ impl ComponentDatabaseProvider for PostgresComponentPlugin {
     }
 }
 
+#[cfg(feature = "postgres")]
 impl Plugin<RuntimeAssembly> for PostgresComponentPlugin {
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {

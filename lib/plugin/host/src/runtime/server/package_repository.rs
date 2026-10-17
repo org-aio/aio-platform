@@ -7,8 +7,12 @@ use az_plugin_package::PluginPackage;
 use sha2::{Digest as _, Sha256};
 
 use super::{
+    RuntimeState,
     publication_validation::validate_publish_payload,
-    repository::{DiscoveredPlugin, RepositoryInstaller, finish_with_cleanup, published_source_id},
+    repository::{
+        DiscoveredPlugin, RepositoryInstaller, finish_with_cleanup, is_package_revision,
+        published_source_id,
+    },
 };
 use crate::runtime::PluginRuntime;
 
@@ -110,5 +114,24 @@ impl RepositoryInstaller {
         }
         .await;
         finish_with_cleanup(result, &staging).await
+    }
+}
+
+impl RuntimeState {
+    pub(super) async fn restore_package_cache(&self, revision: &str) -> Result<()> {
+        if !is_package_revision(revision) {
+            return Ok(());
+        }
+        let archive = self
+            .store()?
+            .package_archive(revision)
+            .await?
+            .context("插件中心没有保存该内容版本的二进制包")?;
+        let package = tokio::task::spawn_blocking(move || PluginPackage::decode(&archive))
+            .await
+            .context("等待目录插件包验证失败")??;
+        ensure!(package.rev == revision, "目录插件包与请求的内容版本不一致");
+        self.repository()?.stage_publish(&package).await?;
+        Ok(())
     }
 }

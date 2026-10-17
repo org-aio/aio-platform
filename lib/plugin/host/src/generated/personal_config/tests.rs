@@ -289,20 +289,12 @@ async fn personal_configuration_devices_isolation_revisions_and_sync() -> Result
         tokio::fs::create_dir(&home).await?;
         tokio::fs::create_dir(&profile).await?;
         let file = profile.join("worker.json");
-        tokio::fs::write(&file,serde_json::to_vec(&json!({"origin":base,"token":pair["token"],"deviceId":pair["device_id"],"root":home}))?).await?;
+        tokio::fs::write(&file,serde_json::to_vec(&json!({"origin":base,"token":pair["token"],"deviceId":pair["device_id"],"root":home,"personalRoot":home}))?).await?;
         use std::os::unix::fs::PermissionsExt;
         tokio::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).await?;
-        command(
-            &cli,
-            &profile,
-            &[
-                "config-enable",
-                "--root",
-                home.to_str().unwrap(),
-                "--foreground",
-            ],
-        )
-        .await?;
+        // 此用例验证结构化配置合并；文件 CRDT 的 config-enable 有独立协议与本地文件前置条件。
+        let synchronized = command(&cli, &profile, &["config-sync"]).await?;
+        assert_eq!(synchronized["phase"], "complete", "{synchronized}");
         homes.push(home);
         profiles.push(profile);
     }

@@ -123,7 +123,9 @@ async fn replacement_delivery_publishes_recovers_and_serves_documents_without_po
         selection(catalog.clone(), true),
     )
     .await?;
+    #[cfg(feature = "postgres")]
     assert!(host.state.service::<sqlx::PgPool>().is_err());
+    #[cfg(feature = "postgres")]
     assert!(host.state.service::<PluginStore>().is_err());
     assert_eq!(
         host.client
@@ -388,6 +390,7 @@ async fn delivery_requires_one_provider_and_documents_can_run_independently() ->
         vec![Arc::new(DocumentationPlugin)],
     );
     let host = Host::start_selected(root.path(), "invalid database", documents).await?;
+    #[cfg(feature = "postgres")]
     assert!(host.state.service::<sqlx::PgPool>().is_err());
     assert_eq!(
         get(&host, "/api/runtime/marketplace/missing/details").await?["data"]["versions"],

@@ -1,8 +1,10 @@
 use super::super::{RuntimeState, plugin_catalog::PluginCatalog};
 use crate::runtime::{MarketplaceEntry, RuntimeCatalog};
 use anyhow::Result;
+#[cfg(feature = "postgres")]
 use sqlx::PgPool;
 
+#[cfg(feature = "postgres")]
 pub(in crate::runtime::server) async fn migrate(pool: &PgPool) -> Result<()> {
     sqlx::Executor::execute(pool, sqlx::raw_sql("CREATE TABLE IF NOT EXISTS tenant_hidden_plugin_menus (tenant_id TEXT NOT NULL, source_id TEXT NOT NULL, PRIMARY KEY(tenant_id,source_id))")).await?;
     Ok(())

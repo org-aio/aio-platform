@@ -47,6 +47,7 @@ async fn native_invocation_and_http_directory_work_without_script_or_database() 
     )
     .await?;
     assert!(state.service::<ScriptRuntime>().is_err());
+    #[cfg(feature = "postgres")]
     assert!(state.service::<sqlx::PgPool>().is_err());
     assert!(state.service::<az_plugin_runtime::Keyring>().is_err());
     assert!(!root.path().join("cache").exists());

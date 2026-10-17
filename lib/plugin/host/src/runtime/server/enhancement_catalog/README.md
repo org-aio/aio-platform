@@ -11,13 +11,13 @@
 - `CommitAuthorization` 是由宿主创建的延迟复核 Future，必须在写锁等待和校验之后、提交之前执行。拒绝、取消或提交失败均不能留下候选、指针或事件。不得把复核放到锁之前或交给后台任务。
 - 观察按租户、激活代数及路径计数，同一摘要重新激活使用新的代数。查询必须验证版本和代数属于当前租户，不保存请求输入、输出或凭据。时间字段统一为 Unix 毫秒。
 
-公共执行链继续负责编译、样例重放、摘要验证、可用语言检查、预算与授权。`Package` 和模型不依赖 SQLx；默认表、SQL 和行解码集中在此目录的 PostgreSQL 实现中。当前宿主 crate 的其他业务仍依赖 SQLx，本次契约拆分不等于整个宿主已不编译 PostgreSQL。
+公共执行链继续负责编译、样例重放、摘要验证、可用语言检查、预算与授权。`Package` 和模型不依赖 SQLx；默认表、SQL 和行解码集中在此目录的 PostgreSQL 实现中。默认 PostgreSQL 实现由独立 `postgres` feature 编译；`server`、脚本和协议 feature 均不引入 SQLx。
 
 验收入口：
 
 ```sh
 AIO_ENHANCEMENT_TEST_DATABASE_URL=postgresql://test@127.0.0.1:5432/kernel_test \
-  cargo test -p az-plugin-host --features rhai,typescript,mcp,grpc,test-support \
+  cargo test -p az-plugin-host --features postgres,rhai,typescript,mcp,grpc,test-support \
   --test enhancement_catalog -- --include-ignored --test-threads=1
 ```
 

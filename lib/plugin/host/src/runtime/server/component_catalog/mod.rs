@@ -1,7 +1,9 @@
 //! 整包目录的持久化边界；执行器、HTTP、首次引导与 Sidecar 共用同一实例。
 
 mod model;
+#[cfg(feature = "postgres")]
 mod postgres;
+#[cfg(feature = "postgres")]
 mod postgres_rows;
 
 use std::any::Any;
@@ -11,6 +13,7 @@ use az_plugin_bundle::Bundle;
 use uuid::Uuid;
 
 pub use model::*;
+#[cfg(feature = "postgres")]
 pub use postgres::PostgresComponentCatalog;
 
 /// 原生提供者负责持久化和原子提交，宿主负责授权、整包校验及执行器补偿。

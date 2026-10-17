@@ -1,3 +1,8 @@
+#[path = "device_storage.rs"]
+mod device_storage;
+#[path = "terminal_storage.rs"]
+mod terminal_storage;
+
 use super::{model::*, service::WorkerService, util::*};
 use crate::identity::SessionContext;
 use anyhow::{Context, Result, ensure};
@@ -99,6 +104,7 @@ impl WorkerService for WorkerServiceImpl {
         Ok(state)
     }
     async fn identity(&self, token: &str) -> Result<DeviceIdentity> {
+        async {
         let row=sqlx::query("SELECT id,tenant_id,user_id,capabilities FROM worker_devices WHERE token_hash=$1 AND state='active'")
             .bind(digest(token)).fetch_optional(&self.pool).await?.context("设备尚未授权或已撤销")?;
         Ok(DeviceIdentity {
@@ -107,6 +113,36 @@ impl WorkerService for WorkerServiceImpl {
             user: row.try_get("user_id")?,
             capabilities: serde_json::from_value(row.try_get("capabilities")?)?,
         })
+        }.await.map_err(storage_error)
+    }
+    async fn capability_active(
+        &self,
+        tenant: &str,
+        user: &str,
+        device: &str,
+        capability: &str,
+    ) -> Result<bool> {
+        Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM worker_devices WHERE id=$1 AND tenant_id=$2 AND user_id=$3 AND state='active' AND capabilities ? $4)")
+            .bind(device).bind(tenant).bind(user).bind(capability).fetch_one(&self.pool).await?)
+    }
+    async fn skills_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()> {
+        sqlx::query("UPDATE worker_devices SET capabilities=(SELECT coalesce(jsonb_agg(value),'[]'::jsonb) FROM jsonb_array_elements(capabilities) WHERE value<>to_jsonb($4::text)) || CASE WHEN $5 THEN jsonb_build_array($4::text) ELSE '[]'::jsonb END WHERE id=$1 AND tenant_id=$2 AND user_id=$3 AND state='active'")
+            .bind(&device.id).bind(&device.tenant).bind(&device.user).bind("skills.sync").bind(enabled).execute(&self.pool).await?;
+        Ok(())
+    }
+    async fn archive_key(&self, device: &DeviceIdentity, candidate: Vec<u8>) -> Result<Vec<u8>> {
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query("INSERT INTO worker_vaults(tenant_id,user_id,ciphertext) VALUES($1,$2,$3) ON CONFLICT DO NOTHING")
+            .bind(&device.tenant).bind(&device.user).bind(candidate).execute(&mut *transaction).await?;
+        let ciphertext = sqlx::query_scalar(
+            "SELECT ciphertext FROM worker_vaults WHERE tenant_id=$1 AND user_id=$2",
+        )
+        .bind(&device.tenant)
+        .bind(&device.user)
+        .fetch_one(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(ciphertext)
     }
     async fn list(&self, session: &SessionContext) -> Result<Vec<Worker>> {
         let rows=sqlx::query("SELECT *,CASE WHEN last_seen>now()-interval '90 seconds' THEN 'online' ELSE 'offline' END AS status,(extract(epoch FROM last_seen)*1000)::bigint AS last_seen_ms FROM worker_devices WHERE tenant_id=$1 AND user_id=$2 AND state='active' ORDER BY created_at DESC LIMIT 100")
@@ -223,16 +259,22 @@ impl WorkerService for WorkerServiceImpl {
     async fn workspace_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()> {
         self.local_capability(device, "workspace.execute", enabled)
             .await
+            .map_err(storage_error)
     }
     async fn desktop_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()> {
         self.local_capability(device, "desktop.control", enabled)
             .await
+            .map_err(storage_error)
     }
     async fn adb_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()> {
-        self.local_capability(device, "adb.control", enabled).await
+        self.local_capability(device, "adb.control", enabled)
+            .await
+            .map_err(storage_error)
     }
     async fn adb_shell_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()> {
-        self.local_capability(device, "adb.shell", enabled).await
+        self.local_capability(device, "adb.shell", enabled)
+            .await
+            .map_err(storage_error)
     }
     async fn desktop(&self, session: &SessionContext, id: &str, enabled: bool) -> Result<()> {
         let mut tx = self.pool.begin().await?;
@@ -429,41 +471,43 @@ impl WorkerService for WorkerServiceImpl {
         device: &DeviceIdentity,
         wait_seconds: u8,
     ) -> Result<Option<TerminalSession>> {
-        self.expire_terminals().await?;
-        let deadline =
-            std::time::Instant::now() + std::time::Duration::from_secs(u64::from(wait_seconds));
-        loop {
-            let mut tx = self.pool.begin().await?;
-            let active: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM worker_devices WHERE id=$1 AND state='active')",
-            )
-            .bind(&device.id)
-            .fetch_one(&mut *tx)
-            .await?;
-            ensure!(active, "设备已撤销");
-            let row = sqlx::query(
-                "SELECT *, (extract(epoch FROM created_at)*1000)::bigint AS created_at_ms FROM worker_terminal_sessions WHERE worker_id=$1 AND state='waiting' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1",
-            )
-            .bind(&device.id)
-            .fetch_optional(&mut *tx)
-            .await?;
-            if let Some(row) = row {
-                let id: String = row.try_get("id")?;
-                sqlx::query("UPDATE worker_terminal_sessions SET state='active',updated_at=now() WHERE id=$1")
-                    .bind(&id)
-                    .execute(&mut *tx)
-                    .await?;
-                let mut value = terminal(row)?;
-                value.state = "active".into();
+        async {
+            self.expire_terminals().await?;
+            let deadline =
+                std::time::Instant::now() + std::time::Duration::from_secs(u64::from(wait_seconds));
+            loop {
+                let mut tx = self.pool.begin().await?;
+                let active: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM worker_devices WHERE id=$1 AND state='active')",
+                )
+                .bind(&device.id)
+                .fetch_one(&mut *tx)
+                .await?;
+                ensure!(active, "设备已撤销");
+                let row = sqlx::query(
+                    "SELECT *, (extract(epoch FROM created_at)*1000)::bigint AS created_at_ms FROM worker_terminal_sessions WHERE worker_id=$1 AND state='waiting' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1",
+                )
+                .bind(&device.id)
+                .fetch_optional(&mut *tx)
+                .await?;
+                if let Some(row) = row {
+                    let id: String = row.try_get("id")?;
+                    sqlx::query("UPDATE worker_terminal_sessions SET state='active',updated_at=now() WHERE id=$1")
+                        .bind(&id)
+                        .execute(&mut *tx)
+                        .await?;
+                    let mut value = terminal(row)?;
+                    value.state = "active".into();
+                    tx.commit().await?;
+                    return Ok(Some(value));
+                }
                 tx.commit().await?;
-                return Ok(Some(value));
+                if std::time::Instant::now() >= deadline {
+                    return Ok(None);
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
-            tx.commit().await?;
-            if std::time::Instant::now() >= deadline {
-                return Ok(None);
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        }
+        }.await.map_err(storage_error)
     }
     async fn terminal_read(
         &self,
@@ -472,65 +516,67 @@ impl WorkerService for WorkerServiceImpl {
         after: u64,
         wait_seconds: u8,
     ) -> Result<TerminalEvents> {
-        let deadline =
-            std::time::Instant::now() + std::time::Duration::from_secs(u64::from(wait_seconds));
-        loop {
-            let row = sqlx::query(
-                "SELECT state FROM worker_terminal_sessions WHERE id=$1 AND worker_id=$2",
-            )
-            .bind(id)
-            .bind(&device.id)
-            .fetch_optional(&self.pool)
-            .await?;
-            let Some(row) = row else {
-                // 浏览器已关闭或会话过期，设备据此结束本地 PTY。
-                return Ok(TerminalEvents {
-                    state: "closed".into(),
-                    frames: Vec::new(),
-                });
-            };
-            let state: String = row.try_get("state")?;
-            let frames = sqlx::query(
-                "SELECT cursor,kind,data FROM worker_terminal_frames WHERE session_id=$1 AND direction='input' AND cursor>$2 ORDER BY cursor ASC LIMIT 256",
-            )
-            .bind(id)
-            .bind(after as i64)
-            .fetch_all(&self.pool)
-            .await?;
-            if !frames.is_empty() {
-                let cursor: i64 = frames.last().unwrap().try_get("cursor")?;
-                sqlx::query("UPDATE worker_terminal_sessions SET device_cursor=$2,updated_at=now() WHERE id=$1")
+        async {
+            let deadline =
+                std::time::Instant::now() + std::time::Duration::from_secs(u64::from(wait_seconds));
+            loop {
+                let row = sqlx::query(
+                    "SELECT state FROM worker_terminal_sessions WHERE id=$1 AND worker_id=$2",
+                )
+                .bind(id)
+                .bind(&device.id)
+                .fetch_optional(&self.pool)
+                .await?;
+                let Some(row) = row else {
+                    // 浏览器已关闭或会话过期，设备据此结束本地 PTY。
+                    return Ok(TerminalEvents {
+                        state: "closed".into(),
+                        frames: Vec::new(),
+                    });
+                };
+                let state: String = row.try_get("state")?;
+                let frames = sqlx::query(
+                    "SELECT cursor,kind,data FROM worker_terminal_frames WHERE session_id=$1 AND direction='input' AND cursor>$2 ORDER BY cursor ASC LIMIT 256",
+                )
+                .bind(id)
+                .bind(after as i64)
+                .fetch_all(&self.pool)
+                .await?;
+                if !frames.is_empty() {
+                    let cursor: i64 = frames.last().unwrap().try_get("cursor")?;
+                    sqlx::query("UPDATE worker_terminal_sessions SET device_cursor=$2,updated_at=now() WHERE id=$1")
+                        .bind(id)
+                        .bind(cursor)
+                        .execute(&self.pool)
+                        .await?;
+                    return Ok(TerminalEvents {
+                        state,
+                        frames: frames
+                            .into_iter()
+                            .map(terminal_frame)
+                            .collect::<Result<Vec<_>>>()?,
+                    });
+                }
+                if matches!(state.as_str(), "closing" | "closed") {
+                    return Ok(TerminalEvents {
+                        state,
+                        frames: Vec::new(),
+                    });
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Ok(TerminalEvents {
+                        state,
+                        frames: Vec::new(),
+                    });
+                }
+                // 设备长时间无输入时保持会话活跃，避免被浏览器长轮询间隙判为过期。
+                sqlx::query("UPDATE worker_terminal_sessions SET updated_at=now() WHERE id=$1")
                     .bind(id)
-                    .bind(cursor)
                     .execute(&self.pool)
                     .await?;
-                return Ok(TerminalEvents {
-                    state,
-                    frames: frames
-                        .into_iter()
-                        .map(terminal_frame)
-                        .collect::<Result<Vec<_>>>()?,
-                });
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             }
-            if matches!(state.as_str(), "closing" | "closed") {
-                return Ok(TerminalEvents {
-                    state,
-                    frames: Vec::new(),
-                });
-            }
-            if std::time::Instant::now() >= deadline {
-                return Ok(TerminalEvents {
-                    state,
-                    frames: Vec::new(),
-                });
-            }
-            // 设备长时间无输入时保持会话活跃，避免被浏览器长轮询间隙判为过期。
-            sqlx::query("UPDATE worker_terminal_sessions SET updated_at=now() WHERE id=$1")
-                .bind(id)
-                .execute(&self.pool)
-                .await?;
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        }
+        }.await.map_err(storage_error)
     }
     async fn terminal_write(
         &self,
@@ -538,36 +584,38 @@ impl WorkerService for WorkerServiceImpl {
         id: &str,
         request: TerminalInput,
     ) -> Result<()> {
-        validate_terminal_data(&request.data, 64 * 1024)?;
-        let mut tx = self.pool.begin().await?;
-        let row = sqlx::query(
-            "SELECT state FROM worker_terminal_sessions WHERE id=$1 AND worker_id=$2 FOR UPDATE",
-        )
-        .bind(id)
-        .bind(&device.id)
-        .fetch_optional(&mut *tx)
-        .await?
-        .context("终端会话不存在")?;
-        let state: String = row.try_get("state")?;
-        ensure!(state != "closed" && state != "closing", "终端会话正在关闭");
-        let cursor: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(cursor),0)+1 FROM worker_terminal_frames WHERE session_id=$1 AND direction='output'",
-        )
-        .bind(id)
-        .fetch_one(&mut *tx)
-        .await?;
-        sqlx::query("INSERT INTO worker_terminal_frames(session_id,direction,cursor,kind,data) VALUES($1,'output',$2,'data',$3)")
+        async {
+            validate_terminal_data(&request.data, 64 * 1024)?;
+            let mut tx = self.pool.begin().await?;
+            let row = sqlx::query(
+                "SELECT state FROM worker_terminal_sessions WHERE id=$1 AND worker_id=$2 FOR UPDATE",
+            )
             .bind(id)
-            .bind(cursor)
-            .bind(&request.data)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("UPDATE worker_terminal_sessions SET updated_at=now() WHERE id=$1")
+            .bind(&device.id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .context("终端会话不存在")?;
+            let state: String = row.try_get("state")?;
+            ensure!(state != "closed" && state != "closing", "终端会话正在关闭");
+            let cursor: i64 = sqlx::query_scalar(
+                "SELECT COALESCE(MAX(cursor),0)+1 FROM worker_terminal_frames WHERE session_id=$1 AND direction='output'",
+            )
             .bind(id)
-            .execute(&mut *tx)
+            .fetch_one(&mut *tx)
             .await?;
-        tx.commit().await?;
-        Ok(())
+            sqlx::query("INSERT INTO worker_terminal_frames(session_id,direction,cursor,kind,data) VALUES($1,'output',$2,'data',$3)")
+                .bind(id)
+                .bind(cursor)
+                .bind(&request.data)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("UPDATE worker_terminal_sessions SET updated_at=now() WHERE id=$1")
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+            Ok(())
+        }.await.map_err(storage_error)
     }
     async fn terminal_finish(
         &self,
@@ -575,30 +623,37 @@ impl WorkerService for WorkerServiceImpl {
         id: &str,
         request: TerminalFinish,
     ) -> Result<()> {
-        ensure!(request.reason.len() <= 120, "终端结束原因过长");
-        let n = sqlx::query(
-            "DELETE FROM worker_terminal_sessions WHERE id=$1 AND worker_id=$2 AND state IN ('active','closing')",
-        )
-        .bind(id)
-        .bind(&device.id)
-        .execute(&self.pool)
-        .await?
-        .rows_affected();
-        ensure!(n == 1, "终端会话不存在或已结束");
-        Ok(())
+        async {
+            ensure!(request.reason.len() <= 120, "终端结束原因过长");
+            let n = sqlx::query(
+                "DELETE FROM worker_terminal_sessions WHERE id=$1 AND worker_id=$2 AND state IN ('active','closing')",
+            )
+            .bind(id)
+            .bind(&device.id)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+            ensure!(n == 1, "终端会话不存在或已结束");
+            Ok(())
+        }.await.map_err(storage_error)
     }
     async fn terminal_access(&self, device: &DeviceIdentity, enabled: bool) -> Result<()> {
-        self.local_capability(device, "terminal.open", enabled)
-            .await?;
-        if !enabled {
-            sqlx::query("DELETE FROM worker_terminal_sessions WHERE worker_id=$1")
-                .bind(&device.id)
-                .execute(&self.pool)
+        async {
+            self.local_capability(device, "terminal.open", enabled)
                 .await?;
+            if !enabled {
+                sqlx::query("DELETE FROM worker_terminal_sessions WHERE worker_id=$1")
+                    .bind(&device.id)
+                    .execute(&self.pool)
+                    .await?;
+            }
+            Ok(())
         }
-        Ok(())
+        .await
+        .map_err(storage_error)
     }
     async fn claim(&self, device: &DeviceIdentity, request_id: &str) -> Result<Option<Task>> {
+        async {
         self.expire().await?;
         let mut tx = self.pool.begin().await?;
         let active: Option<String> = sqlx::query_scalar(
@@ -635,21 +690,24 @@ impl WorkerService for WorkerServiceImpl {
             .bind(&device.id).bind(lease).bind(request_id).fetch_optional(&mut *tx).await?;
         tx.commit().await?;
         row.map(task).transpose()
+        }.await.map_err(storage_error)
     }
     async fn heartbeat(&self, device: &DeviceIdentity, id: Option<(&str, &str)>) -> Result<()> {
-        let n =
-            sqlx::query("UPDATE worker_devices SET last_seen=now() WHERE id=$1 AND state='active'")
-                .bind(&device.id)
-                .execute(&self.pool)
-                .await?
-                .rows_affected();
-        ensure!(n == 1, "设备已撤销");
-        if let Some((id, lease)) = id {
-            let n=sqlx::query("UPDATE worker_tasks SET lease_until=now()+interval '2 minutes' WHERE id=$1 AND worker_id=$2 AND state='running' AND lease=$3 AND lease_until>now()")
-                .bind(id).bind(&device.id).bind(lease).execute(&self.pool).await?.rows_affected();
-            ensure!(n == 1, "任务租约失效");
-        }
-        Ok(())
+        async {
+            let n =
+                sqlx::query("UPDATE worker_devices SET last_seen=now() WHERE id=$1 AND state='active'")
+                    .bind(&device.id)
+                    .execute(&self.pool)
+                    .await?
+                    .rows_affected();
+            ensure!(n == 1, "设备已撤销");
+            if let Some((id, lease)) = id {
+                let n=sqlx::query("UPDATE worker_tasks SET lease_until=now()+interval '2 minutes' WHERE id=$1 AND worker_id=$2 AND state='running' AND lease=$3 AND lease_until>now()")
+                    .bind(id).bind(&device.id).bind(lease).execute(&self.pool).await?.rows_affected();
+                ensure!(n == 1, "任务租约失效");
+            }
+            Ok(())
+        }.await.map_err(storage_error)
     }
     async fn complete(
         &self,
@@ -657,111 +715,25 @@ impl WorkerService for WorkerServiceImpl {
         id: &str,
         request: CompleteTask,
     ) -> Result<()> {
-        ensure!(
-            serde_json::to_vec(&request.result)?.len() <= 512_000
-                && request.error.as_ref().is_none_or(|e| e.len() <= 4096),
-            "任务结果过大"
-        );
-        let state = if request.error.is_some() {
-            "failed"
-        } else {
-            "complete"
-        };
-        let n=sqlx::query("UPDATE worker_tasks SET state=$4,result=$5,error=$6,completed_at=now(),lease=NULL,lease_until=NULL WHERE id=$1 AND worker_id=$2 AND state='running' AND lease=$3 AND lease_until>now() AND EXISTS(SELECT 1 FROM worker_devices WHERE id=$2 AND state='active')")
-            .bind(id).bind(&device.id).bind(&request.lease).bind(state).bind(&request.result).bind(&request.error).execute(&self.pool).await?.rows_affected();
-        if n == 0 {
-            let completed:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM worker_tasks WHERE id=$1 AND worker_id=$2 AND state=$3 AND result IS NOT DISTINCT FROM $4 AND error IS NOT DISTINCT FROM $5)")
-                .bind(id).bind(&device.id).bind(state).bind(&request.result).bind(&request.error).fetch_one(&self.pool).await?;
-            ensure!(completed, "任务已完成或租约失效");
-        }
-        Ok(())
-    }
-}
-impl WorkerServiceImpl {
-    async fn terminal_input_frame(
-        &self,
-        session: &SessionContext,
-        id: &str,
-        kind: &str,
-        data: &str,
-    ) -> Result<TerminalSession> {
-        validate_terminal_data(data, 64 * 1024)?;
-        let mut tx = self.pool.begin().await?;
-        let row = sqlx::query(
-            "SELECT *, (extract(epoch FROM created_at)*1000)::bigint AS created_at_ms FROM worker_terminal_sessions WHERE id=$1 AND tenant_id=$2 AND user_id=$3 FOR UPDATE",
-        )
-        .bind(id)
-        .bind(&session.tenant_id)
-        .bind(&session.user_id)
-        .fetch_optional(&mut *tx)
-        .await?
-        .context("终端会话不存在")?;
-        let state: String = row.try_get("state")?;
-        ensure!(state != "closed" && state != "closing", "终端会话正在关闭");
-        let cursor: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(cursor),0)+1 FROM worker_terminal_frames WHERE session_id=$1 AND direction='input'",
-        )
-        .bind(id)
-        .fetch_one(&mut *tx)
-        .await?;
-        sqlx::query("INSERT INTO worker_terminal_frames(session_id,direction,cursor,kind,data) VALUES($1,'input',$2,$3,$4)")
-            .bind(id)
-            .bind(cursor)
-            .bind(kind)
-            .bind(data)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("UPDATE worker_terminal_sessions SET updated_at=now() WHERE id=$1")
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
-        let value = terminal(row)?;
-        tx.commit().await?;
-        Ok(value)
-    }
-    async fn expire_terminals(&self) -> Result<()> {
-        sqlx::query(
-            "DELETE FROM worker_terminal_sessions WHERE (state='waiting' AND updated_at<now()-interval '10 minutes') OR (state IN ('active','closing') AND updated_at<now()-interval '2 hours')",
-        )
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-    async fn expire(&self) -> Result<()> {
-        // 未知是否完成的副作用任务不自动重派，由用户检查结果后重试。
-        sqlx::query("UPDATE worker_tasks SET state='interrupted',error='设备租约过期，执行结果待确认',lease=NULL,lease_until=NULL WHERE state='running' AND lease_until<now()")
-            .execute(&self.pool).await?;
-        Ok(())
-    }
-}
-
-impl WorkerServiceImpl {
-    async fn local_capability(
-        &self,
-        device: &DeviceIdentity,
-        capability: &str,
-        enabled: bool,
-    ) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
-        let existing: Option<serde_json::Value> = sqlx::query_scalar("SELECT capabilities FROM worker_devices WHERE id=$1 AND tenant_id=$2 AND user_id=$3 AND state='active' FOR UPDATE")
-            .bind(&device.id).bind(&device.tenant).bind(&device.user)
-            .fetch_optional(&mut *tx).await?;
-        let mut capabilities: Vec<String> =
-            serde_json::from_value(existing.context("设备不存在或已撤销")?)?;
-        capabilities.retain(|item| item != capability);
-        if enabled {
-            capabilities.push(capability.into());
-        }
-        sqlx::query("UPDATE worker_devices SET capabilities=$2 WHERE id=$1")
-            .bind(&device.id)
-            .bind(serde_json::to_value(capabilities)?)
-            .execute(&mut *tx)
-            .await?;
-        if !enabled {
-            sqlx::query("UPDATE worker_tasks SET state='cancelled',lease=NULL,lease_until=NULL,completed_at=now(),error='本机执行授权已关闭' WHERE worker_id=$1 AND capability=$2 AND state IN ('queued','running')")
-                .bind(&device.id).bind(capability).execute(&mut *tx).await?;
-        }
-        tx.commit().await?;
-        Ok(())
+        async {
+            ensure!(
+                serde_json::to_vec(&request.result)?.len() <= 512_000
+                    && request.error.as_ref().is_none_or(|e| e.len() <= 4096),
+                "任务结果过大"
+            );
+            let state = if request.error.is_some() {
+                "failed"
+            } else {
+                "complete"
+            };
+            let n=sqlx::query("UPDATE worker_tasks SET state=$4,result=$5,error=$6,completed_at=now(),lease=NULL,lease_until=NULL WHERE id=$1 AND worker_id=$2 AND state='running' AND lease=$3 AND lease_until>now() AND EXISTS(SELECT 1 FROM worker_devices WHERE id=$2 AND state='active')")
+                .bind(id).bind(&device.id).bind(&request.lease).bind(state).bind(&request.result).bind(&request.error).execute(&self.pool).await?.rows_affected();
+            if n == 0 {
+                let completed:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM worker_tasks WHERE id=$1 AND worker_id=$2 AND state=$3 AND result IS NOT DISTINCT FROM $4 AND error IS NOT DISTINCT FROM $5)")
+                    .bind(id).bind(&device.id).bind(state).bind(&request.result).bind(&request.error).fetch_one(&self.pool).await?;
+                ensure!(completed, "任务已完成或租约失效");
+            }
+            Ok(())
+        }.await.map_err(storage_error)
     }
 }

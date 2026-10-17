@@ -21,4 +21,5 @@ mod mcp_schema;
     feature = "rhai",
     feature = "typescript"
 ))]
+#[cfg(feature = "postgres")]
 mod tests;

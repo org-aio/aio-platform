@@ -1,4 +1,4 @@
-#![cfg(feature = "server")]
+#![cfg(feature = "postgres")]
 
 #[path = "support/identity.rs"]
 mod identity_support;

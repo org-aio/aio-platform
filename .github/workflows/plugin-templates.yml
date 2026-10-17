@@ -127,6 +127,6 @@ jobs:
       - name: 验证生成 Component 的租户隔离
         run: |
           AIO_TEST_WASM_COMPONENT="$RUNNER_TEMP/aio-plugin-generated-ts/dist/plugin.wasm" \
-            cargo test -p az-plugin-host --no-default-features --features wasm --lib activates_reuses_and_destroys_tenant_instances -- --ignored
+            cargo test -p az-plugin-host --no-default-features --features postgres,wasm --lib activates_reuses_and_destroys_tenant_instances -- --ignored
           AIO_TEST_WASM_COMPONENT="$RUNNER_TEMP/aio-plugin-generated-kmp-component/dist/plugin.wasm" \
-            cargo test -p az-plugin-host --no-default-features --features wasm --lib activates_reuses_and_destroys_tenant_instances -- --ignored
+            cargo test -p az-plugin-host --no-default-features --features postgres,wasm --lib activates_reuses_and_destroys_tenant_instances -- --ignored

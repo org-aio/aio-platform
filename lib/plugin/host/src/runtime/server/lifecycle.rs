@@ -1,9 +1,9 @@
 use super::{
     RuntimeState,
+    plugin_catalog::{BoundRuntime, ProcessBinding},
     plugins::ProcessInstance,
     plugins::WasmActivation,
     repository::DiscoveredPlugin,
-    store::{BoundRuntime, ProcessBinding},
 };
 use crate::runtime::PluginRuntime;
 

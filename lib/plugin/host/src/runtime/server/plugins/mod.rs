@@ -1,9 +1,16 @@
 //! 宿主能力装配入口；插件统一复用核心的 TypeId 身份、依赖排序和 Dill。
+#[cfg(feature = "postgres")]
 mod delivery;
+mod discovery;
+#[cfg(feature = "postgres")]
+mod postgres;
+#[cfg(feature = "postgres")]
 pub use delivery::{
-    GithubDeliveryDiscoveryPlugin, PostgresDeliveryPlugin, PostgresDeliveryRolloutPlugin,
-    PostgresDocumentationPlugin,
+    PostgresDeliveryPlugin, PostgresDeliveryRolloutPlugin, PostgresDocumentationPlugin,
 };
+pub use discovery::GithubDeliveryDiscoveryPlugin;
+#[cfg(feature = "postgres")]
+pub use postgres::*;
 
 mod admission;
 mod builtins;
@@ -14,13 +21,14 @@ mod component_execution;
 mod component_management;
 mod component_resources;
 mod composition;
+#[cfg(feature = "postgres")]
 mod enhancement_catalog;
 mod enhancement_execution;
 mod evolution;
 #[cfg(test)]
 mod identity_tests;
 mod infrastructure;
-#[cfg(test)]
+#[cfg(all(test, feature = "postgres"))]
 mod infrastructure_tests;
 mod lifecycle;
 #[cfg(test)]
@@ -30,8 +38,9 @@ mod live;
 mod live_tests;
 #[cfg(test)]
 mod optional_tests;
+#[cfg(feature = "postgres")]
 mod platform_services;
-#[cfg(test)]
+#[cfg(all(test, feature = "postgres"))]
 mod platform_services_tests;
 pub(super) mod process_execution;
 #[cfg(any(feature = "remote-mcp", feature = "remote-grpc"))]
@@ -63,12 +72,14 @@ pub use component_execution::*;
 pub(in crate::runtime::server) use component_management::ManagementAccess;
 pub use component_management::{ComponentManagementPlugin, TrustedManagementComponent};
 pub use component_resources::*;
+#[cfg(feature = "postgres")]
 pub use enhancement_catalog::PostgresEnhancementCatalogPlugin;
 pub use enhancement_execution::*;
 pub use evolution::EvolutionPlugin;
 pub use infrastructure::*;
 use lifecycle::{HookPlan, Lifecycle};
 pub use live::RuntimeHost;
+#[cfg(feature = "postgres")]
 pub use platform_services::*;
 pub use process_execution::{
     ProcessExecutor, ProcessInstance, ProcessResponse, StartProcessRequest,

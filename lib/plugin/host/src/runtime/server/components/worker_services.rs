@@ -43,8 +43,10 @@ async fn configure(
     Json(access): Json<Access>,
 ) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
     let identity = device(&state, &headers).await?;
-    sqlx::query("UPDATE worker_devices SET capabilities=(SELECT coalesce(jsonb_agg(value),'[]'::jsonb) FROM jsonb_array_elements(capabilities) WHERE value<>to_jsonb($2::text)) || CASE WHEN $3 THEN jsonb_build_array($2::text) ELSE '[]'::jsonb END WHERE id=$1 AND state='active'")
-        .bind(identity.id).bind(CAPABILITY).bind(access.enabled).execute(state.service::<sqlx::PgPool>()?.as_ref()).await?;
+    state
+        .service::<dyn crate::generated::worker::WorkerService>()?
+        .skills_access(&identity, access.enabled)
+        .await?;
     Ok(Json(RuntimeResponse { data: () }))
 }
 
@@ -165,7 +167,7 @@ async fn invoke(
         .into_response())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "postgres"))]
 mod tests {
     use super::*;
     use crate::generated::worker::WorkerService as RuntimeWorkerService;

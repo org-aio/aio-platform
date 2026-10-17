@@ -7,15 +7,17 @@ pub mod model;
 mod pairing;
 #[cfg(feature = "server")]
 mod service;
-#[cfg(feature = "server")]
+#[cfg(feature = "postgres")]
 mod service_impl;
-#[cfg(all(test, feature = "server"))]
+#[cfg(all(test, feature = "postgres"))]
+mod storage_tests;
+#[cfg(all(test, feature = "postgres"))]
 mod tests;
-#[cfg(feature = "server")]
+#[cfg(feature = "postgres")]
 mod util;
 #[cfg(any(feature = "web", feature = "desktop"))]
 pub(crate) mod view;
 #[cfg(feature = "server")]
-pub use service::WorkerService;
-#[cfg(feature = "server")]
+pub use service::{WorkerService, WorkerServiceUnavailable};
+#[cfg(feature = "postgres")]
 pub(crate) use service_impl::WorkerServiceImpl;

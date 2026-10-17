@@ -3,7 +3,7 @@ use anyhow::{Context as _, Result, ensure};
 use az_plugin_package::PluginPackage;
 use sqlx::{PgPool, Row};
 
-use super::{RuntimeState, repository::is_package_revision, store::PluginStore};
+use super::{repository::is_package_revision, store::PluginStore};
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS plugin_packages (
@@ -94,28 +94,6 @@ impl PluginPackages for PluginStore {
             runtime: manifest.plugin.runtime.map(|runtime| runtime.kind),
             capabilities: manifest.plugin.capabilities,
         }))
-    }
-}
-
-impl RuntimeState {
-    pub(super) async fn restore_package_cache(&self, revision: &str) -> Result<()> {
-        if !is_package_revision(revision) {
-            return Ok(());
-        }
-        let archive = self
-            .store()?
-            .package_archive(revision)
-            .await?
-            .context("插件中心没有保存该内容版本的二进制包")?;
-        let package = tokio::task::spawn_blocking(move || PluginPackage::decode(&archive))
-            .await
-            .context("等待数据库插件包验证失败")??;
-        ensure!(
-            package.rev == revision,
-            "数据库插件包与请求的内容版本不一致"
-        );
-        self.repository()?.stage_publish(&package).await?;
-        Ok(())
     }
 }
 

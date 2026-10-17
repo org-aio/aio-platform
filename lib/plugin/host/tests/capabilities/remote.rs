@@ -42,6 +42,7 @@ async fn native_mcp_and_grpc_calls_share_contracts_deadlines_and_pinned_reload_s
     )
     .await?;
     assert!(state.service::<ScriptRuntime>().is_err());
+    #[cfg(feature = "postgres")]
     assert!(state.service::<sqlx::PgPool>().is_err());
     assert!(!root.path().join("cache").exists());
     let result = tokio::time::timeout(

@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 pub use super::plugins::ProcessInstance;
 pub use super::repository::{DiscoveredPlugin, RepositoryInstaller};
+#[cfg(feature = "postgres")]
 pub use super::store::PluginStore;
 
 impl RuntimeState {
@@ -17,6 +18,7 @@ impl RuntimeState {
     pub async fn has_test_package(&self, revision: &str) -> Result<bool> {
         Ok(self.store()?.package_archive(revision).await?.is_some())
     }
+    #[cfg(feature = "postgres")]
     pub fn database(&self) -> Result<sqlx::PgPool> {
         Ok(self.service::<sqlx::PgPool>()?.as_ref().clone())
     }
@@ -40,7 +42,7 @@ pub async fn prepare_frontend(
 ) -> Result<Arc<dyn std::any::Any + Send + Sync>> {
     Ok(super::frontend_package::prepare(state, revision, entry).await?)
 }
-
+#[cfg(feature = "postgres")]
 pub async fn exercise_rollouts(
     state: &RuntimeState,
     base: &str,

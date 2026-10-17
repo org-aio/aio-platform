@@ -17,7 +17,7 @@ use super::{
         stop_previous_process,
     },
     management::{create_publish_credential, revoke_publish_credential},
-    marketplace_store::PUBLISHED_REGISTRY_SOURCE,
+    plugin_catalog::PUBLISHED_REGISTRY_SOURCE,
     publication::{authorize_upload, download_package, publish},
     request_context::{
         authenticate, authenticate_manager, authenticate_publisher, authorize_publish_target,

@@ -156,6 +156,7 @@ impl Host {
             config(root, &base),
             plugins.clone(),
             |state, router| {
+                #[cfg(feature = "postgres")]
                 assert!(state.service::<sqlx::PgPool>().is_err());
                 assert!(state.service::<az_plugin_runtime::Keyring>().is_err());
                 Ok(router)

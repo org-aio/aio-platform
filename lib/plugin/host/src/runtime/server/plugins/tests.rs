@@ -10,8 +10,10 @@ trait Probe: Any + Send + Sync {
     fn value(&self) -> &'static str;
 }
 
+#[cfg(feature = "postgres")]
 pub(super) struct NoIdentity;
 
+#[cfg(feature = "postgres")]
 #[async_trait::async_trait]
 impl crate::identity::IdentityProvider for NoIdentity {
     async fn authenticate(
@@ -29,6 +31,7 @@ impl crate::identity::IdentityProvider for NoIdentity {
     }
 }
 
+#[cfg(feature = "postgres")]
 #[async_trait::async_trait]
 impl crate::authorization::AuthorizationProvider for NoIdentity {
     async fn can_publish(&self, _: &crate::identity::SessionContext) -> Result<bool> {
@@ -139,6 +142,7 @@ async fn remote_configuration_requires_its_feature_and_plugin() -> Result<()> {
 }
 
 #[tokio::test]
+#[cfg(feature = "postgres")]
 async fn default_profile_declares_services_and_rejects_missing_requirements() -> Result<()> {
     let extensions = extensions(crate::runtime::server::admin_test_support::with_identity(
         Arc::new(NoIdentity),
@@ -153,6 +157,7 @@ async fn default_profile_declares_services_and_rejects_missing_requirements() ->
             .count(),
         1
     );
+    #[cfg(feature = "postgres")]
     assert!(extensions.services.get_one::<sqlx::PgPool>().is_err());
     assert!(
         self::extensions(vec![Arc::new(ClipboardPlugin)])
@@ -192,6 +197,7 @@ async fn selected_plugins_control_real_http_routes() -> Result<()> {
             .service::<dyn crate::authorization::AuthorizationProvider>()
             .is_err()
     );
+    #[cfg(feature = "postgres")]
     assert!(state.service::<sqlx::PgPool>().is_err());
     assert!(state.service::<az_plugin_runtime::Keyring>().is_err());
     assert!(state.service::<dyn super::WasmExecutor>().is_err());

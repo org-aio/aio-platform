@@ -1,6 +1,6 @@
 mod broker;
 mod configuration;
-#[cfg(test)]
+#[cfg(all(test, feature = "postgres"))]
 mod database_tests;
 mod development;
 mod instance;

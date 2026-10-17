@@ -1,18 +1,18 @@
 //! 旧版目录的统一持久化契约；跨职责提交由同一个提供者保证原子性。
 
 mod contract;
+mod model;
+#[cfg(feature = "postgres")]
 mod postgres_queries;
 mod queries;
 
 pub use super::execution_availability::ExecutionAvailability;
 pub use super::plugins::ProcessInstance;
-pub use super::publisher_store::{PublishJob, PublisherBinding};
 pub use super::repository::DiscoveredPlugin;
-pub use super::store::{
-    BoundRuntime, PageBinding, PluginStore, ProcessBinding, ProcessTarget, ServiceBinding,
-    WasmTarget,
-};
+#[cfg(feature = "postgres")]
+pub use super::store::PluginStore;
 pub use contract::*;
+pub use model::*;
 pub use queries::*;
 
 /// 管理、发布、恢复与前端共享的目录。按职责拆分方法，但只允许一次整体绑定，
@@ -28,3 +28,6 @@ pub trait PluginCatalog:
     + PluginCatalogQueries
 {
 }
+
+/// 宿主发布包的目录来源，与具体持久化实现无关。
+pub(crate) const PUBLISHED_REGISTRY_SOURCE: &str = "aio://published";

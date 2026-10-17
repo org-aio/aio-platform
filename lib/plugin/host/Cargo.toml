@@ -63,6 +63,7 @@ web-sys = { version = "0.3.77", features = ["AbortSignal", "Document", "Element"
 test-support = ["server"]
 components = ["dep:az-plugin-bundle", "dep:az-plugin-contract", "dep:az-plugin-runtime", "dep:az-plugin-core", "dep:az-plugin-enhancement", "dep:async-trait", "dep:semver", "dep:getrandom", "dep:futures-util"]
 default = []
+postgres = ["server", "dep:sqlx", "az-plugin-runtime/postgres"]
 wasm = ["server", "dep:wasmtime", "az-plugin-runtime/wasm", "az-plugin-manifest/wasm-validation"]
 sidecar = ["server"]
 rhai = ["server", "az-plugin-enhancement/rhai"]
@@ -75,7 +76,7 @@ remote-grpc = ["server", "dep:arc-swap", "dep:prost", "dep:prost-reflect", "dep:
 ui = ["dep:dioxus", "dep:dioxus-icons", "dep:az-dioxus-admin-shell", "dep:az-ui-components", "dep:tracing"]
 web = ["ui", "dioxus/web", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
 desktop = ["ui", "dioxus/desktop", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
-server = ["dep:tempfile", "dep:tower", "dep:schemars", "dep:tokio-util", "dep:http-body", "dep:jsonwebtoken","components", "az-plugin-runtime/postgres", "az-plugin-manifest/validation", "dep:az-plugin-package", "dep:axum", "dep:flate2", "dep:kuchikiki", "dep:mime_guess", "dep:reqwest", "dep:sha2", "dep:sqlx", "dep:tar", "dep:tokio", "dep:toml", "dep:tower-http", "dep:uuid", "dep:urlencoding"]
+server = ["dep:tempfile", "dep:tower", "dep:schemars", "dep:tokio-util", "dep:http-body", "dep:jsonwebtoken","components", "az-plugin-manifest/validation", "dep:az-plugin-package", "dep:axum", "dep:flate2", "dep:kuchikiki", "dep:mime_guess", "dep:reqwest", "dep:sha2", "dep:tar", "dep:tokio", "dep:toml", "dep:tower-http", "dep:uuid", "dep:urlencoding"]
 
 [lints.rust]
 unsafe_code = "forbid"

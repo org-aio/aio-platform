@@ -9,12 +9,13 @@
 
 ## 执行器与协议编译选择
 
-`server` 提供宿主契约、Dill 装配、生命周期及持久化服务，不引入内置语言、
+`server` 提供宿主契约、Dill 装配、生命周期、路由和持久化接口，不编译 PostgreSQL、SQLx、SQL parser、内置语言、
 Wasm 或 MCP/gRPC 实现。应用在 Cargo 中选取所需实现，再把具体插件交给
 `RuntimeState::initialize` 或 `RuntimeHost::initialize`；编译可用不等于已经装配。
 
 | Cargo feature | 装配插件 | 职责 |
 | --- | --- | --- |
+| `postgres` | `PostgresPlugin`、`DatabasePlugin` 及默认目录、交付、设备提供者 | 正式 PostgreSQL 实现；按需装配 |
 | `rhai` | `RhaiPlugin` | Rhai 编译与有界执行 |
 | `typescript` | `TypeScriptPlugin` | Oxc 转译与 QuickJS 有界执行 |
 | `wasm` | `WasmPlugin`、`WasmComponentPlugin` | Wasm 执行 |
@@ -31,9 +32,9 @@ Wasm 或 MCP/gRPC 实现。应用在 Cargo 中选取所需实现，再把具体�
 可以通过公共 `ScriptExecutor` 接口装配外部执行器。
 显式选择脚本运行时却没有执行器时启动失败；不支持的语言与未编译的远端协议会被拒绝。
 
-`default_plugins()` 汇集已编译的默认实现。纯 `server`、`wasm` 或 `sidecar`
-组合不要求脚本服务；选择协议的默认组合还需要至少一种内置语言。
-完整发布应用显式启用两种语言、两种入站协议和所需执行环境。
+`default_plugins()` 仅在 `postgres` feature 下提供，汇集已编译的默认实现。
+正式产品与开发宿主显式启用 `postgres`；自定义无数据库宿主需要通过 Dill 装配所需的目录与业务服务提供者。
+脚本、Wasm、Sidecar 和协议 feature 不会隐式选择数据库。仅选择协议时原生能力仍可运行，不要求解释器。
 
 组件资源可选依赖增强服务；没有该服务时仍可安装和运行组件，增强调用明确失败。
 `RuntimeAssembly::optional_service::<I>()` 声明这种依赖，
@@ -42,7 +43,7 @@ Wasm 或 MCP/gRPC 实现。应用在 Cargo 中选取所需实现，再把具体�
 
 依赖边界由 `node scripts/check-host-features.mjs` 检查。
 `executor_plugins` 集成测试分别用真实 MCP/gRPC 客户端验证外部执行器的发布与重启恢复；
-`component_executors` 在没有内置语言的 `server` 组合中验证整包执行及资源生命周期。
+`component_executors` 在不编译数据库的 `server` 组合中验证文件目录、整包 HTTP 生命周期、恢复和交付；默认数据库事务用例额外启用 `postgres`。
 
 ## 已配对设备的应用控制
 

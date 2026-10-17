@@ -94,7 +94,7 @@ pub(super) async fn activate(
     )
     .await
 }
-
+#[cfg(feature = "postgres")]
 pub(super) async fn install_followed(
     state: &RuntimeState,
     tenant_id: &str,

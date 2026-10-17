@@ -15,7 +15,7 @@ impl Components {
     pub async fn publish(&self, bundle: Bundle, readme: &str) -> Result<Uuid> {
         self.publish_checked(bundle, readme, None).await
     }
-
+    #[cfg(feature = "postgres")]
     pub async fn publish_delivery(&self, bundle: Bundle, readme: &str, job: i64) -> Result<Uuid> {
         self.publish_checked(bundle, readme, Some(job)).await
     }
