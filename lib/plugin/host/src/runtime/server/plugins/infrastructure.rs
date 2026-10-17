@@ -156,6 +156,9 @@ impl Plugin<RuntimeAssembly> for StorePlugin {
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
             assembly.declare_resource::<PluginStore>()?;
+            assembly
+                .services
+                .bind::<dyn super::super::plugin_catalog::PluginCatalog, PluginStore>();
             assembly.on_initialize::<Self>(|state, _| {
                 Box::pin(async move {
                     let store = Arc::new(PluginStore::new(

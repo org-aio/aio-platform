@@ -22,7 +22,7 @@ pub(super) async fn install(
     request: &InstallPluginRequest,
 ) -> Result<ActivatedPlugin> {
     anyhow::ensure!(
-        !super::marketplace_removal::is_removed(&state.store()?.pool, &request.git).await?,
+        !state.store()?.is_removed(&request.git).await?,
         "插件已从市场删除，无法安装"
     );
     if let Some(components) =
@@ -126,13 +126,17 @@ async fn activate_inner(
     let activation_lock = state.activation_lock(tenant_id, &discovered.source_id)?;
     let _activation_guard = activation_lock.lock().await;
     if following {
-        let eligible: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM tenant_plugin_bindings b JOIN plugin_sources s ON s.id=b.source_id JOIN marketplace_entries m ON m.git=s.git AND m.source='aio://published' LEFT JOIN delivery_installations i ON i.tenant_id=b.tenant_id AND i.source_id=b.source_id WHERE b.tenant_id=$1 AND b.source_id=$2 AND b.enabled AND m.rev=$3 AND i.excluded_revision IS DISTINCT FROM $3)")
-            .bind(tenant_id).bind(&discovered.source_id).bind(&discovered.revision).fetch_one(&state.store()?.pool).await?;
+        let eligible = state
+            .store()?
+            .upgrade_eligible(tenant_id, &discovered.source_id, &discovered.revision)
+            .await?;
         anyhow::ensure!(eligible, "安装状态或目标版本已改变，取消自动升级");
     }
     let publish_only = if publication.is_some() {
-        sqlx::query_scalar::<_,bool>("SELECT EXISTS(SELECT 1 FROM delivery_jobs WHERE package_revision=$3) AND EXISTS(SELECT 1 FROM delivery_installations WHERE tenant_id=$1 AND source_id=$2) AND NOT EXISTS(SELECT 1 FROM tenant_plugin_bindings WHERE tenant_id=$1 AND source_id=$2 AND enabled)")
-            .bind(tenant_id).bind(&discovered.source_id).bind(&discovered.revision).fetch_one(&state.store()?.pool).await?
+        state
+            .store()?
+            .publication_only(tenant_id, &discovered.source_id, &discovered.revision)
+            .await?
     } else {
         false
     };

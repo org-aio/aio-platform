@@ -1,7 +1,18 @@
-use super::model::MarketplaceItem;
+use std::sync::Arc;
+
 use anyhow::{Context as _, Result, ensure};
 use az_tool::{ToolManifest, registration::Documentation};
 use sqlx::PgPool;
+
+use super::ToolCatalog;
+
+/// 默认工具目录从已收录版本中选择最新版本并叠加文档元数据。
+#[dill::component]
+#[dill::interface(dyn ToolCatalog)]
+#[dill::scope(dill::Singleton)]
+pub struct PostgresToolCatalog {
+    pool: Arc<PgPool>,
+}
 
 pub(in crate::runtime::server) async fn migrate(pool: &PgPool) -> Result<()> {
     sqlx::Executor::execute(pool, sqlx::raw_sql("CREATE TABLE IF NOT EXISTS marketplace_tools (id TEXT NOT NULL, version TEXT NOT NULL, manifest JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY(id, version))")).await?;
@@ -63,38 +74,42 @@ fn decode(value: serde_json::Value) -> Result<ToolManifest> {
     Ok(manifest)
 }
 
-pub(in crate::runtime::server) async fn entries(pool: &PgPool) -> Result<Vec<MarketplaceItem>> {
-    let rows: Vec<serde_json::Value> =
+#[async_trait::async_trait]
+impl ToolCatalog for PostgresToolCatalog {
+    async fn entries(&self) -> Result<Vec<ToolManifest>> {
+        let pool = self.pool.as_ref();
+        let rows: Vec<serde_json::Value> =
         sqlx::query_scalar("SELECT manifest FROM marketplace_tools t WHERE NOT EXISTS(SELECT 1 FROM marketplace_tool_removals r WHERE r.id=t.id) ORDER BY id, created_at")
             .fetch_all(pool)
             .await?;
-    let mut latest = std::collections::BTreeMap::<String, ToolManifest>::new();
-    for row in rows {
-        let manifest = decode(row)?;
-        let replace = latest
-            .get(&manifest.id)
-            .map(|old| {
-                Ok::<_, anyhow::Error>(
-                    semver::Version::parse(&manifest.version)?
-                        > semver::Version::parse(&old.version)?,
-                )
-            })
-            .transpose()?
-            .unwrap_or(true);
-        if replace {
-            latest.insert(manifest.id.clone(), manifest);
+        let mut latest = std::collections::BTreeMap::<String, ToolManifest>::new();
+        for row in rows {
+            let manifest = decode(row)?;
+            let replace = latest
+                .get(&manifest.id)
+                .map(|old| {
+                    Ok::<_, anyhow::Error>(
+                        semver::Version::parse(&manifest.version)?
+                            > semver::Version::parse(&old.version)?,
+                    )
+                })
+                .transpose()?
+                .unwrap_or(true);
+            if replace {
+                latest.insert(manifest.id.clone(), manifest);
+            }
         }
-    }
-    let docs: Vec<(String, serde_json::Value)> =
-        sqlx::query_as("SELECT id,document FROM marketplace_tool_details")
-            .fetch_all(pool)
-            .await?;
-    for (id, value) in docs {
-        if let Some(manifest) = latest.get_mut(&id) {
-            apply_metadata(manifest, &serde_json::from_value(value)?);
+        let docs: Vec<(String, serde_json::Value)> =
+            sqlx::query_as("SELECT id,document FROM marketplace_tool_details")
+                .fetch_all(pool)
+                .await?;
+        for (id, value) in docs {
+            if let Some(manifest) = latest.get_mut(&id) {
+                apply_metadata(manifest, &serde_json::from_value(value)?);
+            }
         }
+        Ok(latest.into_values().collect())
     }
-    Ok(latest.into_values().map(Into::into).collect())
 }
 
 // 保留版本历史和删除标记，避免启动导入或自动发布使过时条目重新出现。

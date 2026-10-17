@@ -1,3 +1,4 @@
+use super::plugin_catalog::*;
 use anyhow::Result;
 
 use super::{
@@ -7,8 +8,9 @@ use super::{
 };
 use crate::runtime::MarketplaceEntry;
 
-impl PluginStore {
-    pub async fn activate(
+#[async_trait::async_trait]
+impl PluginActivation for PluginStore {
+    async fn activate(
         &self,
         tenant_id: &str,
         plugin: DiscoveredPlugin,
@@ -19,7 +21,7 @@ impl PluginStore {
             .await
     }
 
-    pub(super) async fn publish_only(
+    async fn publish_only(
         &self,
         tenant_id: &str,
         plugin: DiscoveredPlugin,
@@ -28,7 +30,9 @@ impl PluginStore {
         self.save_activation(tenant_id, plugin, None, Some(publication), false)
             .await
     }
+}
 
+impl PluginStore {
     async fn save_activation(
         &self,
         tenant_id: &str,

@@ -47,6 +47,7 @@ use dill::Catalog;
 
 use super::RuntimeState;
 
+pub use super::tools::ToolCatalog;
 pub(super) use admission::{admit, admit_router};
 pub use builtins::*;
 pub use capability_execution::*;

@@ -94,7 +94,7 @@ pub(in crate::runtime::server::tools) async fn publish(
             .map(|_| "README 暂时无法读取，可在详情页刷新".into()),
     };
     storage::publish(
-        &state.store()?.pool,
+        state.service::<sqlx::PgPool>()?.as_ref(),
         &manifest,
         &doc,
         &identity.sha,

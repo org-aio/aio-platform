@@ -416,7 +416,7 @@ async fn shutdown_leaves_unclaimed_publications_durable() -> Result<()> {
         .await?;
     state.start_publish_job(job.clone())?;
     tokio::time::timeout(Duration::from_secs(5), state.shutdown()).await??;
-    assert!(state.store()?.pool.is_closed());
+    assert!(state.service::<sqlx::PgPool>()?.is_closed());
     let pool = sqlx::PgPool::connect(&database).await?;
     let status: String = sqlx::query_scalar("SELECT state FROM plugin_publish_jobs WHERE id=$1")
         .bind(&job.id)

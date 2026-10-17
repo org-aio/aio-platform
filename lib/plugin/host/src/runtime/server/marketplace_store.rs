@@ -1,3 +1,4 @@
+use super::plugin_catalog::*;
 use anyhow::{Context as _, Result};
 use sqlx::{PgPool, Postgres, Row, Transaction, postgres::PgRow};
 
@@ -56,8 +57,9 @@ pub(super) async fn upsert_published_marketplace_entry(
     Ok(())
 }
 
-impl PluginStore {
-    pub async fn published_marketplace_entry(
+#[async_trait::async_trait]
+impl PluginMarketplace for PluginStore {
+    async fn published_marketplace_entry(
         &self,
         git: &str,
         requested_revision: Option<&str>,
@@ -81,7 +83,7 @@ impl PluginStore {
             .map(|entry| entry.filter(|entry| revision_matches(&entry.rev, requested_revision)))
     }
 
-    pub async fn marketplace_entries(&self, source: &str) -> Result<Vec<MarketplaceEntry>> {
+    async fn marketplace_entries(&self, source: &str) -> Result<Vec<MarketplaceEntry>> {
         let rows = sqlx::query(
             "SELECT git, rev, title, summary, license, tags, runtime, capabilities FROM marketplace_entries WHERE source = $1 ORDER BY title, git",
         )

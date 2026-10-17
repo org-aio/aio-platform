@@ -21,19 +21,7 @@ pub(super) async fn list(
 ) -> Result<Json<Vec<PublishedRelease>>, RuntimeError> {
     authenticate(&state, &headers).await?;
     let git = az_plugin_package::normalize_git_source(&query.git)?;
-    let rows = sqlx::query_as::<_, (String, String, String, String)>("SELECT p.version,p.source_revision,p.revision,p.manifest_toml FROM plugin_packages p WHERE p.git=$1 AND p.source_revision IS NOT NULL AND EXISTS(SELECT 1 FROM plugin_revisions r JOIN plugin_sources s ON s.id=r.source_id WHERE r.revision=p.revision AND s.git=p.git) ORDER BY p.created_at DESC LIMIT 100")
-        .bind(&git).fetch_all(&state.store()?.pool).await?;
-    let mut releases = rows
-        .into_iter()
-        .map(|(version, source_sha, digest, manifest)| PublishedRelease {
-            git: git.clone(),
-            version,
-            source_sha,
-            digest,
-            manifest,
-            abi: 1,
-        })
-        .collect::<Vec<_>>();
+    let mut releases = state.store()?.releases(&git).await?;
     if state
         .optional_service::<crate::runtime::server::components::Components>()?
         .is_some()

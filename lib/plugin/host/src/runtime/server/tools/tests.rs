@@ -43,7 +43,17 @@ async fn exercise(pool: &PgPool) -> Result<()> {
         .bind(serde_json::to_value(&next)?)
         .execute(pool)
         .await?;
-    let entries = super::entries(pool).await?;
+    let catalog = dill::Catalog::builder()
+        .add_value(pool.clone())
+        .add::<super::PostgresToolCatalog>()
+        .build()
+        .get_one::<dyn super::ToolCatalog>()?;
+    let entries = catalog
+        .entries()
+        .await?
+        .into_iter()
+        .map(super::MarketplaceItem::from)
+        .collect::<Vec<_>>();
     let values = serde_json::to_value(entries)?;
     assert_eq!(values.as_array().unwrap().len(), 1);
     assert_eq!(values[0]["rev"], "0.4.10");
@@ -66,7 +76,7 @@ async fn exercise(pool: &PgPool) -> Result<()> {
     );
     super::storage::remove(pool, "codex-model-sync").await?;
     super::migrate(pool).await?;
-    assert!(super::entries(pool).await?.is_empty());
+    assert!(catalog.entries().await?.is_empty());
     assert!(
         super::storage::get(pool, "codex-model-sync", "0.4.1")
             .await?

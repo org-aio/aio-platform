@@ -31,6 +31,7 @@ const DEFAULT_CACHE_BYTES: u64 = 1024 * 1024 * 1024;
 const DEFAULT_CACHE_ENTRIES: usize = 100_000;
 const DEFAULT_CACHE_REVISIONS: usize = 512;
 
+/// 已校验产物与页面的安装候选，由目录提供者原子保存。
 pub struct DiscoveredPlugin {
     pub source_id: String,
     pub git: String,

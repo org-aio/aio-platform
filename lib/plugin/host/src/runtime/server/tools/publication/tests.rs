@@ -124,7 +124,15 @@ async fn keeps_versions_immutable_and_cannot_take_over_another_repository() -> a
             "新版 README"
         );
         assert_eq!(
-            serde_json::to_value(super::super::storage::entries(&pool).await?)?[0]["rev"],
+            serde_json::to_value(
+                dill::Catalog::builder()
+                    .add_value(pool.clone())
+                    .add::<super::super::storage::PostgresToolCatalog>()
+                    .build()
+                    .get_one::<dyn super::super::ToolCatalog>()?
+                    .entries()
+                    .await?
+            )?[0]["version"],
             manifest.version
         );
         let mut takeover = manifest;

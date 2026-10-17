@@ -48,6 +48,9 @@ async fn change(
     {
         return Err(RuntimeError::forbidden("当前租户未安装此插件"));
     }
-    super::service::set_hidden(&state.store()?.pool, &session.tenant_id, &source, hidden).await?;
+    state
+        .store()?
+        .set_menu_hidden(&session.tenant_id, &source, hidden)
+        .await?;
     Ok(Json(RuntimeResponse { data: () }))
 }

@@ -8,7 +8,8 @@ use super::{
 use crate::runtime::{PluginRuntime, PluginState};
 use anyhow::Result;
 
-pub(super) struct ExecutionAvailability {
+/// 当前宿主执行器可用性，供目录投影安装意图为活动或暂停状态。
+pub struct ExecutionAvailability {
     wasm: bool,
     process: bool,
 }

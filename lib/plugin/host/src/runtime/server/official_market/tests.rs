@@ -1,3 +1,4 @@
+use crate::runtime::server::plugin_catalog::*;
 use anyhow::Result;
 use sqlx::{
     PgPool,

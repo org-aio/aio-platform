@@ -1,3 +1,4 @@
+use super::plugin_catalog::*;
 use anyhow::{Context as _, Result, ensure};
 use az_plugin_package::PluginPackage;
 use sqlx::{PgPool, Row};
@@ -25,8 +26,9 @@ pub(super) async fn migrate(pool: &PgPool) -> Result<()> {
     Ok(())
 }
 
-impl PluginStore {
-    pub(super) async fn save_package(&self, package: &PluginPackage) -> Result<()> {
+#[async_trait::async_trait]
+impl PluginPackages for PluginStore {
+    async fn save_package(&self, package: &PluginPackage) -> Result<()> {
         let archive_package = package.clone();
         let archive = tokio::task::spawn_blocking(move || archive_package.encode())
             .await
@@ -74,7 +76,7 @@ impl PluginStore {
         Ok(())
     }
 
-    pub(super) async fn package_archive(&self, revision: &str) -> Result<Option<Vec<u8>>> {
+    async fn package_archive(&self, revision: &str) -> Result<Option<Vec<u8>>> {
         ensure!(
             is_package_revision(revision),
             "插件包版本必须是完整 SHA-256"
@@ -86,7 +88,7 @@ impl PluginStore {
             .map_err(Into::into)
     }
 
-    pub(super) async fn downloadable_package(&self, revision: &str) -> Result<Option<Vec<u8>>> {
+    async fn downloadable_package(&self, revision: &str) -> Result<Option<Vec<u8>>> {
         ensure!(
             is_package_revision(revision),
             "插件包版本必须是完整 SHA-256"
@@ -96,7 +98,7 @@ impl PluginStore {
         ).bind(revision).fetch_optional(&self.pool).await.map_err(Into::into)
     }
 
-    pub(super) async fn published_package_entry(
+    async fn published_package_entry(
         &self,
         git: &str,
         revision: &str,

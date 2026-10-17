@@ -53,7 +53,7 @@ pub(super) async fn publish(
             &source_id,
             None,
             "publish-queued",
-            "二进制包已保存 PostgreSQL，后台健康检查通过后原子激活",
+            "二进制包已持久化，后台健康检查通过后原子激活",
         )
         .await;
     if job.state == PublishState::Queued {

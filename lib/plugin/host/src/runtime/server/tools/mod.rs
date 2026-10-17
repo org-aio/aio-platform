@@ -16,7 +16,14 @@ use axum::{
     routing::{delete, get, post},
 };
 pub(super) use model::MarketplaceItem;
-pub(super) use storage::{entries, migrate};
+pub(super) use storage::PostgresToolCatalog;
+pub(super) use storage::migrate;
+
+/// CLI 工具目录贡献者；管理目录仅在已装配时聚合其条目。
+#[async_trait::async_trait]
+pub trait ToolCatalog: std::any::Any + Send + Sync {
+    async fn entries(&self) -> anyhow::Result<Vec<az_tool::ToolManifest>>;
+}
 
 pub(super) fn router() -> Router<RuntimeState> {
     Router::new()
@@ -49,7 +56,7 @@ async fn manifest(
         }
         .to_string(),
     )?;
-    let value = storage::get(&state.store()?.pool, &id, &version)
+    let value = storage::get(state.service::<sqlx::PgPool>()?.as_ref(), &id, &version)
         .await?
         .ok_or_else(|| RuntimeError::not_found("该工具版本尚未收录于插件市场"))?;
     Ok(Json(value))

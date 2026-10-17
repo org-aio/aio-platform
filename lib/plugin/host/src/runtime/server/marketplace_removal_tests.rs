@@ -1,6 +1,8 @@
 use super::*;
 use crate::identity::{IdentityProvider, SessionContext};
+use crate::runtime::server::plugin_catalog::*;
 use anyhow::Result;
+use sqlx::PgPool;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -60,7 +62,7 @@ async fn removal_http_authorization_not_found_and_install_rejection() -> Result<
     .await?;
     let git = format!("https://example.com/{}.git", uuid::Uuid::new_v4());
     sqlx::query("INSERT INTO marketplace_entries(source,git,rev,title,summary,license,tags,capabilities) VALUES('aio://published',$1,'old','Removal test','','MIT','[]','{}')")
-        .bind(&git).execute(&state.store()?.pool).await?;
+        .bind(&git).execute(state.service::<sqlx::PgPool>()?.as_ref()).await?;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let base = format!("http://{}", listener.local_addr()?);
     let server = tokio::spawn(
@@ -70,11 +72,11 @@ async fn removal_http_authorization_not_found_and_install_rejection() -> Result<
     server.abort();
     sqlx::query("DELETE FROM marketplace_plugin_removals WHERE git=$1")
         .bind(&git)
-        .execute(&state.store()?.pool)
+        .execute(state.service::<sqlx::PgPool>()?.as_ref())
         .await?;
     sqlx::query("DELETE FROM marketplace_entries WHERE git=$1")
         .bind(&git)
-        .execute(&state.store()?.pool)
+        .execute(state.service::<sqlx::PgPool>()?.as_ref())
         .await?;
     result
 }
@@ -173,11 +175,11 @@ async fn exercise(pool: &PgPool) -> Result<()> {
         INSERT INTO business_data VALUES ('keep');
     "#).execute(pool).await?;
     let git = "https://example.com/remove.git";
-    assert!(!is_removed(pool, git).await?);
-    mark_removed(pool, git).await?;
-    mark_removed(pool, git).await?;
-    assert!(is_removed(pool, git).await?);
-    assert!(!is_removed(pool, "https://example.com/keep.git").await?);
+    assert!(!store.is_removed(git).await?);
+    store.mark_removed(git).await?;
+    store.mark_removed(git).await?;
+    assert!(store.is_removed(git).await?);
+    assert!(!store.is_removed("https://example.com/keep.git").await?);
 
     let mut entries = store.marketplace_entries("aio://published").await?;
     let mut republished = entries
@@ -198,13 +200,15 @@ async fn exercise(pool: &PgPool) -> Result<()> {
     // 模拟已安装目录与组件目录重复回填相同来源。
     republished.installed = true;
     entries.push(republished);
-    retain_listed(pool, &mut entries).await?;
+    retain_listed(&store, &mut entries).await?;
     assert!(!entries.is_empty());
     assert!(
         entries
             .iter()
-            .all(|entry| entry.git == "https://example.com/keep.git")
+            .all(|entry| entry.git == "https://example.com/keep.git"
+                || (entry.git == git && entry.installed))
     );
+    assert_eq!(entries.iter().filter(|entry| entry.git == git).count(), 1);
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
             "SELECT count(*) FROM tenant_plugin_bindings WHERE revision_id='old-revision'"

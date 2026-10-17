@@ -1,3 +1,4 @@
+use super::plugin_catalog::*;
 use anyhow::{Context as _, Result, ensure};
 use sha2::{Digest as _, Sha256};
 use sqlx::{PgPool, Postgres, Row, Transaction};
@@ -34,8 +35,9 @@ CREATE SEQUENCE IF NOT EXISTS plugin_publish_requests_seq;
 ALTER TABLE plugin_publish_jobs ADD COLUMN IF NOT EXISTS request_order BIGINT NOT NULL DEFAULT nextval('plugin_publish_requests_seq');
 "#;
 
+/// 持久发布任务，由管理插件恢复和执行。
 #[derive(Clone)]
-pub(super) struct PublishJob {
+pub struct PublishJob {
     pub id: String,
     pub tenant_id: String,
     pub source_id: String,
@@ -47,7 +49,8 @@ pub(super) struct PublishJob {
     pub detail: String,
 }
 
-pub(super) struct PublisherBinding {
+/// 发布凭据的租户与来源绑定。
+pub struct PublisherBinding {
     pub tenant_id: String,
     pub git: String,
 }
@@ -88,8 +91,9 @@ pub(super) async fn ensure_current_publication(
     Ok(())
 }
 
-impl PluginStore {
-    pub(super) async fn create_publish_credential(
+#[async_trait::async_trait]
+impl PluginPublications for PluginStore {
+    async fn create_publish_credential(
         &self,
         tenant_id: &str,
         git: &str,
@@ -118,7 +122,7 @@ impl PluginStore {
         })
     }
 
-    pub(super) async fn publisher_binding(&self, token: &str) -> Result<Option<PublisherBinding>> {
+    async fn publisher_binding(&self, token: &str) -> Result<Option<PublisherBinding>> {
         let row = sqlx::query(
             "SELECT tenant_id, git FROM plugin_publish_credentials WHERE token_hash = $1 AND revoked_at IS NULL",
         )
@@ -131,11 +135,7 @@ impl PluginStore {
         }))
     }
 
-    pub(super) async fn revoke_publish_credential(
-        &self,
-        tenant_id: &str,
-        credential_id: &str,
-    ) -> Result<()> {
+    async fn revoke_publish_credential(&self, tenant_id: &str, credential_id: &str) -> Result<()> {
         let result = sqlx::query(
             "UPDATE plugin_publish_credentials SET revoked_at = now() WHERE id = $1 AND tenant_id = $2 AND revoked_at IS NULL",
         )
@@ -147,7 +147,7 @@ impl PluginStore {
         Ok(())
     }
 
-    pub(super) async fn queue_publish_job(
+    async fn queue_publish_job(
         &self,
         tenant_id: &str,
         source_id: &str,
@@ -175,7 +175,7 @@ impl PluginStore {
         publish_job(row)
     }
 
-    pub(super) async fn claim_publish_job(&self, job_id: &str) -> Result<bool> {
+    async fn claim_publish_job(&self, job_id: &str) -> Result<bool> {
         let result = sqlx::query(
             "UPDATE plugin_publish_jobs SET state = 'running', detail = '正在验证 Component 并执行健康检查', updated_at = now() WHERE id = $1 AND state = 'queued'",
         )
@@ -185,7 +185,7 @@ impl PluginStore {
         Ok(result.rows_affected() == 1)
     }
 
-    pub(super) async fn finish_publish_job(
+    async fn finish_publish_job(
         &self,
         job_id: &str,
         state: PublishState,
@@ -212,7 +212,7 @@ impl PluginStore {
         Ok(())
     }
 
-    pub(super) async fn resume_publish_jobs(&self) -> Result<Vec<PublishJob>> {
+    async fn resume_publish_jobs(&self) -> Result<Vec<PublishJob>> {
         sqlx::query(
             "UPDATE plugin_publish_jobs SET state = 'queued', detail = '宿主重启后恢复后台验证', updated_at = now() WHERE state = 'running'",
         )
@@ -226,11 +226,7 @@ impl PluginStore {
         rows.into_iter().map(publish_job).collect()
     }
 
-    pub(super) async fn publish_job(
-        &self,
-        tenant_id: &str,
-        job_id: &str,
-    ) -> Result<Option<PublishJob>> {
+    async fn publish_job(&self, tenant_id: &str, job_id: &str) -> Result<Option<PublishJob>> {
         sqlx::query(
             "SELECT id, tenant_id, source_id, git, revision, runtime, page_count, state, detail FROM plugin_publish_jobs WHERE tenant_id = $1 AND id = $2",
         )

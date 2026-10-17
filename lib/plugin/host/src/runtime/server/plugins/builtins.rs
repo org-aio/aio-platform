@@ -6,6 +6,7 @@ use anyhow::Result;
 use az_plugin_core::{DynPlugin, Plugin, PluginFuture};
 use dill::CatalogBuilder;
 
+use super::super::plugin_catalog::PluginCatalog;
 use super::{
     CapabilityServicePlugin, RuntimeAssembly, enhancement_execution::*, infrastructure::*,
     platform_services::*,
@@ -38,9 +39,12 @@ macro_rules! route_plugin {
     };
 }
 
-route_plugin!(FrontendPlugin, [StorePlugin, RepositoryPlugin], [], |_| {
-    super::super::routes::frontend()
-});
+route_plugin!(
+    FrontendPlugin,
+    [RepositoryPlugin],
+    [dyn PluginCatalog],
+    |_| super::super::routes::frontend()
+);
 route_plugin!(EnhancementsPlugin, [EnhancementServicePlugin], [], |_| {
     super::super::enhancements::router()
 });
@@ -63,18 +67,37 @@ route_plugin!(
     optional[super::super::enhancements::Enhancements],
     |state| super::super::protocols::grpc::router(state.clone())?
 );
-route_plugin!(BootstrapPlugin, [StorePlugin], [], |_| {
+route_plugin!(BootstrapPlugin, [], [dyn PluginCatalog], |_| {
     super::super::bootstrap::router()
 });
-route_plugin!(NavigationPlugin, [StorePlugin], [], |_| {
+route_plugin!(NavigationPlugin, [], [dyn PluginCatalog], |_| {
     super::super::navigation::router()
 });
-route_plugin!(
-    ToolsPlugin,
-    [StorePlugin, RepositoryPlugin],
-    [dyn worker::WorkerService, dyn crate::authorization::AuthorizationProvider],
-    |_| super::super::tools::router()
-);
+/// 默认工具业务跨表查询，显式依赖 PostgreSQL 目录提供者。
+#[dill::component]
+#[dill::interface(dyn Plugin<RuntimeAssembly>)]
+pub struct ToolsPlugin;
+impl Plugin<RuntimeAssembly> for ToolsPlugin {
+    fn dependencies(&self) -> Vec<TypeId> {
+        vec![
+            TypeId::of::<StorePlugin>(),
+            TypeId::of::<RepositoryPlugin>(),
+        ]
+    }
+    fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
+        Box::pin(async move {
+            assembly.require_service::<dyn crate::identity::IdentityProvider>();
+            assembly.require_service::<dyn crate::authorization::AuthorizationProvider>();
+            assembly.require_service::<dyn worker::WorkerService>();
+            assembly
+                .services
+                .add::<super::super::tools::PostgresToolCatalog>();
+            assembly.require_service::<dyn super::super::tools::ToolCatalog>();
+            assembly.add_routes(|_| Ok(super::super::tools::router()));
+            Ok(())
+        })
+    }
+}
 route_plugin!(WorkersPlugin, [], [dyn worker::WorkerService], |_| {
     worker::controller::router()
 });
@@ -116,15 +139,14 @@ pub struct ManagementPlugin;
 
 impl Plugin<RuntimeAssembly> for ManagementPlugin {
     fn dependencies(&self) -> Vec<TypeId> {
-        vec![
-            TypeId::of::<StorePlugin>(),
-            TypeId::of::<RepositoryPlugin>(),
-        ]
+        vec![TypeId::of::<RepositoryPlugin>()]
     }
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
             assembly.require_service::<dyn crate::identity::IdentityProvider>();
             assembly.require_service::<dyn crate::authorization::AuthorizationProvider>();
+            assembly.require_service::<dyn PluginCatalog>();
+            assembly.optional_service::<dyn super::super::tools::ToolCatalog>();
             // 发布任务按安装包动态选择执行器，持有的运行时快照必须随组合更新。
             assembly.observe_catalog();
             assembly.add_routes(|state| Ok(super::super::routes::management(state.clone())));
@@ -180,6 +202,7 @@ pub struct DeliveryPlugin;
 impl Plugin<RuntimeAssembly> for DeliveryPlugin {
     fn dependencies(&self) -> Vec<TypeId> {
         vec![
+            TypeId::of::<StorePlugin>(),
             TypeId::of::<ManagementPlugin>(),
             TypeId::of::<ComponentsPlugin>(),
         ]

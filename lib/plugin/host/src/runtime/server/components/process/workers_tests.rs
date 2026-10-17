@@ -152,7 +152,7 @@ async fn workspace_access_cancel_and_bridge_isolation() -> Result<()> {
     );
     let result = verify_workspace(&state, &base).await;
     server.abort();
-    state.store()?.pool.close().await;
+    state.service::<sqlx::PgPool>()?.close().await;
     sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
         .execute(&admin)
         .await?;
@@ -375,7 +375,7 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
         "SELECT lease IS NULL AND lease_until IS NULL FROM worker_tasks WHERE id=$1",
     )
     .bind(&running.id)
-    .fetch_one(&state.store()?.pool)
+    .fetch_one(state.service::<sqlx::PgPool>()?.as_ref())
     .await?;
     assert!(cleared);
     // 完成、失败和中断等终态的取消均保持现有结果。
@@ -389,7 +389,7 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
             .bind(terminal)
             .bind(json!({"saved":true}))
             .bind("saved error")
-            .execute(&state.store()?.pool)
+            .execute(state.service::<sqlx::PgPool>()?.as_ref())
             .await?;
         let before = state
             .service::<dyn RuntimeWorkerService>()?
@@ -451,7 +451,7 @@ async fn verify_workspace(state: &RuntimeState, base: &str) -> Result<()> {
             "SELECT state,lease,lease_until IS NULL AS cleared FROM worker_tasks WHERE id=$1",
         )
         .bind(id)
-        .fetch_one(&state.store()?.pool)
+        .fetch_one(state.service::<sqlx::PgPool>()?.as_ref())
         .await?;
         assert_eq!(row.try_get::<String, _>("state")?, "cancelled");
         assert!(row.try_get::<Option<String>, _>("lease")?.is_none());
@@ -598,7 +598,8 @@ fn desktop_actions_need_an_observation_and_explicit_process_grant() -> Result<()
 async fn verify_bridge(state: &RuntimeState, worker: &str) -> Result<()> {
     let components = state.components()?;
     let source = Uuid::new_v4();
-    let pool = &state.store()?.pool;
+    let database = state.service::<sqlx::PgPool>()?;
+    let pool = database.as_ref();
     sqlx::query("INSERT INTO component_sources(id,git) VALUES($1,$2)")
         .bind(source)
         .bind(format!("https://example.invalid/{source}"))

@@ -1,10 +1,10 @@
+use super::plugin_catalog::PluginCatalog;
 use super::{
     RuntimeState, http_error::RuntimeError, request_context::authenticate_publish_manager,
 };
 use crate::runtime::{MarketplaceEntry, RuntimeResponse};
 use axum::{Json, extract::State, http::HeaderMap};
 use serde::Deserialize;
-use sqlx::PgPool;
 use std::collections::HashSet;
 
 #[derive(Deserialize)]
@@ -19,9 +19,7 @@ pub(super) async fn remove(
     Json(request): Json<RemoveRequest>,
 ) -> Result<Json<RuntimeResponse<()>>, RuntimeError> {
     authenticate_publish_manager(&state, &headers).await?;
-    let mut exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM marketplace_entries WHERE git=$1) OR EXISTS(SELECT 1 FROM plugin_sources WHERE git=$1)",
-    ).bind(&request.git).fetch_one(&state.store()?.pool).await?;
+    let mut exists = state.store()?.source_exists(&request.git).await?;
     if !exists
         && state
             .optional_service::<crate::runtime::server::components::Components>()?
@@ -37,37 +35,16 @@ pub(super) async fn remove(
     if !exists {
         return Err(RuntimeError::not_found("插件市场条目不存在"));
     }
-    mark_removed(&state.store()?.pool, &request.git).await?;
+    state.store()?.mark_removed(&request.git).await?;
     Ok(Json(RuntimeResponse { data: () }))
-}
-
-async fn mark_removed(pool: &PgPool, git: &str) -> anyhow::Result<()> {
-    sqlx::query(
-        "INSERT INTO marketplace_plugin_removals(git) VALUES($1) ON CONFLICT(git) DO NOTHING",
-    )
-    .bind(git)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-pub(super) async fn is_removed(pool: &PgPool, git: &str) -> anyhow::Result<bool> {
-    Ok(
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM marketplace_plugin_removals WHERE git=$1)")
-            .bind(git)
-            .fetch_one(pool)
-            .await?,
-    )
 }
 
 // 下架只影响市场可安装目录；租户已安装的条目必须保留，否则会丢失停用和卸载入口。
 pub(super) async fn retain_listed(
-    pool: &PgPool,
+    store: &dyn PluginCatalog,
     entries: &mut Vec<MarketplaceEntry>,
 ) -> anyhow::Result<()> {
-    let removed: Vec<String> = sqlx::query_scalar("SELECT git FROM marketplace_plugin_removals")
-        .fetch_all(pool)
-        .await?;
+    let removed = store.removed_sources().await?;
     retain_installed_or_listed(&removed.into_iter().collect(), entries);
     Ok(())
 }

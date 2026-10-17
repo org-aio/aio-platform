@@ -192,7 +192,7 @@ async fn delivery_publishes_bundles_and_respects_tenant_choices() -> Result<()> 
     .await?;
     let failed: String = sqlx::query_scalar("SELECT state FROM delivery_jobs WHERE id=$1")
         .bind(failed_job.id)
-        .fetch_one(&state.store()?.pool)
+        .fetch_one(state.service::<sqlx::PgPool>()?.as_ref())
         .await?;
     assert_eq!(failed, "failed");
     let generation: Uuid = sqlx::query_scalar(
@@ -200,7 +200,7 @@ async fn delivery_publishes_bundles_and_respects_tenant_choices() -> Result<()> 
     )
     .bind(source)
     .bind(&tenants[0])
-    .fetch_one(&state.store()?.pool)
+    .fetch_one(state.service::<sqlx::PgPool>()?.as_ref())
     .await?;
     components.rollout().await?;
     let unchanged: Uuid = sqlx::query_scalar(
@@ -208,7 +208,7 @@ async fn delivery_publishes_bundles_and_respects_tenant_choices() -> Result<()> 
     )
     .bind(source)
     .bind(&tenants[0])
-    .fetch_one(&state.store()?.pool)
+    .fetch_one(state.service::<sqlx::PgPool>()?.as_ref())
     .await?;
     assert_eq!(generation, unchanged);
     for tenant in [&tenants[0], &tenants[1], &tenants[3]] {
@@ -222,7 +222,7 @@ async fn target(state: &RuntimeState, git: &str, sequence: u32) -> Result<BuildJ
     let sha = format!("{sequence:040x}");
     let lease = Uuid::new_v4().to_string();
     let recipe = json!({"environment":"fullstack","command":["sh","scripts/build.sh"]});
-    let mut tx = state.store()?.pool.begin().await?;
+    let mut tx = state.service::<sqlx::PgPool>()?.begin().await?;
     sqlx::query("INSERT INTO delivery_sources(git,branch,desired_sha) VALUES($1,'main',$2) ON CONFLICT(git) DO UPDATE SET desired_sha=$2").bind(git).bind(&sha).execute(&mut *tx).await?;
     sqlx::query("UPDATE delivery_jobs SET state='superseded' WHERE git=$1 AND state IN ('building','uploaded','publishing')").bind(git).execute(&mut *tx).await?;
     let id: i64 = sqlx::query_scalar("INSERT INTO delivery_jobs(git,source_revision,recipe,state,lease,lease_until) VALUES($1,$2,$3,'building',$4,now()+interval '5 minutes') RETURNING id")
@@ -284,17 +284,17 @@ async fn suspended_installations_keep_queued_upgrades_without_blocking_active_te
     sqlx::query("INSERT INTO delivery_sources(git,branch,desired_sha) VALUES($1,'main',$2)")
         .bind(&git)
         .bind("a".repeat(40))
-        .execute(&state.store()?.pool)
+        .execute(state.service::<sqlx::PgPool>()?.as_ref())
         .await?;
     for (position, tenant) in tenants.iter().enumerate() {
         sqlx::query("INSERT INTO component_rollouts(tenant_id,source_id,digest,updated_at) VALUES($1,$2,$3,now()+$4*interval '1 second')")
-            .bind(tenant).bind(source).bind(&second.digest).bind(position as i32).execute(&state.store()?.pool).await?;
+            .bind(tenant).bind(source).bind(&second.digest).bind(position as i32).execute(state.service::<sqlx::PgPool>()?.as_ref()).await?;
     }
     components.rollout().await?;
     for tenant in &tenants[..8] {
         assert_installed(&components, tenant, source, Some((&first.digest, true))).await?;
         let state: String = sqlx::query_scalar("SELECT state FROM component_rollouts WHERE tenant_id=$1 AND source_id=$2 AND digest=$3")
-            .bind(tenant).bind(source).bind(&second.digest).fetch_one(&state.store()?.pool).await?;
+            .bind(tenant).bind(source).bind(&second.digest).fetch_one(state.service::<sqlx::PgPool>()?.as_ref()).await?;
         assert_eq!(state, "queued");
     }
     assert_installed(

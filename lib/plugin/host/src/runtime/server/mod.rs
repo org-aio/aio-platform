@@ -31,6 +31,7 @@ mod official_market;
 mod package_repository;
 mod package_store;
 mod page_state;
+pub mod plugin_catalog;
 pub mod plugins;
 #[cfg(feature = "sidecar")]
 mod process;
@@ -112,7 +113,7 @@ impl RuntimeState {
             .clone())
     }
 
-    pub(crate) fn store(&self) -> Result<Arc<store::PluginStore>> {
+    pub(crate) fn store(&self) -> Result<Arc<dyn plugin_catalog::PluginCatalog>> {
         self.service()
     }
     pub(crate) fn repository(&self) -> Result<Arc<repository::RepositoryInstaller>> {

@@ -1,3 +1,4 @@
+use super::plugin_catalog::*;
 use anyhow::{Context as _, Result, ensure};
 use az_plugin_manifest::PluginManifest;
 use serde_json::Value;
@@ -60,14 +61,17 @@ ALTER TABLE tenant_plugin_bindings DROP CONSTRAINT IF EXISTS tenant_plugin_bindi
 ALTER TABLE tenant_plugin_bindings ADD CONSTRAINT tenant_plugin_bindings_source_id_fkey FOREIGN KEY (source_id) REFERENCES plugin_sources(id) ON DELETE CASCADE ON UPDATE CASCADE;
 "#;
 
+/// 默认 PostgreSQL 目录；由 StorePlugin 初始化，业务入口消费 PluginCatalog。
 pub struct PluginStore {
     pub(crate) pool: PgPool,
 }
 
+/// 当前活动进程的宿主句柄。
 pub struct ProcessBinding {
     pub instance_id: String,
 }
 
+/// 租户选定的版本及其产物，用于恢复与回滚。
 pub struct BoundRuntime {
     pub revision_id: String,
     pub revision: String,
@@ -75,6 +79,7 @@ pub struct BoundRuntime {
     pub artifact: String,
 }
 
+/// 活动服务的运行目标、地址和已声明路由。
 pub struct ServiceBinding {
     pub runtime: PluginRuntime,
     pub revision: String,
@@ -82,6 +87,7 @@ pub struct ServiceBinding {
     pub routes: Vec<String>,
 }
 
+/// 页面与安装代数、状态代数绑定，防止旧页面继续写入。
 pub struct PageBinding {
     pub source_id: String,
     pub activation_generation: String,
@@ -91,6 +97,7 @@ pub struct PageBinding {
     pub service: ServiceBinding,
 }
 
+/// 宿主启动时需要恢复的进程安装。
 pub struct ProcessTarget {
     pub tenant_id: String,
     pub source_id: String,
@@ -98,6 +105,7 @@ pub struct ProcessTarget {
     pub revision: String,
 }
 
+/// 宿主启动时需要恢复的 Wasm 安装。
 pub struct WasmTarget {
     pub tenant_id: String,
     pub source_id: String,
@@ -125,8 +133,11 @@ impl PluginStore {
         self.migrate_published_source_ids().await?;
         Ok(())
     }
+}
 
-    pub async fn has_plugins(&self, tenant_id: &str) -> Result<bool> {
+#[async_trait::async_trait]
+impl PluginInstallations for PluginStore {
+    async fn has_plugins(&self, tenant_id: &str) -> Result<bool> {
         let count = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM tenant_plugin_bindings WHERE tenant_id = $1",
         )
@@ -136,7 +147,7 @@ impl PluginStore {
         Ok(count > 0)
     }
 
-    pub async fn source_id(&self, git: &str) -> Result<Option<String>> {
+    async fn source_id(&self, git: &str) -> Result<Option<String>> {
         sqlx::query_scalar("SELECT id FROM plugin_sources WHERE git = $1")
             .bind(git)
             .fetch_optional(&self.pool)
@@ -144,7 +155,7 @@ impl PluginStore {
             .map_err(Into::into)
     }
 
-    pub async fn record_lifecycle_event(
+    async fn record_lifecycle_event(
         &self,
         tenant_id: &str,
         source_id: &str,
@@ -166,7 +177,7 @@ impl PluginStore {
         Ok(())
     }
 
-    pub async fn lifecycle_events(
+    async fn lifecycle_events(
         &self,
         tenant_id: &str,
         source_id: &str,
@@ -190,7 +201,7 @@ impl PluginStore {
             .collect()
     }
 
-    pub(super) async fn catalog(
+    async fn catalog(
         &self,
         tenant_id: &str,
         tenant_label: &str,
@@ -256,7 +267,7 @@ impl PluginStore {
         })
     }
 
-    pub async fn set_enabled(
+    async fn set_enabled(
         &self,
         tenant_id: &str,
         source_id: &str,
@@ -284,7 +295,7 @@ impl PluginStore {
         Ok(())
     }
 
-    pub async fn uninstall(&self, tenant_id: &str, source_id: &str) -> Result<()> {
+    async fn uninstall(&self, tenant_id: &str, source_id: &str) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
         stop_instances(&mut transaction, tenant_id, source_id).await?;
         page_state::delete_source_states(&mut transaction, tenant_id, source_id).await?;
@@ -309,7 +320,7 @@ impl PluginStore {
         Ok(())
     }
 
-    pub async fn rollback_target(&self, tenant_id: &str, source_id: &str) -> Result<BoundRuntime> {
+    async fn rollback_target(&self, tenant_id: &str, source_id: &str) -> Result<BoundRuntime> {
         let row = sqlx::query(
             "SELECT revisions.id, revisions.revision, revisions.runtime, revisions.manifest->'runtime'->>'artifact' AS artifact FROM plugin_revisions revisions JOIN tenant_plugin_bindings bindings ON bindings.source_id = revisions.source_id WHERE bindings.tenant_id = $1 AND bindings.source_id = $2 AND revisions.id <> bindings.revision_id AND (length(revisions.revision)<>64 OR EXISTS(SELECT 1 FROM plugin_packages p WHERE p.revision=revisions.revision)) ORDER BY revisions.created_at DESC LIMIT 1",
         )
@@ -326,7 +337,7 @@ impl PluginStore {
         })
     }
 
-    pub async fn rollback_to(
+    async fn rollback_to(
         &self,
         tenant_id: &str,
         source_id: &str,
@@ -353,7 +364,7 @@ impl PluginStore {
         Ok(())
     }
 
-    pub async fn active_service(
+    async fn active_service(
         &self,
         tenant_id: &str,
         source_id: &str,
@@ -385,7 +396,7 @@ impl PluginStore {
         .transpose()
     }
 
-    pub async fn active_page_binding(
+    async fn active_page_binding(
         &self,
         tenant_id: &str,
         page_id: &str,
@@ -429,7 +440,7 @@ impl PluginStore {
         Ok(binding)
     }
 
-    pub async fn bound_runtime(&self, tenant_id: &str, source_id: &str) -> Result<BoundRuntime> {
+    async fn bound_runtime(&self, tenant_id: &str, source_id: &str) -> Result<BoundRuntime> {
         let row = sqlx::query(
             "SELECT revisions.id, revisions.revision, revisions.runtime, revisions.manifest->'runtime'->>'artifact' AS artifact FROM tenant_plugin_bindings bindings JOIN plugin_revisions revisions ON revisions.id = bindings.revision_id WHERE bindings.tenant_id = $1 AND bindings.source_id = $2",
         )
@@ -446,7 +457,7 @@ impl PluginStore {
         })
     }
 
-    pub async fn active_wasm_revision(
+    async fn active_wasm_revision(
         &self,
         tenant_id: &str,
         source_id: &str,
@@ -461,7 +472,7 @@ impl PluginStore {
         .map_err(Into::into)
     }
 
-    pub async fn active_process(
+    async fn active_process(
         &self,
         tenant_id: &str,
         source_id: &str,
@@ -483,7 +494,7 @@ impl PluginStore {
         .transpose()
     }
 
-    pub async fn enabled_process_targets(&self) -> Result<Vec<ProcessTarget>> {
+    async fn enabled_process_targets(&self) -> Result<Vec<ProcessTarget>> {
         let rows = sqlx::query(
             "SELECT bindings.tenant_id, bindings.source_id, revisions.id, revisions.revision FROM tenant_plugin_bindings bindings JOIN plugin_revisions revisions ON revisions.id = bindings.revision_id WHERE bindings.enabled = TRUE AND revisions.runtime = 'process' ORDER BY bindings.tenant_id, bindings.source_id",
         )
@@ -501,7 +512,7 @@ impl PluginStore {
             .collect()
     }
 
-    pub async fn stop_orphan_process_records(&self) -> Result<()> {
+    async fn stop_orphan_process_records(&self) -> Result<()> {
         sqlx::query(
             "UPDATE plugin_runtime_instances instances SET state = 'stopped', stopped_at = now() WHERE instances.state = 'active' AND instances.runtime_handle IS NOT NULL AND NOT EXISTS (SELECT 1 FROM tenant_plugin_bindings bindings JOIN plugin_revisions revisions ON revisions.id = bindings.revision_id WHERE bindings.tenant_id = instances.tenant_id AND bindings.revision_id = instances.revision_id AND bindings.enabled = TRUE AND revisions.runtime = 'process')",
         )
@@ -510,7 +521,7 @@ impl PluginStore {
         Ok(())
     }
 
-    pub async fn enabled_wasm_targets(&self) -> Result<Vec<WasmTarget>> {
+    async fn enabled_wasm_targets(&self) -> Result<Vec<WasmTarget>> {
         let rows = sqlx::query(
             "SELECT bindings.tenant_id, bindings.source_id, revisions.id, revisions.revision, revisions.manifest->'runtime'->>'artifact' AS artifact FROM tenant_plugin_bindings bindings JOIN plugin_revisions revisions ON revisions.id = bindings.revision_id WHERE bindings.enabled = TRUE AND revisions.runtime = 'wasm-component' ORDER BY bindings.tenant_id, bindings.source_id",
         )
@@ -529,7 +540,7 @@ impl PluginStore {
             .collect()
     }
 
-    pub async fn verify_revision_pages(
+    async fn verify_revision_pages(
         &self,
         revision_id: &str,
         pages: &[PageDefinition],
@@ -545,7 +556,7 @@ impl PluginStore {
         Ok(())
     }
 
-    pub async fn recover_process_instance(
+    async fn recover_process_instance(
         &self,
         target: &ProcessTarget,
         instance: &ProcessInstance,
@@ -572,7 +583,7 @@ impl PluginStore {
         Ok(())
     }
 
-    pub async fn restore_process_instance(
+    async fn restore_process_instance(
         &self,
         tenant_id: &str,
         source_id: &str,
@@ -601,7 +612,7 @@ impl PluginStore {
         Ok(())
     }
 
-    pub async fn recover_wasm_instance(&self, target: &WasmTarget) -> Result<()> {
+    async fn recover_wasm_instance(&self, target: &WasmTarget) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
         stop_instances(&mut transaction, &target.tenant_id, &target.source_id).await?;
         start_instance(
@@ -724,3 +735,5 @@ pub(super) fn parse_runtime(value: String) -> Result<PluginRuntime> {
 #[cfg(test)]
 #[path = "store_tests.rs"]
 mod tests;
+
+impl PluginCatalog for PluginStore {}

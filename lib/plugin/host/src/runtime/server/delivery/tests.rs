@@ -1,3 +1,4 @@
+use crate::runtime::server::plugin_catalog::*;
 use anyhow::Result;
 use az_plugin_delivery::Documentation;
 use sqlx::postgres::PgPoolOptions;

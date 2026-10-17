@@ -1,5 +1,5 @@
-use super::super::RuntimeState;
-use crate::runtime::{MarketplaceEntry, PageDefinition, RuntimeCatalog};
+use super::super::{RuntimeState, plugin_catalog::PluginCatalog};
+use crate::runtime::{MarketplaceEntry, RuntimeCatalog};
 use anyhow::Result;
 use sqlx::PgPool;
 
@@ -8,40 +8,12 @@ pub(in crate::runtime::server) async fn migrate(pool: &PgPool) -> Result<()> {
     Ok(())
 }
 
-pub(super) async fn set_hidden(
-    pool: &PgPool,
-    tenant: &str,
-    source: &str,
-    hidden: bool,
-) -> Result<()> {
-    let sql = if hidden {
-        "INSERT INTO tenant_hidden_plugin_menus(tenant_id,source_id) VALUES($1,$2) ON CONFLICT DO NOTHING"
-    } else {
-        "DELETE FROM tenant_hidden_plugin_menus WHERE tenant_id=$1 AND source_id=$2"
-    };
-    sqlx::query(sql)
-        .bind(tenant)
-        .bind(source)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
-async fn hidden_sources(pool: &PgPool, tenant: &str) -> Result<Vec<String>> {
-    Ok(sqlx::query_scalar(
-        "SELECT source_id FROM tenant_hidden_plugin_menus WHERE tenant_id=$1 ORDER BY source_id",
-    )
-    .bind(tenant)
-    .fetch_all(pool)
-    .await?)
-}
-
 pub(in crate::runtime::server) async fn enrich_entries(
-    pool: &PgPool,
+    store: &dyn PluginCatalog,
     tenant: &str,
     entries: &mut [MarketplaceEntry],
 ) -> Result<()> {
-    let hidden = hidden_sources(pool, tenant).await?;
+    let hidden = store.hidden_sources(tenant).await?;
     for entry in entries {
         entry.menu_hidden = entry
             .source_id
@@ -56,7 +28,7 @@ pub(in crate::runtime::server) async fn apply(
     tenant: &str,
     catalog: &mut RuntimeCatalog,
 ) -> Result<()> {
-    let hidden = hidden_sources(&state.store()?.pool, tenant).await?;
+    let hidden = state.store()?.hidden_sources(tenant).await?;
     if hidden.is_empty() {
         return Ok(());
     }
@@ -71,15 +43,9 @@ pub(in crate::runtime::server) async fn apply(
                 .map(|page| page.id.clone()),
         );
     }
-    let pages = sqlx::query_scalar::<_, serde_json::Value>("SELECT r.pages FROM tenant_plugin_bindings b JOIN plugin_revisions r ON r.id=b.revision_id WHERE b.tenant_id=$1 AND b.enabled AND b.source_id=ANY($2)")
-        .bind(tenant).bind(&hidden).fetch_all(&state.store()?.pool).await?;
-    for pages in pages {
-        catalog.hidden_pages.extend(
-            serde_json::from_value::<Vec<PageDefinition>>(pages)?
-                .into_iter()
-                .map(|page| page.id),
-        );
-    }
+    catalog
+        .hidden_pages
+        .extend(state.store()?.hidden_page_ids(tenant, &hidden).await?);
     catalog.hidden_pages.sort();
     catalog.hidden_pages.dedup();
     Ok(())

@@ -56,7 +56,7 @@ async fn inspect(
     .bind(git)
     .bind(&sha)
     .bind(branch)
-    .fetch_one(&state.store()?.pool)
+    .fetch_one(state.service::<sqlx::PgPool>()?.as_ref())
     .await?;
     if exists {
         return Ok(());
@@ -69,12 +69,12 @@ async fn inspect(
     if response.status() == StatusCode::NOT_FOUND {
         sqlx::query("UPDATE delivery_sources SET enabled=FALSE,updated_at=now() WHERE git=$1")
             .bind(git)
-            .execute(&state.store()?.pool)
+            .execute(state.service::<sqlx::PgPool>()?.as_ref())
             .await?;
         return Ok(());
     }
     let manifest = az_plugin_delivery::parse(&response.error_for_status()?.text().await?)?;
-    let mut tx = state.store()?.pool.begin().await?;
+    let mut tx = state.service::<sqlx::PgPool>()?.begin().await?;
     sqlx::query("INSERT INTO delivery_sources(git,branch,desired_sha) VALUES($1,$2,$3) ON CONFLICT(git) DO UPDATE SET branch=EXCLUDED.branch,desired_sha=EXCLUDED.desired_sha,enabled=TRUE,updated_at=now()")
         .bind(git).bind(branch).bind(&sha).execute(&mut *tx).await?;
     sqlx::query("UPDATE delivery_jobs SET state='superseded',lease_until=NULL,updated_at=now() WHERE git=$1 AND source_revision<>$2 AND state IN ('queued','building','uploaded','publishing')").bind(git).bind(&sha).execute(&mut *tx).await?;
@@ -119,7 +119,7 @@ async fn scan(
             if repository.archived || repository.fork {
                 sqlx::query("UPDATE delivery_sources SET enabled=FALSE WHERE git=$1")
                     .bind(&repository.clone_url)
-                    .execute(&state.store()?.pool)
+                    .execute(state.service::<sqlx::PgPool>()?.as_ref())
                     .await?;
                 continue;
             }
@@ -257,7 +257,7 @@ async fn poll(
         }
         let result = async {
             let rows = sqlx::query("SELECT git,branch FROM delivery_sources WHERE enabled")
-                .fetch_all(&state.store()?.pool)
+                .fetch_all(state.service::<sqlx::PgPool>()?.as_ref())
                 .await?;
             let mut tasks = tokio::task::JoinSet::new();
             for row in rows {

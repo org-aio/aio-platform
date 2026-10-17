@@ -130,7 +130,7 @@ async fn registration_http_auth_persistence_metadata_and_no_server_execution() -
     assert_eq!(duplicate["data"]["id"], manifest.id);
     assert_eq!(duplicate["data"]["title"], metadata.title);
     assert!(
-        storage::documentation(&state.store()?.pool, &manifest.id)
+        storage::documentation(state.service::<sqlx::PgPool>()?.as_ref(), &manifest.id)
             .await?
             .is_some()
     );
@@ -164,11 +164,11 @@ async fn registration_http_auth_persistence_metadata_and_no_server_execution() -
     server.abort();
     sqlx::query("DELETE FROM marketplace_tool_details WHERE id=$1")
         .bind(&manifest.id)
-        .execute(&state.store()?.pool)
+        .execute(state.service::<sqlx::PgPool>()?.as_ref())
         .await?;
     sqlx::query("DELETE FROM marketplace_tools WHERE id=$1")
         .bind(&manifest.id)
-        .execute(&state.store()?.pool)
+        .execute(state.service::<sqlx::PgPool>()?.as_ref())
         .await?;
     Ok(())
 }

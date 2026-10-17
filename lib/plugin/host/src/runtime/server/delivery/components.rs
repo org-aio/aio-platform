@@ -13,7 +13,7 @@ pub(super) async fn upload(state: &RuntimeState, job: &BuildJob, bytes: &[u8]) -
             && bundle.version == job.version,
         "构建产物与任务的仓库、源码提交或版本不符"
     );
-    let mut tx = state.store()?.pool.begin().await?;
+    let mut tx = state.service::<sqlx::PgPool>()?.begin().await?;
     // 与发现器共用来源行锁，避免校验租约后较旧上传覆盖新目标。
     let current: bool = sqlx::query_scalar(
         "SELECT enabled AND desired_sha=$2 FROM delivery_sources WHERE git=$1 FOR SHARE",
@@ -38,7 +38,7 @@ pub(super) async fn complete(
     documentation: &Documentation,
 ) -> Result<bool> {
     ensure!(documentation.readme.len() <= 512 * 1024, "README 超过限制");
-    let mut tx = state.store()?.pool.begin().await?;
+    let mut tx = state.service::<sqlx::PgPool>()?.begin().await?;
     let updated = sqlx::query("UPDATE delivery_component_packages SET readme=$2 WHERE job_id=$1")
         .bind(job.id)
         .bind(&documentation.readme)
@@ -85,7 +85,7 @@ pub(in crate::runtime::server) async fn tick(state: &RuntimeState) -> Result<()>
         return Ok(());
     };
     let pending = sqlx::query_as::<_, (i64, Vec<u8>, String)>("SELECT j.id,p.archive,p.readme FROM delivery_jobs j JOIN delivery_component_packages p ON p.job_id=j.id WHERE j.state='publishing' ORDER BY j.id LIMIT 1")
-        .fetch_optional(&state.store()?.pool).await?;
+        .fetch_optional(state.service::<sqlx::PgPool>()?.as_ref()).await?;
     if let Some((id, bytes, readme)) = pending {
         let result = async {
             let bundle = tokio::task::spawn_blocking(move || Bundle::decode(&bytes)).await??;
@@ -95,9 +95,9 @@ pub(in crate::runtime::server) async fn tick(state: &RuntimeState) -> Result<()>
         .await;
         if let Err(error) = result {
             sqlx::query("UPDATE delivery_jobs SET state='failed',error=$2,updated_at=now() WHERE id=$1 AND state='publishing'")
-                .bind(id).bind(format!("{error:#}").chars().take(16000).collect::<String>()).execute(&state.store()?.pool).await?;
+                .bind(id).bind(format!("{error:#}").chars().take(16000).collect::<String>()).execute(state.service::<sqlx::PgPool>()?.as_ref()).await?;
         }
     }
-    sqlx::query("DELETE FROM delivery_component_packages p USING delivery_jobs j WHERE p.job_id=j.id AND j.state IN ('superseded','active')").execute(&state.store()?.pool).await?;
+    sqlx::query("DELETE FROM delivery_component_packages p USING delivery_jobs j WHERE p.job_id=j.id AND j.state IN ('superseded','active')").execute(state.service::<sqlx::PgPool>()?.as_ref()).await?;
     components.rollout().await
 }

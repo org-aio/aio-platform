@@ -1,3 +1,4 @@
+use super::plugin_catalog::*;
 use std::collections::HashMap;
 
 use anyhow::{Context as _, Result, ensure};
@@ -71,8 +72,11 @@ impl PluginStore {
         }
         Ok(generations)
     }
+}
 
-    pub async fn save_page_state(
+#[async_trait::async_trait]
+impl PluginPageStates for PluginStore {
+    async fn save_page_state(
         &self,
         tenant_id: &str,
         source_id: &str,

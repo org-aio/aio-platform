@@ -317,11 +317,7 @@ async fn enable(
         .store()?
         .bound_runtime(&session.tenant_id, &source_id)
         .await?;
-    let git: Option<String> = sqlx::query_scalar("SELECT git FROM plugin_sources WHERE id=$1")
-        .bind(&source_id)
-        .fetch_optional(&state.store()?.pool)
-        .await
-        .map_err(anyhow::Error::from)?;
+    let git = state.store()?.source_git(&source_id).await?;
     if let Some(git) = git
         && let Some(latest) = state
             .store()?
@@ -639,14 +635,16 @@ async fn marketplace(
             entries.push(unlisted_entry(plugin));
         }
     }
-    super::marketplace_removal::retain_listed(&state.store()?.pool, &mut entries).await?;
-    super::navigation::enrich_entries(&state.store()?.pool, &session.tenant_id, &mut entries)
+    super::marketplace_removal::retain_listed(state.store()?.as_ref(), &mut entries).await?;
+    super::navigation::enrich_entries(state.store()?.as_ref(), &session.tenant_id, &mut entries)
         .await?;
     let mut items = entries
         .into_iter()
         .map(super::tools::MarketplaceItem::Plugin)
         .collect::<Vec<_>>();
-    items.extend(super::tools::entries(&state.store()?.pool).await?);
+    if let Some(tools) = state.optional_service::<dyn super::tools::ToolCatalog>()? {
+        items.extend(tools.entries().await?.into_iter().map(Into::into));
+    }
     Ok(Json(RuntimeResponse { data: items }))
 }
 

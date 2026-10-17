@@ -6,6 +6,9 @@ mod identity_support;
 #[path = "component_execution/catalog/mod.rs"]
 mod catalog;
 
+#[path = "legacy_catalog/mod.rs"]
+mod legacy_catalog;
+
 #[path = "component_execution/fixture.rs"]
 mod fixture;
 

@@ -237,7 +237,7 @@ async fn personal_configuration_devices_isolation_revisions_and_sync() -> Result
     let bytes: Vec<u8> =
         sqlx::query_scalar("SELECT ciphertext FROM personal_config_entries WHERE id=$1")
             .bind(&id)
-            .fetch_one(&state.store()?.pool)
+            .fetch_one(state.service::<sqlx::PgPool>()?.as_ref())
             .await?;
     assert!(!bytes.windows(5).any(|v| v == b"alpha"));
     // 两台设备修改相同版本时只接受一次提交；重放相同请求仍然幂等。
@@ -416,12 +416,12 @@ async fn personal_configuration_devices_isolation_revisions_and_sync() -> Result
     let function_id: String = sqlx::query_scalar(
         "SELECT id FROM personal_config_entries WHERE tenant_id='test' AND user_id='owner' AND kind='function' AND target='where_aio'",
     )
-    .fetch_one(&state.store()?.pool)
+    .fetch_one(state.service::<sqlx::PgPool>()?.as_ref())
     .await?;
     let ciphertext: Vec<u8> =
         sqlx::query_scalar("SELECT ciphertext FROM personal_config_entries WHERE id=$1")
             .bind(function_id)
-            .fetch_one(&state.store()?.pool)
+            .fetch_one(state.service::<sqlx::PgPool>()?.as_ref())
             .await?;
     assert!(!ciphertext.windows(8).any(|part| part == b"aio.home"));
     let revision: Value = client
@@ -479,7 +479,7 @@ async fn personal_configuration_devices_isolation_revisions_and_sync() -> Result
         401
     );
     server.abort();
-    state.store()?.pool.close().await;
+    state.service::<sqlx::PgPool>()?.close().await;
     sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
         .execute(&admin)
         .await?;

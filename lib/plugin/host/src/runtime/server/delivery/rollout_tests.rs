@@ -58,7 +58,7 @@ pub(in crate::runtime::server) async fn exercise_rollouts(
         .error_for_status()?;
     sqlx::query("UPDATE delivery_jobs SET next_attempt_at=now() WHERE id=$1")
         .bind(first_job.id)
-        .execute(&state.store()?.pool)
+        .execute(state.service::<sqlx::PgPool>()?.as_ref())
         .await?;
     let resumed = client
         .post(format!("{base}/api/internal/delivery/claim"))
@@ -121,19 +121,19 @@ pub(in crate::runtime::server) async fn exercise_rollouts(
     assert_binding(state, &tenants[0], &source, Some((&first, true))).await?;
     let status: String = sqlx::query_scalar("SELECT state FROM delivery_jobs WHERE id=$1")
         .bind(failed.id)
-        .fetch_one(&state.store()?.pool)
+        .fetch_one(state.service::<sqlx::PgPool>()?.as_ref())
         .await?;
     assert_eq!(status, "failed");
 
     let second_job = target(state, &client, base, &token, &git, 3).await?;
     let second = publish(state, &client, base, &token, &second_job, manifest, pages).await?;
     sqlx::query("INSERT INTO delivery_rollouts(tenant_id,source_id,revision,state,error) VALUES($1,$2,$3,'failed','租户暂时不可用')")
-        .bind(&tenants[0]).bind(&source).bind(&second).execute(&state.store()?.pool).await?;
+        .bind(&tenants[0]).bind(&source).bind(&second).execute(state.service::<sqlx::PgPool>()?.as_ref()).await?;
     super::rollout::tick(state).await?;
     assert_binding(state, &tenants[0], &source, Some((&first, true))).await?;
     assert_binding(state, &tenants[3], &source, Some((&second, true))).await?;
     sqlx::query("UPDATE delivery_rollouts SET updated_at=now()-interval '2 minutes' WHERE tenant_id=$1 AND source_id=$2")
-        .bind(&tenants[0]).bind(&source).execute(&state.store()?.pool).await?;
+        .bind(&tenants[0]).bind(&source).execute(state.service::<sqlx::PgPool>()?.as_ref()).await?;
     super::rollout::tick(state).await?;
     assert_binding(state, "default", &source, Some((&first, false))).await?;
     assert_binding(state, &tenants[0], &source, Some((&second, true))).await?;
@@ -180,14 +180,14 @@ pub(in crate::runtime::server) async fn exercise_rollouts(
         "SELECT count(*) FROM plugin_lifecycle_events WHERE source_id=$1 AND lifecycle='activate'",
     )
     .bind(&source)
-    .fetch_one(&state.store()?.pool)
+    .fetch_one(state.service::<sqlx::PgPool>()?.as_ref())
     .await?;
     super::rollout::tick(state).await?;
     let after: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM plugin_lifecycle_events WHERE source_id=$1 AND lifecycle='activate'",
     )
     .bind(&source)
-    .fetch_one(&state.store()?.pool)
+    .fetch_one(state.service::<sqlx::PgPool>()?.as_ref())
     .await?;
     assert_eq!(before, after, "无变化轮询不得再次激活");
     println!(
@@ -205,7 +205,7 @@ async fn target(
     sequence: u32,
 ) -> Result<BuildJob> {
     let sha = format!("{sequence:040x}");
-    let mut tx = state.store()?.pool.begin().await?;
+    let mut tx = state.service::<sqlx::PgPool>()?.begin().await?;
     sqlx::query("INSERT INTO delivery_sources(git,branch,desired_sha) VALUES($1,'main',$2) ON CONFLICT(git) DO UPDATE SET desired_sha=$2")
         .bind(git).bind(&sha).execute(&mut *tx).await?;
     sqlx::query("UPDATE delivery_jobs SET state='superseded',lease_until=NULL WHERE git=$1 AND state IN ('queued','building','uploaded','publishing')")
@@ -295,7 +295,7 @@ async fn assert_binding(
     expected: Option<(&str, bool)>,
 ) -> Result<()> {
     let binding: Option<(String,bool)> = sqlx::query_as("SELECT r.revision,b.enabled FROM tenant_plugin_bindings b JOIN plugin_revisions r ON r.id=b.revision_id WHERE b.tenant_id=$1 AND b.source_id=$2")
-        .bind(tenant).bind(source).fetch_optional(&state.store()?.pool).await?;
+        .bind(tenant).bind(source).fetch_optional(state.service::<sqlx::PgPool>()?.as_ref()).await?;
     ensure!(
         binding
             .as_ref()
