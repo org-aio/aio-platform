@@ -20,6 +20,12 @@ use std::{
 };
 use uuid::Uuid;
 
+#[path = "management_actions.rs"]
+mod actions;
+
+#[path = "management_images.rs"]
+mod images;
+
 struct Identity {
     tenant: String,
     revoked: AtomicBool,

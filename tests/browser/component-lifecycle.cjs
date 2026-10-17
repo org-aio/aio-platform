@@ -17,10 +17,12 @@ const component = Promise.all([
 let origin;
 let sequence = 0;
 const grants = new Map();
-const counts = { mount: 0, delete: 0, request: 0, manage: 0, renew: 0 };
+const counts = { mount: 0, delete: 0, request: 0, manage: 0, action: 0, image: 0, renew: 0 };
 const requests = [];
 const management = [];
+const imageTickets = [];
 let deleteDelay = 0;
+let actionDelay = 0;
 let rejectedRenewal;
 
 function send(response, status, data) {
@@ -70,7 +72,7 @@ const server = createServer(async (request, response) => {
       response.writeHead(204);
       return response.end();
     }
-    const requestRoute = path.match(/^\/api\/runtime\/components\/([^/]+)\/(request|manage|renew)$/);
+    const requestRoute = path.match(/^\/api\/runtime\/components\/([^/]+)\/(request|manage|action|image|renew)$/);
     if (requestRoute) {
       const [, token, action] = requestRoute;
       if (action === 'renew') counts.renew++;
@@ -81,15 +83,44 @@ const server = createServer(async (request, response) => {
         return response.end();
       }
       counts[action]++;
+      if (action === 'image') {
+        imageTickets.push(token);
+        response.writeHead(200, { 'content-type': 'image/png' });
+        return response.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aV8kAAAAASUVORK5CYII=', 'base64'));
+      }
+      if (action === 'action') {
+        const approved = JSON.parse((await body(request)).toString());
+        if (actionDelay) await new Promise(resolve => setTimeout(resolve, actionDelay));
+        return send(response, 200, { data: approved });
+      }
       if (action === 'manage') management.push({ token, request: JSON.parse((await body(request)).toString()) });
       else requests.push(token);
       return send(response, 200, { data: { status: 200, headers: [], body: Array.from(Buffer.from('{}')) } });
+    }
+    const download = path.match(/^\/api\/runtime\/components\/([^/]+)\/packages\/([a-f0-9]{64})$/);
+    if (download) {
+      if (!grants.has(download[1])) return send(response, 403, { error: 'Mount revoked' });
+      response.writeHead(200, { 'content-type': 'application/vnd.aio.component+gzip', 'content-disposition': `attachment; filename="${download[2]}.aio-plugin"` });
+      return response.end(Buffer.alloc(34 * 1024 * 1024, 0xa5));
     }
     const asset = path.match(/^\/api\/runtime\/components\/assets\/([^/]+)\/index\.html$/);
     if (asset) {
       if (!grants.has(asset[1])) return send(response, 401, { error: 'Mount missing' });
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      return response.end(`<!doctype html><html><body><script data-token="${asset[1]}">${await lifecycle}</script><script>${await guest}</script><script>window.marker = 'initial';</script></body></html>`);
+      return response.end(`<!doctype html><html><body><script data-token="${asset[1]}">${await lifecycle}</script><script>${await guest}</script><button id="download">Download</button><button id="settings">Settings</button><button id="image">Image</button><img id="document-image"><script>
+      window.marker = 'initial';
+      document.querySelector('#image').onclick = async () => {
+        try {
+          const response = await window.aioPlugin.managementImage('/api/runtime/marketplace/' + 'a'.repeat(64) + '/images/image.png');
+          if (response.status !== 200) throw new Error('Image unavailable');
+          const image = document.querySelector('#document-image');
+          if (image.src) URL.revokeObjectURL(image.src);
+          image.src = URL.createObjectURL(new Blob([response.body], { type: response.headers[0].value }));
+        } catch (error) { window.imageError = error.message; }
+      };
+      document.querySelector('#download').onclick = () => window.aioPlugin.downloadPackage('a'.repeat(64)).catch(error => window.actionError = error.message);
+      document.querySelector('#settings').onclick = () => window.aioPlugin.openSettings('component:other:settings').catch(error => window.actionError = error.message);
+      </script></body></html>`);
     }
     send(response, 404, { error: 'Not found' });
   } catch (error) {
@@ -112,6 +143,8 @@ const server = createServer(async (request, response) => {
       document.body.innerHTML = `<div id="page" data-aio-page-active="true" data-aio-workspace-active="true" data-aio-workspace-context="${config.context}"><div class="application-frontend-shell"><div id="frontend-loading" class="application-frontend-loading"></div><iframe id="frame" sandbox="allow-scripts allow-forms"></iframe></div></div>`;
       window.__hostMessages = [];
       window.__catalogChanges = 0;
+      window.__settings = [];
+      window.addEventListener('aio:plugin-settings', event => window.__settings.push(event.detail.pageId));
       window.addEventListener('aio:catalog-invalidated', () => window.__catalogChanges++);
       let receive = 0;
       window.dioxus = {
@@ -139,6 +172,19 @@ const server = createServer(async (request, response) => {
     assert.equal(await page.evaluate(() => window.__catalogChanges), 0);
     await manage('POST');
     await page.waitForFunction(() => window.__catalogChanges === 1);
+
+    await frame.locator('#image').click();
+    await frame.locator('#document-image').evaluate(image => image.decode());
+    assert.equal(await frame.locator('#document-image').evaluate(image => image.naturalWidth), 1);
+    assert.equal(imageTickets.at(-1), mount.token);
+    const downloading = page.waitForEvent('download');
+    await frame.locator('#download').click();
+    const downloaded = await downloading;
+    assert.equal(downloaded.suggestedFilename(), `${'a'.repeat(64)}.aio-plugin`);
+    assert.equal((await readFile(await downloaded.path())).length, 34 * 1024 * 1024);
+    await frame.locator('#settings').click();
+    await page.waitForFunction(() => window.__settings.length === 1);
+    assert.equal(await page.evaluate(() => window.__settings[0]), 'component:other:settings');
 
     deleteDelay = 250;
     await page.evaluate(() => document.querySelector('#page').dataset.aioWorkspaceActive = 'false');
@@ -176,6 +222,22 @@ const server = createServer(async (request, response) => {
     await manage('GET');
     assert.equal(management.at(-1).token, renewedTicket);
     rejectedRenewal = undefined;
+    await frame.locator('#image').click();
+    await waitFor(() => imageTickets.at(-1) === renewedTicket);
+    await frame.locator('#document-image').evaluate(image => image.decode());
+
+    actionDelay = 500;
+    const actionsBefore = counts.action;
+    await frame.locator('#settings').click();
+    await waitFor(() => counts.action === actionsBefore + 1);
+    await page.evaluate(() => document.querySelector('#page').dataset.aioWorkspaceActive = 'false');
+    await waitFor(() => grants.size === 0);
+    await page.waitForTimeout(600);
+    assert.equal(await page.evaluate(() => window.__settings.length), 1);
+    assert(await frame.locator('body').evaluate(() => Boolean(window.actionError)));
+    actionDelay = 0;
+    await page.evaluate(() => document.querySelector('#page').dataset.aioWorkspaceActive = 'true');
+    await waitFor(() => grants.size === 1);
 
     for (let index = 0; index < 20; index++) {
       await page.evaluate(active => document.querySelector('#page').dataset.aioWorkspaceActive = String(active), false);
@@ -193,7 +255,7 @@ const server = createServer(async (request, response) => {
     await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
     await waitFor(() => grants.size === 1);
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({ retainedFrame: true, releasedOnSuspend: true, restoredWithNewGrant: true, expiredLeaseRecoveredInPlace: true, repeatedCycles: 20, bfcache: true, maxGrants: 1, management: { isolated: true, suspended: true, renewed: true, catalogInvalidated: true } }));
+    console.log(JSON.stringify({ retainedFrame: true, releasedOnSuspend: true, restoredWithNewGrant: true, expiredLeaseRecoveredInPlace: true, repeatedCycles: 20, bfcache: true, maxGrants: 1, management: { isolated: true, suspended: true, renewed: true, catalogInvalidated: true, largeDownload: true, settings: true, suspendedActionCancelled: true, authorizedImage: true, renewedImage: true } }));
   } finally {
     await context.close();
     await browser.close();

@@ -15,6 +15,8 @@ mod dispatch;
 pub(in crate::runtime::server) mod execution;
 pub(in crate::runtime::server) mod executors;
 mod frontend;
+mod frontend_images;
+mod frontend_management;
 #[cfg(all(test, feature = "wasm", feature = "sidecar"))]
 mod host_access_tests;
 mod installation;

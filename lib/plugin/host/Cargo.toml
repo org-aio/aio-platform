@@ -1,6 +1,6 @@
 [package]
 name = "az-plugin-host"
-version = "2026.10.16"
+version = "2026.10.17"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
@@ -31,8 +31,8 @@ sse-stream = { version = "0.2", optional = true }
 dill = "0.15.0"
 dioxus = { version = "=0.7.9", default-features = false, features = ["macro", "html", "signals"], optional = true }
 dioxus-icons = { version = "0.1.0", default-features = false, optional = true }
-az-dioxus-admin-shell = { git = "https://github.com/zjarlin/dioxus-admin-workbench.git", rev = "f5a10a65526f4e2aae8de10c36607472716ddeba", default-features = false, optional = true }
-az-ui-components = { git = "https://github.com/zjarlin/dioxus-admin-workbench.git", rev = "f5a10a65526f4e2aae8de10c36607472716ddeba", optional = true }
+az-dioxus-admin-shell = { git = "https://github.com/zjarlin/dioxus-admin-workbench.git", rev = "071324ed60909f755f19120dcfe3346c73f0ab5d", default-features = false, optional = true }
+az-ui-components = { git = "https://github.com/zjarlin/dioxus-admin-workbench.git", rev = "071324ed60909f755f19120dcfe3346c73f0ab5d", optional = true }
 az-plugin-manifest = { path = "../manifest", default-features = false }
 az-plugin-package = { path = "../package", optional = true }
 gloo-net = { version = "0.6.0", features = ["http", "json"], optional = true }
@@ -54,6 +54,7 @@ toml = { version = "0.9.5", optional = true }
 tower = { version = "0.5", features = ["util"], optional = true }
 tower-http = { version = "0.6.2", features = ["fs", "compression-gzip", "compression-br"], optional = true }
 uuid = { version = "1.18.1", features = ["v4", "v5"], optional = true }
+urlencoding = { workspace = true, optional = true }
 wasmtime = { version = "48.0.0", default-features = false, features = ["anyhow", "component-model", "cranelift", "gc-drc", "runtime", "std"], optional = true }
 web-sys = { version = "0.3.77", features = ["AbortSignal", "Document", "Element", "Node", "History", "Location", "Url", "UrlSearchParams", "Window"], optional = true }
 
@@ -73,7 +74,7 @@ remote-grpc = ["server", "dep:arc-swap", "dep:prost", "dep:prost-reflect", "dep:
 ui = ["dep:dioxus", "dep:dioxus-icons", "dep:az-dioxus-admin-shell", "dep:az-ui-components"]
 web = ["ui", "dioxus/web", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
 desktop = ["ui", "dioxus/desktop", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
-server = ["dep:tempfile", "dep:tower", "dep:schemars", "dep:tokio-util", "dep:http-body", "dep:jsonwebtoken","components", "az-plugin-manifest/validation", "dep:az-plugin-package", "dep:axum", "dep:flate2", "dep:kuchikiki", "dep:mime_guess", "dep:reqwest", "dep:sha2", "dep:sqlx", "dep:tar", "dep:tokio", "dep:toml", "dep:tower-http", "dep:uuid"]
+server = ["dep:tempfile", "dep:tower", "dep:schemars", "dep:tokio-util", "dep:http-body", "dep:jsonwebtoken","components", "az-plugin-manifest/validation", "dep:az-plugin-package", "dep:axum", "dep:flate2", "dep:kuchikiki", "dep:mime_guess", "dep:reqwest", "dep:sha2", "dep:sqlx", "dep:tar", "dep:tokio", "dep:toml", "dep:tower-http", "dep:uuid", "dep:urlencoding"]
 
 [lints.rust]
 unsafe_code = "forbid"

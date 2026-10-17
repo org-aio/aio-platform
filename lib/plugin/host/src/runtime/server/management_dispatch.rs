@@ -90,16 +90,23 @@ pub(super) async fn invoke(
 }
 
 fn validate(request: &Request) -> Result<()> {
+    let document_image = request.method == "GET"
+        && request.path.starts_with("/api/runtime/marketplace/")
+        && request.path.contains("/images/");
+    if document_image {
+        document_image_path(&request.path)?;
+    }
     ensure!(
         request.body.len() <= 8 * 1024 * 1024 && request.headers.len() <= 8,
         "管理请求超过配额"
     );
     ensure!(
         request.path.len() <= 2048
-            && request
-                .path
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"/_-.~".contains(&b))
+            && (document_image
+                || request
+                    .path
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"/_-.~+".contains(&b)))
             && !request.path.split('/').any(|s| s == "." || s == ".."),
         "管理路径无效"
     );
@@ -129,6 +136,14 @@ fn validate(request: &Request) -> Result<()> {
         ("GET", ["marketplace", _, "images", rest @ ..]) => !rest.is_empty(),
         ("GET", ["tools", "access"]) => true,
         ("GET", ["tools", _, "details" | "devices"]) => true,
+        ("GET", ["tools", id, version]) => az_tool::InstallLink::parse(
+            &az_tool::InstallLink {
+                id: (*id).into(),
+                version: (*version).into(),
+            }
+            .to_string(),
+        )
+        .is_ok(),
         ("GET", ["workers", "tasks"]) => true,
         ("POST", ["plugins", "install"]) => true,
         (
@@ -147,6 +162,38 @@ fn validate(request: &Request) -> Result<()> {
         _ => false,
     };
     ensure!(permitted, "请求不属于已开放的宿主管理契约");
+    Ok(())
+}
+
+pub(super) fn document_image_path(path: &str) -> Result<()> {
+    ensure!(
+        path.bytes().all(|b| b.is_ascii_graphic())
+            && path.len() <= 2048
+            && !path.contains(['?', '#', '\\']),
+        "图片路径必须使用 URL 编码"
+    );
+    let tail = path
+        .strip_prefix("/api/runtime/marketplace/")
+        .context("不是已发布的文档路径")?;
+    let (revision, path) = tail.split_once("/images/").context("文档图片路径无效")?;
+    ensure!(
+        revision.len() == 64
+            && revision
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+        "文档版本无效"
+    );
+    let decoded = urlencoding::decode(path)?;
+    // 文档路径允许中文及空格；它是已发布图片的数据库键，不是整包产物路径。
+    ensure!(
+        decoded.len() <= 1024
+            && !decoded.contains(['\\', ':'])
+            && !decoded.chars().any(char::is_control)
+            && decoded
+                .split('/')
+                .all(|part| !part.is_empty() && part != "." && part != ".."),
+        "文档图片相对路径无效"
+    );
     Ok(())
 }
 

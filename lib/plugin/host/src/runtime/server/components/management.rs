@@ -17,6 +17,24 @@ impl Components {
         session: SessionContext,
         executing: bool,
     ) -> Result<Response> {
+        let state = self.management_state(scope, &session).await?;
+        super::super::management_dispatch::invoke(
+            state,
+            scope.clone(),
+            self.services.clone(),
+            executing,
+            request,
+        )
+        .await
+    }
+
+    // 前端文件传输与交互操作复用同一信任边界，不通过 JSON 装载整包内容。
+    pub(super) async fn management_state(
+        &self,
+        scope: &InvocationScope,
+        session: &SessionContext,
+    ) -> Result<super::super::RuntimeState> {
+        self.services.management_session(scope)?;
         ensure!(scope.grants.management, "插件未获管理能力");
         let bundle = self
             .bundle(scope.source_id.parse()?, &session.tenant_id)
@@ -42,14 +60,6 @@ impl Components {
             .upgrade()
             .get_one::<ManagementAccess>()
             .context("宿主未开放管理能力")?;
-        let state = access.runtime()?;
-        super::super::management_dispatch::invoke(
-            state,
-            scope.clone(),
-            self.services.clone(),
-            executing,
-            request,
-        )
-        .await
+        access.runtime()
     }
 }

@@ -4,7 +4,7 @@ export function mountBridge(frame, invoke, options = {}) {
   let inflight = 0;
   const listener = async (event) => {
     const message = event.data;
-    if (!active || event.source !== frame.contentWindow || event.origin !== "null" || message?.protocol !== "aio:plugin@2" || !["request", "manage", "clipboard", "download"].includes(message.kind)) return;
+    if (!active || event.source !== frame.contentWindow || event.origin !== "null" || message?.protocol !== "aio:plugin@2" || !["request", "manage", "clipboard", "download", "management-action", "management-image"].includes(message.kind)) return;
     if (typeof message.id !== "string" || message.id.length > 80) return;
     const source = event.source;
     const reply = { protocol: "aio:plugin@2", kind: "response", id: message.id };
@@ -33,6 +33,12 @@ export function mountBridge(frame, invoke, options = {}) {
           link.remove();
           setTimeout(() => URL.revokeObjectURL(url), 60000);
           reply.response = { status: 204, headers: [], body: [] };
+        } else if (message.kind === "management-image") {
+          if (!options.managementImage || typeof message.url !== "string" || message.url.length > 4096) throw new Error("Management image unavailable");
+          reply.response = await options.managementImage(message.url);
+        } else if (message.kind === "management-action") {
+          if (!options.managementAction || !document.hasFocus() || document.hidden || !navigator.userActivation?.isActive || !frame.checkVisibility?.()) throw new Error("Management action requires a visible active gesture");
+          reply.response = await options.managementAction(message.action);
         } else if (message.kind === "manage") {
           if (!options.manage) throw new Error("Management access unavailable");
           reply.response = await options.manage(message.request);

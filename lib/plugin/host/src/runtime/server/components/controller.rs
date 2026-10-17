@@ -40,6 +40,10 @@ pub(in crate::runtime::server) fn router(state: RuntimeState) -> Router<RuntimeS
             }),
         )
         .route(
+            "/api/runtime/components/{token}/image",
+            post(super::frontend_images::image).layer(DefaultBodyLimit::max(8192)),
+        )
+        .route(
             "/api/runtime/components/assets/{token}/{*path}",
             get(super::frontend::asset).layer(super::super::frontend_delivery::compression()),
         )
@@ -49,7 +53,15 @@ pub(in crate::runtime::server) fn router(state: RuntimeState) -> Router<RuntimeS
         )
         .route(
             "/api/runtime/components/{token}/manage",
-            post(super::frontend::manage).layer(DefaultBodyLimit::max(32 * 1024 * 1024)),
+            post(super::frontend_management::manage).layer(DefaultBodyLimit::max(32 * 1024 * 1024)),
+        )
+        .route(
+            "/api/runtime/components/{token}/action",
+            post(super::frontend_management::action).layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/runtime/components/{token}/packages/{revision}",
+            get(super::frontend_management::download),
         )
         .route(
             "/api/runtime/components/{token}/renew",

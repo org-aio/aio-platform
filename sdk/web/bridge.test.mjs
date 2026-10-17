@@ -227,3 +227,79 @@ test('guest download sends binary data and validates filenames before transport'
   receive({ source: parent, data: { protocol: 'aio:plugin@2', kind: 'response', id: sent.id, response: { status: 204, headers: [], body: [] } } });
   assert.equal((await pending).status, 204);
 });
+
+test('管理动作要求可见页面和用户手势，默认拒绝且不接受外部窗口', async () => {
+  let listener, reply, calls = 0;
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const activation = { isActive: false };
+  const child = { postMessage: message => { reply = message; } };
+  const frame = { contentWindow: child, checkVisibility: () => true };
+  globalThis.window = { addEventListener: (_, fn) => { listener = fn; }, removeEventListener: () => {} };
+  globalThis.document = { hasFocus: () => true, hidden: false };
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { userActivation: activation } });
+  const event = { source: child, origin: 'null', data: { protocol: 'aio:plugin@2', kind: 'management-action', id: 'action', action: { kind: 'download-package', revision: 'a'.repeat(64) } } };
+  try {
+    let dispose = mountBridge(frame, () => assert.fail('动作进入执行器'));
+    activation.isActive = true;
+    await listener(event); assert(reply.error); dispose();
+    dispose = mountBridge(frame, () => assert.fail('动作进入执行器'), { managementAction: async action => { calls++; assert.equal(action.kind, 'download-package'); return { status: 204, headers: [], body: [] }; } });
+    await listener({ ...event, source: {} });
+    await listener({ ...event, origin: 'https://foreign.test' });
+    activation.isActive = false;
+    await listener(event); assert(reply.error);
+    activation.isActive = true;
+    document.hidden = true;
+    await listener(event); assert(reply.error);
+    document.hidden = false;
+    frame.checkVisibility = () => false;
+    await listener(event); assert(reply.error);
+    assert.equal(calls, 0);
+    frame.checkVisibility = () => true;
+    await listener(event); assert.equal(calls, 1); assert.equal(reply.response.status, 204);
+    dispose(); await listener(event); assert.equal(calls, 1);
+  } finally {
+    delete globalThis.window; delete globalThis.document;
+    if (previous) Object.defineProperty(globalThis, 'navigator', previous); else delete globalThis.navigator;
+  }
+});
+
+test('客户端管理动作仅传递语义参数', async () => {
+  let received, sent;
+  const parent = { postMessage: message => { sent = message; } };
+  const guest = { parent, addEventListener: (_, listener) => { received = listener; } };
+  vm.runInContext(readFileSync(new URL('./guest.js', import.meta.url), 'utf8'), guestContext(guest));
+  for (const [operation, expected] of [
+    [() => guest.aioPlugin.downloadPackage('a'.repeat(64)), { kind: 'download-package', revision: 'a'.repeat(64) }],
+    [() => guest.aioPlugin.openSettings('component:source:settings'), { kind: 'open-settings', page_id: 'component:source:settings' }],
+    [() => guest.aioPlugin.installTool('tool', '1.2.3'), { kind: 'install-tool', id: 'tool', version: '1.2.3' }],
+  ]) {
+    const waiting = operation();
+    assert.equal(sent.kind, 'management-action');
+    assert.deepEqual(JSON.parse(JSON.stringify(sent.action)), expected);
+    received({ source: parent, data: { protocol: 'aio:plugin@2', kind: 'response', id: sent.id, response: { status: 204, headers: [], body: [] } } });
+    assert.equal((await waiting).status, 204);
+  }
+});
+
+test('文档图片通过独立消息读取并默认拒绝未开放宿主', async () => {
+  let listener, reply, received, sent, calls = 0;
+  globalThis.window = { addEventListener: (_, fn) => { listener = fn; }, removeEventListener: () => {} };
+  const child = { postMessage: message => { reply = message; } };
+  const parent = { postMessage: message => { sent = message; } };
+  const guest = { parent, addEventListener: (_, fn) => { received = fn; } };
+  vm.runInContext(readFileSync(new URL('./guest.js', import.meta.url), 'utf8'), guestContext(guest));
+  const waiting = guest.aioPlugin.managementImage('https://images.example/a.png');
+  const event = { source: child, origin: 'null', data: sent };
+  try {
+    let dispose = mountBridge({ contentWindow: child }, () => assert.fail('图片进入执行器'));
+    await listener(event); assert(reply.error); dispose();
+    dispose = mountBridge({ contentWindow: child }, () => assert.fail('图片进入执行器'), {
+      managementImage: async url => { calls++; assert.equal(url, 'https://images.example/a.png'); return { status: 200, headers: [{ name: 'content-type', value: 'image/png' }], body: new Uint8Array([0, 255, 128]) }; },
+    });
+    await listener({ ...event, source: {} }); await listener({ ...event, origin: 'https://foreign.test' }); assert.equal(calls, 0);
+    await listener(event); received({ source: parent, data: reply });
+    assert.deepEqual([...(await waiting).body], [0, 255, 128]);
+    dispose(); await listener(event); assert.equal(calls, 1);
+    await assert.rejects(guest.aioPlugin.managementImage('x'.repeat(4097)), /Invalid image/);
+  } finally { delete globalThis.window; }
+});

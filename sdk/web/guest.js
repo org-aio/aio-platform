@@ -119,6 +119,24 @@
     window.parent.postMessage({ protocol: "aio:plugin@2", kind: "download", id, name, mime, body }, "*");
   });
   const navigate = (fragment, options) => window.aioNavigation.navigate(fragment, options);
+  // 仅描述语义操作；实际地址、权限与用户手势由宿主确认。
+  const managementAction = action => new Promise((resolve, reject) => {
+    if (pending.size >= 16) return reject(new Error("Too many pending requests"));
+    const id = createId();
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error("Management action timed out")); }, 15000);
+    pending.set(id, { resolve, reject, timer });
+    window.parent.postMessage({ protocol: "aio:plugin@2", kind: "management-action", id, action }, "*");
+  });
+  const downloadPackage = revision => managementAction({ kind: "download-package", revision });
+  const openSettings = page_id => managementAction({ kind: "open-settings", page_id });
+  const installTool = (id, version) => managementAction({ kind: "install-tool", id, version });
+  const managementImage = url => new Promise((resolve, reject) => {
+    if (pending.size >= 16 || typeof url !== "string" || url.length > 4096) return reject(new Error("Invalid image request"));
+    const id = createId();
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error("Image request timed out")); }, 20000);
+    pending.set(id, { resolve, reject, timer });
+    window.parent.postMessage({ protocol: "aio:plugin@2", kind: "management-image", id, url }, "*");
+  });
   const onNavigationChange = listener => window.aioNavigation.onNavigationChange(listener);
   const onFileDrop = listener => {
     if (typeof listener !== "function") { throw new TypeError("文件拖入监听器必须是函数"); }
@@ -134,5 +152,5 @@
   const fileDrag = () => {
     if (fileDrop) { window.parent.postMessage({ protocol: "aio:plugin@2", kind: "file-drag", id: fileDrop.id }, "*"); }
   };
-  Object.defineProperty(window, "aioPlugin", { value: Object.freeze({ request, manage, json, copy, download, navigate, onNavigationChange, deviceView, onFileDrop, fileDrag }), writable: false, configurable: false });
+  Object.defineProperty(window, "aioPlugin", { value: Object.freeze({ request, manage, json, copy, download, downloadPackage, openSettings, installTool, managementImage, navigate, onNavigationChange, deviceView, onFileDrop, fileDrag }), writable: false, configurable: false });
 })();
