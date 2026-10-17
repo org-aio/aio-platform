@@ -183,6 +183,41 @@ impl Components {
         request: Request,
         context: RequestContext,
     ) -> Result<Response> {
+        let executor = self
+            .authorized_executor(source, tenant, digest, &context)
+            .await?;
+        executor
+            .handle(source, tenant, digest, request, context)
+            .await
+    }
+
+    pub(super) async fn handle_stream(
+        &self,
+        source: Uuid,
+        tenant: &str,
+        digest: &str,
+        request: Request,
+        context: RequestContext,
+    ) -> Result<super::execution::StreamingResponse> {
+        ensure!(
+            matches!(request.method.as_str(), "GET" | "HEAD") && request.body.is_empty(),
+            "流式入口仅允许读取"
+        );
+        let executor = self
+            .authorized_executor(source, tenant, digest, &context)
+            .await?;
+        executor
+            .handle_stream(source, tenant, digest, request, context)
+            .await
+    }
+
+    async fn authorized_executor(
+        &self,
+        source: Uuid,
+        tenant: &str,
+        digest: &str,
+        context: &RequestContext,
+    ) -> Result<Arc<dyn ComponentExecutor>> {
         ensure!(
             context.tenant_id.as_deref() == Some(tenant),
             "调用租户不匹配"
@@ -195,7 +230,7 @@ impl Components {
             let registered =
                 self.services
                     .interactive(&context.request_id, tenant, &source.to_string())?;
-            ensure!(registered == context, "交互请求归属不匹配");
+            ensure!(registered == *context, "交互请求归属不匹配");
             ensure!(
                 self.host_permissions(
                     tenant,
@@ -207,10 +242,7 @@ impl Components {
                 "当前用户无插件所需的宿主权限"
             );
         }
-        let executor = self.active_executor(source, tenant, digest).await?;
-        executor
-            .handle(source, tenant, digest, request, context)
-            .await
+        self.active_executor(source, tenant, digest).await
     }
 }
 

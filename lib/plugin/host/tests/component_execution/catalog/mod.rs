@@ -3,6 +3,7 @@ mod file;
 #[cfg(feature = "postgres")]
 mod postgres;
 mod resources;
+mod streaming;
 
 use super::{fixture::*, identity_support};
 use anyhow::{Context, Result};
@@ -33,6 +34,25 @@ fn selected(
     probes: [Arc<Probe>; 2],
     surfaces: bool,
 ) -> Vec<DynPlugin<RuntimeAssembly>> {
+    selected_with_identity(
+        root,
+        catalog,
+        probes,
+        surfaces,
+        Arc::new(Identity(tenant.into())),
+    )
+}
+fn selected_with_identity<P>(
+    root: &std::path::Path,
+    catalog: Arc<FileCatalog>,
+    probes: [Arc<Probe>; 2],
+    surfaces: bool,
+    identity: Arc<P>,
+) -> Vec<DynPlugin<RuntimeAssembly>>
+where
+    P: az_plugin_host::identity::IdentityProvider
+        + az_plugin_host::authorization::AuthorizationProvider,
+{
     let mut selected = plugins(probes, surfaces);
     #[cfg(feature = "postgres")]
     selected.retain(|plugin| {
@@ -52,7 +72,7 @@ fn selected(
     }
     selected.push(Arc::new(CatalogPlugin(catalog)));
     selected.push(Arc::new(resources::NoDatabase));
-    identity_support::with_identity(Arc::new(Identity(tenant.into())), selected)
+    identity_support::with_identity(identity, selected)
 }
 fn bootstrap(
     root: &std::path::Path,

@@ -10,6 +10,10 @@ pub struct Configuration {
     /// 当前进程是否持有对象存储授权；实际访问仍由 broker 实时复核。
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub storage: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub public_routes: Vec<crate::public::PublicRoute>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_base: Option<String>,
     pub ingress_token: String,
     pub broker_socket: String,
     pub endpoints: Vec<String>,

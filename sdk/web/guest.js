@@ -118,6 +118,16 @@
     pending.set(id, { resolve, reject, timer });
     window.parent.postMessage({ protocol: "aio:plugin@2", kind: "download", id, name, mime, body }, "*");
   });
+  // 仅发送插件内的资源路径，不通过消息通道缓存整个文件。
+  const downloadFrom = (path, name, query) => new Promise((resolve, reject) => {
+    if (pending.size >= 16 || typeof path !== "string" || path.length > 2048 || !/^\/(?:[A-Za-z0-9_~.-]+\/)*[A-Za-z0-9_~.-]+$/.test(path) || path.split("/").some(part => part === "." || part === "..") ||
+        typeof name !== "string" || !name.length || name.length > 255 || /[\\/\x00-\x1f\x7f]/.test(name) ||
+        (query != null && (typeof query !== "string" || query.length > 8192 || /[#\x00-\x1f\x7f]/.test(query)))) return reject(new Error("Invalid streaming download request"));
+    const id = createId();
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error("Download request timed out")); }, 5000);
+    pending.set(id, { resolve, reject, timer });
+    window.parent.postMessage({ protocol: "aio:plugin@2", kind: "download-request", id, path, name, query }, "*");
+  });
   const navigate = (fragment, options) => window.aioNavigation.navigate(fragment, options);
   // 仅描述语义操作；实际地址、权限与用户手势由宿主确认。
   const managementAction = action => new Promise((resolve, reject) => {
@@ -152,5 +162,5 @@
   const fileDrag = () => {
     if (fileDrop) { window.parent.postMessage({ protocol: "aio:plugin@2", kind: "file-drag", id: fileDrop.id }, "*"); }
   };
-  Object.defineProperty(window, "aioPlugin", { value: Object.freeze({ request, manage, json, copy, download, downloadPackage, openSettings, installTool, managementImage, navigate, onNavigationChange, deviceView, onFileDrop, fileDrag }), writable: false, configurable: false });
+  Object.defineProperty(window, "aioPlugin", { value: Object.freeze({ request, manage, json, copy, download, downloadFrom, downloadPackage, openSettings, installTool, managementImage, navigate, onNavigationChange, deviceView, onFileDrop, fileDrag }), writable: false, configurable: false });
 })();

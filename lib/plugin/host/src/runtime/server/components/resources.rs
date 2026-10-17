@@ -40,6 +40,7 @@ impl Components {
             executors,
             active: Default::default(),
             mutations: Default::default(),
+            public_slots: Arc::new(tokio::sync::Semaphore::new(16)),
         });
         components
             .services

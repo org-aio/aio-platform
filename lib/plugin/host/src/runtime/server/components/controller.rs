@@ -19,6 +19,14 @@ pub(in crate::runtime::server) fn router(state: RuntimeState) -> Router<RuntimeS
     Router::new()
         .merge(super::worker_services::router())
         .route(
+            "/api/runtime/components/{token}/download",
+            get(super::downloads::read),
+        )
+        .route(
+            "/api/runtime/components/public/{source}/{tenant}/{*path}",
+            get(super::public::read),
+        )
+        .route(
             "/api/runtime/components/publish",
             post(publish)
                 .layer(DefaultBodyLimit::max(az_plugin_bundle::MAX_ENCODED_BYTES))

@@ -6,6 +6,7 @@ mod development;
 mod instance;
 mod management;
 mod model;
+mod resource_requests;
 mod storage;
 #[cfg(all(test, feature = "postgres"))]
 mod storage_tests;

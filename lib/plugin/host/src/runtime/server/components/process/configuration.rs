@@ -162,6 +162,16 @@ impl Processes {
             database_url,
             encryption_key,
             storage: resources.storage.is_some(),
+            public_routes: manifest.public_routes.clone(),
+            public_base: if manifest.public_routes.is_empty() {
+                None
+            } else {
+                Some(format!(
+                    "/api/runtime/components/public/{}/{}",
+                    start.source,
+                    urlencoding::encode(&start.tenant)
+                ))
+            },
             ingress_token: random()?,
             broker_socket: if local {
                 directory

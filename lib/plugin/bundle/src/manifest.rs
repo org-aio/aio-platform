@@ -23,6 +23,9 @@ pub struct ComponentManifest {
     /// 访问整包所需的宿主权限；安装不会授予这些权限，调用时由宿主实时校验。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required_permissions: Vec<String>,
+    /// 明确声明的匿名只读资源；未声明路径仍要求完整交互授权。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub public_routes: Vec<az_plugin_contract::public::PublicRoute>,
     pub marketplace: Option<MarketplaceManifest>,
     pub runtime: RuntimeManifest,
     pub frontend: FrontendManifest,
@@ -102,6 +105,7 @@ impl BundleManifest {
             "只接受 v2 清单"
         );
         let plugin = &manifest.plugin;
+        az_plugin_contract::public::validate_routes(&plugin.public_routes)?;
         if let Some(page) = &plugin.settings_page {
             ensure!(
                 !page.is_empty()

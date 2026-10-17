@@ -91,6 +91,31 @@ impl ComponentExecutor for SidecarExecutor {
             .await
     }
 
+    async fn handle_stream(
+        &self,
+        source: Uuid,
+        tenant: &str,
+        digest: &str,
+        request: Request,
+        context: RequestContext,
+    ) -> Result<super::super::execution::StreamingResponse> {
+        self.state()?
+            .handle_stream(source, tenant, digest, request, context)
+            .await
+    }
+
+    async fn handle_public(
+        &self,
+        source: Uuid,
+        tenant: &str,
+        digest: &str,
+        request: Request,
+    ) -> Result<super::super::execution::StreamingResponse> {
+        self.state()?
+            .handle_public(source, tenant, digest, request)
+            .await
+    }
+
     async fn deactivate(&self, source: Uuid, tenant: &str) -> Result<()> {
         if tenant == "development" {
             self.state()?.deactivate_development(source).await;

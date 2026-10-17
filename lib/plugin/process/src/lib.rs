@@ -1,6 +1,8 @@
 //! 原生进程插件的宿主配置和可信入口；不依赖宿主、数据库或具体业务。
 
 mod ingress;
+mod public;
+pub use public::PublicCaller;
 #[cfg(unix)]
 mod storage;
 #[cfg(unix)]
@@ -48,6 +50,7 @@ impl Host {
                 && socket.is_absolute(),
             "宿主配置绑定无效"
         );
+        az_plugin_contract::public::validate_routes(&configuration.public_routes)?;
         Ok(Self {
             configuration,
             socket,

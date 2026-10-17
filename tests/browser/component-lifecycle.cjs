@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const { createServer } = require('node:http');
+const { once } = require('node:events');
 const { readFile } = require('node:fs/promises');
 const { chromium } = require('playwright');
 
@@ -22,6 +23,7 @@ const counts = { mount: 0, delete: 0, request: 0, manage: 0, action: 0, image: 0
 const requests = [];
 const management = [];
 const imageTickets = [];
+const streamTickets = [];
 let deleteDelay = 0;
 let actionDelay = 0;
 let rejectedRenewal;
@@ -98,6 +100,20 @@ const server = createServer(async (request, response) => {
       else requests.push(token);
       return send(response, 200, { data: { status: 200, headers: [], body: Array.from(Buffer.from('{}')) } });
     }
+    const stream = path.match(/^\/api\/runtime\/components\/([^/]+)\/download$/);
+    if (stream) {
+      if (!grants.has(stream[1])) return send(response, 403, {error:'Mount revoked'});
+      const parameters = new URL(request.url, origin).searchParams;
+      assert.equal(parameters.get('path'), '/files/large');
+      assert.equal(parameters.get('name'), 'large.bin');
+      assert.equal(parameters.get('query'), 'version=2');
+      streamTickets.push(stream[1]);
+      response.writeHead(200, {'content-type':'application/octet-stream', 'content-disposition':'attachment; filename="large.bin"', 'content-length':100 * 1024 * 1024});
+      for (let index = 0; index < 100; index++) {
+        if (!response.write(Buffer.alloc(1024 * 1024, 0x5a))) await once(response, 'drain');
+      }
+      return response.end();
+    }
     const download = path.match(/^\/api\/runtime\/components\/([^/]+)\/packages\/([a-f0-9]{64})$/);
     if (download) {
       if (!grants.has(download[1])) return send(response, 403, { error: 'Mount revoked' });
@@ -108,7 +124,7 @@ const server = createServer(async (request, response) => {
     if (asset) {
       if (!grants.has(asset[1])) return send(response, 401, { error: 'Mount missing' });
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      return response.end(`<!doctype html><html><body><script data-token="${asset[1]}">${await lifecycle}</script><script>${await guest}</script><button id="download">Download</button><button id="settings">Settings</button><button id="image">Image</button><img id="document-image"><script>
+      return response.end(`<!doctype html><html><body><script data-token="${asset[1]}">${await lifecycle}</script><script>${await guest}</script><button id="download">Download</button><button id="stream">Stream</button><button id="settings">Settings</button><button id="image">Image</button><img id="document-image"><script>
       window.marker = 'initial';
       document.querySelector('#image').onclick = async () => {
         try {
@@ -119,6 +135,7 @@ const server = createServer(async (request, response) => {
           image.src = URL.createObjectURL(new Blob([response.body], { type: response.headers[0].value }));
         } catch (error) { window.imageError = error.message; }
       };
+      document.querySelector('#stream').onclick = () => window.aioPlugin.downloadFrom('/files/large', 'large.bin', 'version=2').catch(error => window.streamError = error.message);
       document.querySelector('#download').onclick = () => window.aioPlugin.downloadPackage('a'.repeat(64)).catch(error => window.actionError = error.message);
       document.querySelector('#settings').onclick = () => window.aioPlugin.openSettings('component:other:settings').catch(error => window.actionError = error.message);
       </script></body></html>`);
@@ -212,6 +229,14 @@ const server = createServer(async (request, response) => {
     const downloaded = await downloading;
     assert.equal(downloaded.suggestedFilename(), `${'a'.repeat(64)}.aio-plugin`);
     assert.equal((await readFile(await downloaded.path())).length, 34 * 1024 * 1024);
+    const streaming = page.waitForEvent('download');
+    await frame.locator('#stream').click();
+    const streamed = await streaming;
+    assert.equal(streamed.suggestedFilename(), 'large.bin');
+    const streamedBytes = await readFile(await streamed.path());
+    assert.equal(streamedBytes.length, 100 * 1024 * 1024);
+    assert(streamedBytes.every(byte => byte === 0x5a));
+    assert.equal(streamTickets.at(-1), mount.token);
     await frame.locator('#settings').click();
     await page.waitForFunction(() => window.__settings.length === 1);
     assert.equal(await page.evaluate(() => window.__settings[0]), 'component:other:settings');
@@ -227,6 +252,10 @@ const server = createServer(async (request, response) => {
     await page.evaluate(() => { window.__holdCatalog = false; });
     assert.equal(await page.locator('#frame').getAttribute('src'), initialSource);
     assert.equal(await frame.locator('body').evaluate(() => window.marker), 'initial');
+    const beforeStreams = streamTickets.length;
+    await frame.locator('#stream').click();
+    await frame.locator('body').evaluate(() => window.aioPlugin.downloadFrom('/files/large', 'large.bin').then(() => { throw new Error('暂停下载未拒绝'); }, error => { if (!/就绪/.test(error.message)) throw error; }));
+    assert.equal(streamTickets.length, beforeStreams);
     const beforeSuspended = counts.manage;
     await assert.rejects(manage('GET'), /暂停/);
     assert.equal(counts.manage, beforeSuspended);
@@ -258,6 +287,10 @@ const server = createServer(async (request, response) => {
     await manage('GET');
     assert.equal(management.at(-1).token, renewedTicket);
     rejectedRenewal = undefined;
+    const restoredDownload = page.waitForEvent('download');
+    await frame.locator('#stream').click();
+    assert.equal((await readFile(await (await restoredDownload).path())).length, 100 * 1024 * 1024);
+    assert.equal(streamTickets.at(-1), renewedTicket);
     const previousImage = await frame.locator('#document-image').getAttribute('src');
     await frame.locator('#image').click();
     await waitFor(() => imageTickets.at(-1) === renewedTicket);
@@ -294,7 +327,7 @@ const server = createServer(async (request, response) => {
     await waitFor(() => grants.size === 1);
     assert.deepEqual(errors, []);
     await page.evaluate(() => window.__stopCatalog());
-    console.log(JSON.stringify({ retainedFrame: true, releasedOnSuspend: true, restoredWithNewGrant: true, expiredLeaseRecoveredInPlace: true, repeatedCycles: 20, bfcache: true, maxGrants: 1, management: { isolated: true, suspended: true, renewed: true, catalogInvalidated: true, largeDownload: true, settings: true, suspendedActionCancelled: true, authorizedImage: true, renewedImage: true } }));
+    console.log(JSON.stringify({ streamingDownload100MiB: true, streamingDownloadRevoked: true, renewedDownload: true, retainedFrame: true, releasedOnSuspend: true, restoredWithNewGrant: true, expiredLeaseRecoveredInPlace: true, repeatedCycles: 20, bfcache: true, maxGrants: 1, management: { isolated: true, suspended: true, renewed: true, catalogInvalidated: true, largeDownload: true, settings: true, suspendedActionCancelled: true, authorizedImage: true, renewedImage: true } }));
   } finally {
     await context.close();
     await browser.close();

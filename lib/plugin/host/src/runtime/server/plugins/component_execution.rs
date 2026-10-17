@@ -5,7 +5,7 @@ use az_plugin_core::{Plugin, PluginFuture};
 
 pub use super::super::components::execution::{
     ComponentDescription, ComponentExecutor, ComponentExecutors, ComponentPage, ExecutionContext,
-    Request as ComponentRequest, Response as ComponentResponse,
+    Request as ComponentRequest, Response as ComponentResponse, StreamingResponse,
 };
 #[cfg(feature = "sidecar")]
 pub use super::super::components::executors::SidecarExecutor;

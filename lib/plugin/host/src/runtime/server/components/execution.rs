@@ -51,6 +51,13 @@ impl ExecutionContext {
     }
 }
 
+/// 有界资源的流式响应；宿主负责限制总字节、截止时间和持续授权。
+pub struct StreamingResponse {
+    pub status: u16,
+    pub headers: Vec<az_plugin_contract::transport::Header>,
+    pub body: futures_util::stream::BoxStream<'static, Result<Vec<u8>>>,
+}
+
 /// 可替换的整包执行器；具体类型的 TypeId 是原生插件身份，整包格式只用于匹配输入。
 /// initialize 和 shutdown 必须允许部分初始化；关闭保留持久版本，deactivate 才停用实例。
 /// activate 可能改变在线状态，失败时组件管理器会按安装记录调用 restore 补偿。
@@ -77,6 +84,38 @@ pub trait ComponentExecutor: Any + Send + Sync {
         request: Request,
         context: RequestContext,
     ) -> Result<Response>;
+    /// 有身份的流式读取；默认实现复用普通执行入口，原生进程可直接转发字节流。
+    async fn handle_stream(
+        &self,
+        source: Uuid,
+        tenant: &str,
+        digest: &str,
+        request: Request,
+        context: RequestContext,
+    ) -> Result<StreamingResponse> {
+        use futures_util::StreamExt;
+        let response = self
+            .handle(source, tenant, digest, request, context)
+            .await?;
+        Ok(StreamingResponse {
+            status: response.status,
+            headers: response.headers,
+            body: futures_util::stream::once(async move { Ok(response.body) }).boxed(),
+        })
+    }
+
+    /// 执行清单声明的匿名 GET/HEAD，不能伪造用户或绕过普通 handle 的授权。
+    /// 不支持此入口的提供者明确拒绝，不能自动降级为有身份的调用。
+    async fn handle_public(
+        &self,
+        _source: Uuid,
+        _tenant: &str,
+        _digest: &str,
+        _request: Request,
+    ) -> Result<StreamingResponse> {
+        anyhow::bail!("此执行器未实现公开资源")
+    }
+
     /// 释放指定实例；宿主随后提交停用或卸载记录。
     async fn deactivate(&self, source: Uuid, tenant: &str) -> Result<()>;
     /// 释放本次宿主拥有的全部资源，保留持久安装与活动版本。

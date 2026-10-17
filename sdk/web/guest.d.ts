@@ -11,6 +11,8 @@ declare global {
       json<T>(method: string, path: string, value?: unknown): Promise<T>;
       copy(text: string): Promise<Response>;
       download(name: string, body: Uint8Array, mime?: string): Promise<Response>;
+      /** 请求浏览器下载插件资源，返回接收确认，不代表保存完成。 */
+      downloadFrom(path: string, name: string, query?: string): Promise<Response>;
       /** 通过宿主原始下载响应启动整包下载，不受消息字节配额限制。 */
       downloadPackage(revision: string): Promise<Response>;
       /** 打开当前用户已授权的插件设置。 */

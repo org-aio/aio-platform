@@ -4,7 +4,7 @@ export function mountBridge(frame, invoke, options = {}) {
   let inflight = 0;
   const listener = async (event) => {
     const message = event.data;
-    if (!active || event.source !== frame.contentWindow || event.origin !== "null" || message?.protocol !== "aio:plugin@2" || !["request", "manage", "clipboard", "download", "management-action", "management-image"].includes(message.kind)) return;
+    if (!active || event.source !== frame.contentWindow || event.origin !== "null" || message?.protocol !== "aio:plugin@2" || !["request", "manage", "clipboard", "download", "download-request", "management-action", "management-image"].includes(message.kind)) return;
     if (typeof message.id !== "string" || message.id.length > 80) return;
     const source = event.source;
     const reply = { protocol: "aio:plugin@2", kind: "response", id: message.id };
@@ -33,6 +33,15 @@ export function mountBridge(frame, invoke, options = {}) {
           link.remove();
           setTimeout(() => URL.revokeObjectURL(url), 60000);
           reply.response = { status: 204, headers: [], body: [] };
+        } else if (message.kind === "download-request") {
+          if (!options.downloadRequest || !document.hasFocus() || document.hidden || !navigator.userActivation?.isActive || !frame.checkVisibility?.() ||
+              typeof message.path !== "string" || message.path.length > 2048 || !/^\/(?:[A-Za-z0-9_~.-]+\/)*[A-Za-z0-9_~.-]+$/.test(message.path) || message.path.split("/").some(part => part === "." || part === "..") ||
+              typeof message.name !== "string" || !message.name.length || message.name.length > 255 || /[\\/\x00-\x1f\x7f]/.test(message.name) ||
+              (message.query != null && (typeof message.query !== "string" || message.query.length > 8192 || /[#\x00-\x1f\x7f]/.test(message.query)))) {
+            throw new Error("Streaming download access denied");
+          }
+          // 回调立即使用当前手势，文件内容由浏览器与有身份的宿主流式传输。
+          reply.response = await options.downloadRequest({ path: message.path, name: message.name, query: message.query });
         } else if (message.kind === "management-image") {
           if (!options.managementImage || typeof message.url !== "string" || message.url.length > 4096) throw new Error("Management image unavailable");
           reply.response = await options.managementImage(message.url);

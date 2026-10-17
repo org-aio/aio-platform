@@ -41,3 +41,7 @@ Component v2 插件声明 `worker_capabilities=["codex.web"]` 后，可调用 `a
 已配对设备通过 `/api/runtime/workers/webviews/access` 提交 `enabled: true, headless: true, runtime: "codex"`，在同一授权内发布 `codex.web` 和 `codex.cli`。省略 `headless` 代表桌面模式，移除 `codex.cli`；停用同时移除两者并关闭所有视图。模式标记与授权原子更新。
 
 声明 `codex.web` 的插件可以经 `aioPlugin.deviceView` 打开视图，并连接返回 `src` 下的 `__channel`。CSP 仅对当前挂载票据目录放行对应 HTTPS/WSS 或 HTTP/WS，保持沙箱、用户/租户/会话隔离和 LAN 优先选路。CLI 的 ready snapshot 标记 `runtime: codex-cli`，后续使用 `{kind: 'rpc', message: 原生请求}` 帧；Desktop 继续使用原有 renderer 桥。宿主只传输帧，不实现 Codex 协议、任务或审批语义。
+
+## 大文件下载
+
+真实点击事件可调用 `aioPlugin.downloadFrom('/files/id', 'file.bin', 'version=2')`。它立即请求宿主用当前挂载票据启动浏览器下载，返回接收确认；文件不经过 postMessage 字节数组，最大 128 MiB。宿主持续检查登录、页面、整包权限和版本；暂停或撤权后中断。不能传外部 URL，也不能在先等待大文件读取后再借用已经消失的用户手势。已有 `download(name, bytes, mime)` 适用于不超过 16 MiB 的内存数据。完整契约见 [插件资源流](../../docs/plugin/component-resources.md)。

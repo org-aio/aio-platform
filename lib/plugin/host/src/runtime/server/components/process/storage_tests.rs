@@ -192,7 +192,9 @@ fn package(root: &Path, git: &str, storage: bool) -> Result<Bundle> {
     let content = std::fs::read_to_string(&manifest)?;
     std::fs::write(
         &manifest,
-        format!("{content}\n[plugin.capabilities]\nstorage={storage}\n"),
+        format!(
+            "{content}\n[plugin.capabilities]\nstorage={storage}\n[[plugin.public_routes]]\npath='/i/{{token}}'\ncontent_types=['image/png']\nmax_bytes=104857600\n"
+        ),
     )?;
     Bundle::from_directory(
         root,
@@ -393,3 +395,6 @@ async fn sidecar_storage_scopes_persists_and_revokes() -> Result<()> {
     fixture.pool.close().await;
     Ok(())
 }
+
+#[path = "resource_tests.rs"]
+mod resource_tests;

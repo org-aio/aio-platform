@@ -14,6 +14,7 @@ mod development;
 #[cfg(feature = "postgres")]
 mod development_tests;
 mod dispatch;
+mod downloads;
 pub(in crate::runtime::server) mod execution;
 pub(in crate::runtime::server) mod executors;
 mod frontend;
@@ -34,10 +35,12 @@ pub(in crate::runtime::server) mod process;
 #[cfg(all(test, feature = "sidecar"))]
 #[cfg(feature = "postgres")]
 mod process_publication_tests;
+mod public;
 mod resources;
 pub(in crate::runtime::server) mod services;
 mod shutdown;
 mod store;
+mod streaming;
 #[cfg(test)]
 mod tests;
 mod worker_services;
@@ -69,6 +72,7 @@ pub(super) struct Components {
     executors: Arc<ComponentExecutors>,
     active: RwLock<HashMap<(Uuid, String), ActiveExecution>>,
     pub mutations: Mutex<()>,
+    public_slots: Arc<tokio::sync::Semaphore>,
 }
 
 #[cfg(test)]

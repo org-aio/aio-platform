@@ -26,6 +26,7 @@ pub struct Probe {
     pub context: Mutex<Option<ExecutionContext>>,
     pub active: Mutex<HashMap<(Uuid, String), Arc<VerifiedBundle>>>,
     pub events: Mutex<Vec<&'static str>>,
+    pub resource_calls: Mutex<Vec<(ComponentRequest, Option<RequestContext>)>>,
     #[cfg(feature = "postgres")]
     pub pool: Mutex<Option<Arc<PgPool>>>,
     pub fail_activate: AtomicBool,
@@ -41,6 +42,9 @@ pub struct Probe {
     pub entered: Notify,
     pub resume: Notify,
 }
+
+#[path = "fixture_streaming.rs"]
+mod streaming;
 
 pub struct Replacement<const ID: u8>(pub Arc<Probe>);
 
@@ -176,6 +180,47 @@ impl<const ID: u8> ComponentExecutor for Replacement<ID> {
                 &json!({"executor":ID,"tenant":tenant,"revision":digest,"path":request.path}),
             )?,
         })
+    }
+    async fn handle_public(
+        &self,
+        source: Uuid,
+        tenant: &str,
+        digest: &str,
+        request: ComponentRequest,
+    ) -> Result<StreamingResponse> {
+        ensure!(
+            self.bundle(source, tenant)
+                .await?
+                .is_some_and(|bundle| bundle.digest() == digest),
+            "测试资源版本不匹配"
+        );
+        self.0
+            .resource_calls
+            .lock()
+            .await
+            .push((request.clone(), None));
+        streaming::response(request)
+    }
+    async fn handle_stream(
+        &self,
+        source: Uuid,
+        tenant: &str,
+        digest: &str,
+        request: ComponentRequest,
+        context: RequestContext,
+    ) -> Result<StreamingResponse> {
+        ensure!(
+            self.bundle(source, tenant)
+                .await?
+                .is_some_and(|bundle| bundle.digest() == digest),
+            "测试资源版本不匹配"
+        );
+        self.0
+            .resource_calls
+            .lock()
+            .await
+            .push((request.clone(), Some(context)));
+        streaming::response(request)
     }
     async fn deactivate(&self, source: Uuid, tenant: &str) -> Result<()> {
         self.0.events.lock().await.push("deactivate");

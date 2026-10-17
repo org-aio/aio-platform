@@ -80,3 +80,62 @@ async fn guards_identity_before_business_handler() -> Result<()> {
     assert_eq!(router.oneshot(request).await?.status(), 401);
     Ok(())
 }
+
+#[tokio::test]
+async fn public_ingress_has_only_the_bound_tenant_and_no_user_authority() -> Result<()> {
+    let mut configuration = config();
+    configuration["public_routes"] =
+        json!([{"path":"/i/{token}","content_types":["image/png"],"max_bytes":1048576}]);
+    let host = Host::from_bytes(
+        &serde_json::to_vec(&configuration)?,
+        "/tmp/service.sock".into(),
+    )?;
+    let app = host.protect_public(Router::new().route(
+        "/i/{token}",
+        get(|Extension(caller): Extension<super::PublicCaller>| async move { caller.tenant_id }),
+    ));
+    for (method, path, extra, expected) in [
+        ("GET", "/i/abc", None, 200),
+        ("HEAD", "/i/abc", None, 200),
+        ("POST", "/i/abc", None, 403),
+        ("GET", "/i/%252e", None, 403),
+        ("GET", "/i/abc", Some(("x-aio-user-id", "reader")), 403),
+        ("GET", "/i/abc", Some(("x-aio-context", "context")), 403),
+        (
+            "GET",
+            "/i/abc",
+            Some(("authorization", "Bearer secret")),
+            403,
+        ),
+        ("GET", "/i/abc", Some(("cookie", "session=secret")), 403),
+        ("GET", "/i/abc", Some(("x-aio-tenant-id", "tenant-b")), 403),
+        ("GET", "/i/abc", Some(("x-aio-public", "1")), 403),
+    ] {
+        let mut request = Request::builder()
+            .method(method)
+            .uri(path)
+            .header("x-aio-token", "a".repeat(32))
+            .header("x-aio-tenant-id", "tenant-a")
+            .header("x-aio-public", "1");
+        if let Some((name, value)) = extra {
+            request = request.header(name, value);
+        }
+        let response = app.clone().oneshot(request.body(Body::empty())?).await?;
+        assert_eq!(response.status(), expected, "{method} {path} {extra:?}");
+        if method == "GET" && expected == 200 {
+            assert_eq!(
+                axum::body::to_bytes(response.into_body(), 1024)
+                    .await?
+                    .as_ref(),
+                b"tenant-a"
+            );
+        }
+    }
+    assert_eq!(
+        app.oneshot(Request::builder().uri("/i/abc").body(Body::empty())?)
+            .await?
+            .status(),
+        403
+    );
+    Ok(())
+}
