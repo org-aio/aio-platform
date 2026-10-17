@@ -242,6 +242,26 @@ pub(super) async fn asset(
         state.transport.request_origin(&request_headers)
     );
     let device_views = permits_device_views(&state, bundle.manifest())?;
+    let public_images = bundle
+        .manifest()
+        .plugin
+        .public_routes
+        .iter()
+        .any(|route| {
+            route
+                .content_types
+                .iter()
+                .any(|mime| mime.starts_with("image/"))
+        })
+        .then(|| {
+            format!(
+                "{}/api/runtime/components/public/{}/{}/",
+                state.transport.request_origin(&request_headers),
+                grant.source_id,
+                urlencoding::encode(&session.tenant_id)
+            )
+        });
+
     let bytes = if path == grant.entry {
         render(
             bytes,
@@ -288,12 +308,20 @@ pub(super) async fn asset(
             &token,
             device_views,
             &state.transport.lan_origins,
+            public_images.as_deref(),
         ))?,
     );
     Ok(response)
 }
 
-fn content_policy(prefix: &str, token: &str, device_views: bool, lan_origins: &[String]) -> String {
+fn content_policy(
+    prefix: &str,
+    token: &str,
+    device_views: bool,
+    lan_origins: &[String],
+    public_images: Option<&str>,
+) -> String {
+    let public_images = public_images.unwrap_or_default();
     let view_roots = if device_views {
         std::iter::once(format!("{prefix}__device_view"))
             .chain(lan_origins.iter().map(|origin| {
@@ -334,7 +362,7 @@ fn content_policy(prefix: &str, token: &str, device_views: bool, lan_origins: &[
         .collect::<Vec<_>>()
         .join(" ");
     format!(
-        "sandbox allow-scripts allow-forms; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: {prefix}; connect-src {prefix} {view_connections} {probes} blob:; style-src 'unsafe-inline' blob: {prefix}; img-src data: blob: {prefix}; font-src data: {prefix}; object-src 'none'; frame-src {frame_policy}; worker-src blob:; base-uri {prefix}; form-action 'none'; frame-ancestors 'self'"
+        "sandbox allow-scripts allow-forms; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: {prefix}; connect-src {prefix} {view_connections} {probes} blob:; style-src 'unsafe-inline' blob: {prefix}; img-src data: blob: {prefix} {public_images}; font-src data: {prefix}; object-src 'none'; frame-src {frame_policy}; worker-src blob:; base-uri {prefix}; form-action 'none'; frame-ancestors 'self'"
     )
 }
 
@@ -511,6 +539,7 @@ mod tests {
             "ticket",
             true,
             &["https://lan.example:3443".into()],
+            None,
         );
         let directives = policy
             .split(';')
@@ -547,10 +576,44 @@ mod tests {
             "ticket",
             false,
             &["https://lan.example:3443".into()],
+            None,
         );
         assert!(!policy.contains("__device_view"));
         assert!(policy.contains("frame-src 'none'"));
         assert!(policy.contains("https://lan.example:3443/api/runtime/transport"));
+    }
+
+    #[test]
+    fn declared_public_images_are_scoped_to_the_current_plugin_and_tenant() {
+        let root = "https://aio.test/api/runtime/components/public/source/tenant/";
+        let policy = content_policy(
+            "https://aio.test/api/runtime/components/assets/ticket/",
+            "ticket",
+            false,
+            &[],
+            Some(root),
+        );
+        let directives = policy
+            .split(';')
+            .map(str::trim)
+            .filter_map(|value| value.split_once(' '))
+            .collect::<BTreeMap<_, _>>();
+        assert!(
+            directives["img-src"]
+                .split_whitespace()
+                .any(|value| value == root)
+        );
+        for directive in ["connect-src", "script-src", "frame-src"] {
+            assert!(!directives[directive].contains("/public/"));
+        }
+        let absent = content_policy(
+            "https://aio.test/api/runtime/components/assets/ticket/",
+            "ticket",
+            false,
+            &[],
+            None,
+        );
+        assert!(!absent.contains("/public/"));
     }
 
     #[test]
