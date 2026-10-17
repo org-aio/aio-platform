@@ -1,6 +1,6 @@
 {
   "name": "@zjarlin/aio",
-  "version": "2026.10.16",
+  "version": "2026.10.17",
   "description": "AIO application and plugin CLI",
   "license": "MIT OR Apache-2.0",
   "homepage": "https://github.com/org-aio/aio-platform",
@@ -30,11 +30,11 @@
     "@zjarlin/aio-device": "0.12.6"
   },
   "optionalDependencies": {
-    "@zjarlin/aio-darwin-arm64": "2026.10.16",
-    "@zjarlin/aio-darwin-x64": "2026.10.16",
-    "@zjarlin/aio-linux-arm64": "2026.10.16",
-    "@zjarlin/aio-linux-x64": "2026.10.16",
-    "@zjarlin/aio-win32-x64": "2026.10.16"
+    "@zjarlin/aio-darwin-arm64": "2026.10.17",
+    "@zjarlin/aio-darwin-x64": "2026.10.17",
+    "@zjarlin/aio-linux-arm64": "2026.10.17",
+    "@zjarlin/aio-linux-x64": "2026.10.17",
+    "@zjarlin/aio-win32-x64": "2026.10.17"
   },
   "publishConfig": {
     "access": "public",
