@@ -73,7 +73,7 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
             .await
             .map_err(|_| anyhow::anyhow!("dsh 授权失败"))?;
         let dsh_owner = ViewOwner {
-            runtime: runtime,
+            runtime,
             mount: "separate-mount".into(),
             ..owner.clone()
         };
