@@ -66,35 +66,37 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         revision: "revision1".into(),
         mount: "mount1".into(),
     };
-    // dsh 授权不能污染 Codex 模式，两个插件按自己的能力筛选设备。
-    service
-        .access(&device, true, false, WebviewRuntime::Dsh)
-        .await
-        .map_err(|_| anyhow::anyhow!("dsh 授权失败"))?;
-    let dsh_owner = ViewOwner {
-        runtime: WebviewRuntime::Dsh,
-        mount: "dsh-mount".into(),
-        ..owner.clone()
-    };
-    assert_eq!(
+    for runtime in [WebviewRuntime::Dsh, WebviewRuntime::Tunnel] {
+        // dsh 与隧道独立授权，不能修改 Codex 模式。
         service
-            .devices(&dsh_owner)
+            .access(&device, true, false, runtime)
             .await
-            .map_err(|_| anyhow::anyhow!("dsh 设备读取失败"))?
-            .len(),
-        1
-    );
-    service
-        .access(&device, false, false, WebviewRuntime::Dsh)
-        .await
-        .map_err(|_| anyhow::anyhow!("dsh 撤权失败"))?;
-    assert!(
+            .map_err(|_| anyhow::anyhow!("dsh 授权失败"))?;
+        let dsh_owner = ViewOwner {
+            runtime: runtime,
+            mount: "separate-mount".into(),
+            ..owner.clone()
+        };
+        assert_eq!(
+            service
+                .devices(&dsh_owner)
+                .await
+                .map_err(|_| anyhow::anyhow!("dsh 设备读取失败"))?
+                .len(),
+            1
+        );
         service
-            .devices(&dsh_owner)
+            .access(&device, false, false, runtime)
             .await
-            .map_err(|_| anyhow::anyhow!("dsh 设备读取失败"))?
-            .is_empty()
-    );
+            .map_err(|_| anyhow::anyhow!("dsh 撤权失败"))?;
+        assert!(
+            service
+                .devices(&dsh_owner)
+                .await
+                .map_err(|_| anyhow::anyhow!("dsh 设备读取失败"))?
+                .is_empty()
+        );
+    }
     assert_eq!(
         service
             .devices(&owner)

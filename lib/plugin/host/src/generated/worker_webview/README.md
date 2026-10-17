@@ -19,3 +19,7 @@
 Codex 插件声明 `codex.web`，DeepSeek Harness 插件声明 `dsh.web`。宿主从已经验证的插件清单推导唯一运行时，`list/open/authorize/renew` 均检查对应能力；设备 `access` 请求可指定 `runtime`，省略时沿用 Codex。两种运行时在设备端复用一条通道，通过打开视图时的 `runtime` 和后续 `sessionId` 分发。撤销 dsh 授权只关闭 dsh 视图，不修改 Codex 的授权和无界面模式。
 
 建议阅读顺序：`model.rs` 的运行时和身份、`service_impl.rs` 的权限与生命周期、`controller.rs` 的资源 CSP、`tests.rs` 的数据库回归。
+
+## device 内网服务通道
+
+`WebviewRuntime::Tunnel` 使用独立 `tunnel.connect` 能力，复用现有出站连接、账号隔离、视图生命周期和有界帧队列。HTTP 网关、服务目录、目标授权和浏览器入口由 `aio-plugin-device/server` 提供，宿主不读取内网地址，也不维护第二套配对连接。原生 device 插件可通过 `WorkerWebviewService` 创建并消费此运行时；Codex/dsh 的组件视图权限保持独立。

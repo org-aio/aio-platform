@@ -57,6 +57,10 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
                 sqlx::query("UPDATE worker_devices SET capabilities=(capabilities-'dsh.web') || CASE WHEN $2 THEN '[\"dsh.web\"]'::jsonb ELSE '[]'::jsonb END WHERE id=$1 AND state='active'")
                     .bind(&device.id).bind(enabled).execute(&self.pool).await?;
             }
+            WebviewRuntime::Tunnel => {
+                sqlx::query("UPDATE worker_devices SET capabilities=(capabilities-'tunnel.connect') || CASE WHEN $2 THEN '[\"tunnel.connect\"]'::jsonb ELSE '[]'::jsonb END WHERE id=$1 AND state='active'")
+                    .bind(&device.id).bind(enabled).execute(&self.pool).await?;
+            }
         }
         if !enabled {
             let ids: Vec<String> = self
@@ -198,7 +202,7 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
         device: &DeviceIdentity,
     ) -> Result<(String, mpsc::Receiver<Value>), RuntimeError> {
         let _guard = self.lifecycle.lock().await;
-        let enabled: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM worker_devices WHERE id=$1 AND state='active' AND (capabilities ? 'codex.web' OR capabilities ? 'dsh.web'))").bind(&device.id).fetch_one(&self.pool).await?;
+        let enabled: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM worker_devices WHERE id=$1 AND state='active' AND (capabilities ? 'codex.web' OR capabilities ? 'dsh.web' OR capabilities ? 'tunnel.connect'))").bind(&device.id).fetch_one(&self.pool).await?;
         if !enabled {
             return Err(RuntimeError::forbidden("设备未启用网页访问"));
         }

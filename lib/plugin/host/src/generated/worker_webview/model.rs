@@ -52,6 +52,8 @@ pub enum WebviewRuntime {
     #[default]
     Codex,
     Dsh,
+    /// device 插件登记的内网服务复用设备出站通道，目标授权留在设备端。
+    Tunnel,
 }
 
 impl WebviewRuntime {
@@ -59,6 +61,7 @@ impl WebviewRuntime {
         match self {
             Self::Codex => "codex.web",
             Self::Dsh => "dsh.web",
+            Self::Tunnel => "tunnel.connect",
         }
     }
 }

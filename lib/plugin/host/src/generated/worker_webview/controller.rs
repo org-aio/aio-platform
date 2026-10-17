@@ -149,7 +149,7 @@ async fn worker_socket(
     loop {
         tokio::select! {
             _ = heartbeat.tick() => {
-                let authorized = device(&state, &headers).await.is_ok_and(|identity| identity.capabilities.iter().any(|capability| matches!(capability.as_str(), "codex.web" | "dsh.web")));
+                let authorized = device(&state, &headers).await.is_ok_and(|identity| identity.capabilities.iter().any(|capability| matches!(capability.as_str(), "codex.web" | "dsh.web" | "tunnel.connect")));
                 if !authorized || last_seen.elapsed() > Duration::from_secs(45) { break; }
                 if service.expire(&id).await.is_err() { break; }
                 if socket.send(Message::Ping(Bytes::new())).await.is_err() { break; }
@@ -164,7 +164,7 @@ async fn worker_socket(
                 match frame {
                     Message::Pong(_) | Message::Ping(_) => {}
                     Message::Text(text) => {
-                        let authorized = device(&state, &headers).await.is_ok_and(|identity| identity.capabilities.iter().any(|capability| matches!(capability.as_str(), "codex.web" | "dsh.web")));
+                        let authorized = device(&state, &headers).await.is_ok_and(|identity| identity.capabilities.iter().any(|capability| matches!(capability.as_str(), "codex.web" | "dsh.web" | "tunnel.connect")));
                         if !authorized { break; }
                         let Ok(frame) = serde_json::from_str(&text) else { break; };
                         if service.receive(&id, &generation, frame).await.is_err() { break; }
