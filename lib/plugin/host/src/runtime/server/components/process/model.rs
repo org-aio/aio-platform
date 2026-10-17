@@ -55,6 +55,9 @@ pub(super) struct Gateway {
     pub enhancements: Vec<String>,
     pub runtime_capabilities: Vec<String>,
     pub management: bool,
+    pub storage: Option<az_plugin_runtime::ObjectStore>,
+    pub storage_gate: tokio::sync::Mutex<()>,
+    pub stopped: tokio_util::sync::CancellationToken,
     pub client: reqwest::Client,
     pub quota: Arc<tokio::sync::Semaphore>,
 }

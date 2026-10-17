@@ -557,6 +557,9 @@ async fn verify_bridge(state: &RuntimeState, worker: &str) -> Result<()> {
         enhancements: vec![],
         runtime_capabilities: vec![],
         management: false,
+        storage: None,
+        storage_gate: Default::default(),
+        stopped: Default::default(),
         components: Arc::downgrade(&components),
         start: super::super::model::Start {
             source,

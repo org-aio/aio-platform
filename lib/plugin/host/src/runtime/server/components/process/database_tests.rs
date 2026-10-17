@@ -20,7 +20,10 @@ fn relay(path: &Path, endpoint: DatabaseEndpoint, jobs: &mut JoinSet<Result<()>>
                     clients.spawn(super::configuration::forward_database(stream, endpoint.clone()));
                 }
                 result = clients.join_next(), if !clients.is_empty() => {
-                    result.context("数据库代理任务缺失")???;
+                    // 单个客户端关闭连接不能终止整个测试代理；与实际 broker 保持相同生命周期。
+                    if let Err(error) = result.context("数据库代理任务缺失")?? {
+                        eprintln!("测试数据库连接已关闭: {error:#}");
+                    }
                 }
             }
         }
@@ -61,12 +64,13 @@ async fn sidecar_database_tunnel_preserves_checked_role_through_both_transports(
         DatabaseEndpoint::Unix(upstream_socket),
         &mut jobs,
     )?;
-    for directory in [upstream.path(), downstream.path()] {
+    for (transport, directory) in [("TCP", upstream.path()), ("Unix", downstream.path())] {
         let options = PgConnectOptions::from_str(&connection.isolated_url)?.socket(directory);
         let pool: PgPool = PgPoolOptions::new()
             .max_connections(1)
             .connect_with(options)
-            .await?;
+            .await
+            .with_context(|| format!("连接 {transport} Sidecar 数据库代理失败"))?;
         let role: String = sqlx::query_scalar("SELECT current_user")
             .fetch_one(&pool)
             .await?;

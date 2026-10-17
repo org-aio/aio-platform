@@ -3,6 +3,7 @@
 mod enhancement;
 mod model;
 pub mod process;
+pub mod storage;
 pub mod transport;
 #[cfg(feature = "validation")]
 mod value_schema;

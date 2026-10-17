@@ -20,6 +20,12 @@ use super::model::Gateway;
 
 pub(super) fn router(gateway: Arc<Gateway>) -> Router {
     Router::new()
+        .route(
+            "/storage",
+            get(super::storage::read)
+                .put(super::storage::write)
+                .delete(super::storage::remove),
+        )
         .route("/invoke", post(invoke))
         .route("/enhancements/invoke", post(super::enhancements::invoke))
         .route("/management/invoke", post(super::management::invoke))
@@ -106,6 +112,7 @@ pub(super) async fn active(
     gateway: &Gateway,
     headers: &HeaderMap,
 ) -> Result<Arc<super::super::Components>> {
+    ensure!(!gateway.stopped.is_cancelled(), "process 已停止");
     let token = headers
         .get("x-aio-token")
         .and_then(|v| v.to_str().ok())

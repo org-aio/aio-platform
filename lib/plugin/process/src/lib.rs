@@ -1,6 +1,10 @@
 //! 原生进程插件的宿主配置和可信入口；不依赖宿主、数据库或具体业务。
 
 mod ingress;
+#[cfg(unix)]
+mod storage;
+#[cfg(unix)]
+pub use storage::ObjectStorage;
 
 use std::{io::Read, path::PathBuf};
 

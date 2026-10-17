@@ -4,7 +4,7 @@ use anyhow::{Result, ensure};
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 
-pub(crate) const MAX_OBJECT_BYTES: usize = 16 * 1024 * 1024;
+use az_plugin_contract::storage::{MAX_OBJECT_BYTES, MAX_OBJECT_KEY_BYTES};
 
 /// 运行时生成的对象地址；后端只能消费已隔离的命名空间和已校验键的摘要。
 pub struct ObjectKey {
@@ -23,8 +23,11 @@ impl ObjectKey {
 }
 
 /// 对象读写实现，由宿主插件注入；所有执行器通过 ObjectStore 共享隔离与配额。
+/// 操作可能因截止时间或实例停止而取消，实现须回收临时资源，不能派生未托管的写入任务。
+/// 已经提交的副作用不因调用取消而回滚，业务须使用稳定对象键协调重试。
 #[async_trait::async_trait]
 pub trait ObjectStorage: Any + Send + Sync {
+    /// 对象缺失须返回包含 std::io::ErrorKind::NotFound 的错误，其余后端故障不能伪装成缺失。
     async fn read(&self, key: &ObjectKey) -> Result<Vec<u8>>;
     async fn write(&self, key: &ObjectKey, bytes: &[u8]) -> Result<()>;
     async fn remove(&self, key: &ObjectKey) -> Result<()>;
@@ -68,7 +71,10 @@ impl ObjectStore {
     }
 
     fn key(&self, key: &str) -> Result<ObjectKey> {
-        ensure!(!key.is_empty() && key.len() <= 1024, "对象键长度无效");
+        ensure!(
+            !key.is_empty() && key.len() <= MAX_OBJECT_KEY_BYTES,
+            "对象键长度无效"
+        );
         Ok(ObjectKey {
             namespace: self.namespace.clone(),
             digest: format!("{:x}", Sha256::digest(key.as_bytes())),

@@ -62,3 +62,5 @@ storage.write("record", b"data").await?;
 ```
 
 替代后端属于可信原生代码，其内部 I/O、内存及远端请求仍由实现负责约束；脚本和 Sidecar 不直接取得 Provider。`cargo test -p az-plugin-runtime --test storage` 验证后端替换、租户和来源隔离、超限拒绝、现有文件布局读取及符号链接拒绝。
+
+Sidecar 通过 [宿主 broker](../../../docs/plugin/process-storage.md) 复用同一个 `ObjectStore` 和提供者。限额位于 `az-plugin-contract::storage`，运行时、broker 与 SDK 使用同一常量。后端 Future 可以被取消，默认文件实现也会自动清理取消期间的临时对象；已经提交的写入不承诺因取消而回滚。

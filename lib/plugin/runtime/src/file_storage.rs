@@ -1,9 +1,10 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, ensure};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::{ObjectKey, ObjectStorage, storage::MAX_OBJECT_BYTES};
+use crate::{ObjectKey, ObjectStorage};
+use az_plugin_contract::storage::MAX_OBJECT_BYTES;
 
 /// 默认本地对象后端；目录和文件摘要沿用既有格式，切换接口不迁移数据。
 pub struct FileObjectStorage {
@@ -55,17 +56,15 @@ impl ObjectStorage for FileObjectStorage {
     async fn write(&self, key: &ObjectKey, bytes: &[u8]) -> Result<()> {
         let root = self.directory(key).await?;
         let path = root.join(key.digest());
-        let temporary = root.join(format!(".{}.tmp", uuid::Uuid::new_v4()));
-        let result = async {
-            tokio::fs::write(&temporary, bytes).await?;
-            tokio::fs::rename(&temporary, path).await?;
-            Ok(())
-        }
-        .await;
-        if result.is_err() {
-            let _ = tokio::fs::remove_file(temporary).await;
-        }
-        result
+        // RAII 临时文件在超时或任务取消时同样回收；写入只针对已打开的文件句柄。
+        let temporary = tokio::task::spawn_blocking(move || tempfile::NamedTempFile::new_in(root))
+            .await
+            .context("创建对象临时文件任务失败")??;
+        let mut file = tokio::fs::File::from_std(temporary.as_file().try_clone()?);
+        file.write_all(bytes).await?;
+        file.flush().await?;
+        tokio::fs::rename(temporary.path(), path).await?;
+        Ok(())
     }
 
     async fn remove(&self, key: &ObjectKey) -> Result<()> {

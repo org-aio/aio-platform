@@ -50,6 +50,8 @@
 
 - 宿主 PostgreSQL 实现由显式 `postgres` feature 编译，`server`、Rhai、TypeScript、Wasm、Sidecar 与 MCP/gRPC 入站/出站组合不引入 SQLx 或 SQL parser。公共模型、包恢复与 GitHub 发现器保留在中立边界；设备长轮询、Skill 授权与归档密钥改用服务契约。文件夹具直接运行 v1/v2 真实 HTTP 安装、升级、回滚和重启；默认提供者保留事务与可重试故障语义。正式产品与开发宿主仍显式选择 PostgreSQL，不把文件夹具当生产存储。
 
+- Sidecar 已通过启动时固定授权的 Unix broker 复用运行时对象存储，原生 SDK 不依赖宿主实现或数据库。二进制接口保留来源/租户隔离、单对象 16 MiB 限额、并发与总截止时间；上传、排队、下载结束及实例停止均复核或撤销授权。真实 broker、SDK、PostgreSQL 安装目录与文件后端覆盖隔离、故障注入、超限、升级撤权、重启和取消。文件插件独立交付还须迁移旧对象、保留最大 100 MiB 文件支持并补齐匿名图片路由，尚未从产品静态组合移除。见 [Sidecar 对象存储](process-storage.md)。
+
 这些进展不代表以下完整验收已经通过。
 
 ## 完整目标的验收项

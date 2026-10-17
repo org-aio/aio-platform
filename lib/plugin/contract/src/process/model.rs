@@ -7,6 +7,9 @@ pub struct Configuration {
     pub tenant_id: String,
     pub database_url: Option<String>,
     pub encryption_key: Option<String>,
+    /// 当前进程是否持有对象存储授权；实际访问仍由 broker 实时复核。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub storage: bool,
     pub ingress_token: String,
     pub broker_socket: String,
     pub endpoints: Vec<String>,

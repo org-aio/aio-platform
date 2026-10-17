@@ -36,8 +36,8 @@ impl Processes {
             .as_ref()
             .context("不是 process 包")?;
         ensure!(
-            !manifest.capabilities.storage && !manifest.capabilities.identity_provider,
-            "process 未开放对象存储及身份提供能力"
+            !manifest.capabilities.identity_provider,
+            "process 未开放身份提供能力"
         );
         let approved = std::env::var("AIO_PROCESS_ENDPOINTS").unwrap_or_default();
         ensure!(
@@ -109,11 +109,11 @@ impl Processes {
         } else {
             None
         };
+        let resources = components
+            .resources_verified(start.source, &start.tenant, verified)
+            .await?;
         let mut jobs = JoinSet::new();
         let database_url = if manifest.capabilities.database {
-            let resources = components
-                .resources_verified(start.source, &start.tenant, verified)
-                .await?;
             let database = resources.database.context("未授予 process 数据库")?;
             let connection = database.process_connection()?;
             drop(database);
@@ -161,6 +161,7 @@ impl Processes {
             tenant_id: start.tenant.clone(),
             database_url,
             encryption_key,
+            storage: resources.storage.is_some(),
             ingress_token: random()?,
             broker_socket: if local {
                 directory
@@ -198,6 +199,9 @@ impl Processes {
             enhancements: manifest.capabilities.enhancements.clone(),
             runtime_capabilities: manifest.capabilities.runtime.clone(),
             management: manifest.capabilities.management,
+            storage: resources.storage,
+            storage_gate: Default::default(),
+            stopped: Default::default(),
             client: reqwest::Client::builder()
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())
@@ -206,8 +210,17 @@ impl Processes {
                 .build()?,
             quota: Arc::new(tokio::sync::Semaphore::new(8)),
         });
+        // 即使启动任务尚未被轮询就被取消，也撤销已有连接持有的 broker 授权。
+        let stopped = gateway.stopped.clone();
+        let guard = stopped.clone().drop_guard();
         jobs.spawn(async move {
-            let _ = axum::serve(listener, super::broker::router(gateway)).await;
+            let _guard = guard;
+            if let Err(error) = axum::serve(listener, super::broker::router(gateway))
+                .with_graceful_shutdown(stopped.cancelled_owned())
+                .await
+            {
+                eprintln!("Sidecar broker 服务失败: {error}");
+            }
         });
         Ok((configuration, jobs))
     }

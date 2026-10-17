@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+tempfile = "3.23.0"
 anyhow.workspace = true
 async-trait.workspace = true
 az-plugin-contract = { path = "../contract" }
@@ -32,7 +33,6 @@ wasm = ["dep:wasmtime", "dep:wasmtime-wasi"]
 [dev-dependencies]
 sqlx = { version = "0.8.6", default-features = false, features = ["sqlite", "runtime-tokio-rustls"] }
 az-plugin-enhancement = { path = "../enhancement" }
-tempfile = "3.23.0"
 axum.workspace = true
 serde.workspace = true
 mime_guess = "2.0.5"

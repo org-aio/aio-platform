@@ -13,7 +13,12 @@ serde_json.workspace = true
 subtle = "2.6"
 tokio = { workspace = true, features = ["signal"] }
 
+[target.'cfg(unix)'.dependencies]
+reqwest = { version = "0.12.23", default-features = false }
+
 [dev-dependencies]
+futures-util = "0.3.32"
+tempfile = "3.23.0"
 tower = { version = "0.5", features = ["util"] }
 
 [lints]

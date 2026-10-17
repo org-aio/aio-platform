@@ -6,6 +6,9 @@ mod development;
 mod instance;
 mod management;
 mod model;
+mod storage;
+#[cfg(all(test, feature = "postgres"))]
+mod storage_tests;
 pub(in crate::runtime::server) mod supervision;
 mod workers;
 
@@ -30,3 +33,6 @@ pub(super) struct Processes {
 
 mod enhancements;
 mod http_egress;
+
+#[cfg(all(test, feature = "postgres"))]
+mod storage_probe_tests;

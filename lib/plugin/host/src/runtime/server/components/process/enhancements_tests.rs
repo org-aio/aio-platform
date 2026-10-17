@@ -251,6 +251,9 @@ async fn verify_sidecar(metering: bool) -> Result<()> {
             enhancements: grants,
             runtime_capabilities,
             management: false,
+            storage: None,
+            storage_gate: Default::default(),
+            stopped: Default::default(),
             client: reqwest::Client::new(),
             quota: Arc::new(tokio::sync::Semaphore::new(2)),
         })
