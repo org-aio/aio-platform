@@ -322,12 +322,15 @@ async fn engine_neutral_transport_survives_guest_and_host_wit_boundaries() -> Re
         body: vec![0, 255, 128, 42],
     };
     let response = instance.handle(request.clone(), context).await?;
+    // 夹具移除管理入口前缀，再将请求转交给宿主公共路由。
+    let mut delegated = request.clone();
+    delegated.path = "/api/runtime/catalog".into();
     assert_eq!(
         host.0
             .lock()
             .map_err(|_| anyhow::anyhow!("测试请求锁损坏"))?
             .as_ref(),
-        Some(&request)
+        Some(&delegated)
     );
     assert_eq!(
         response,
