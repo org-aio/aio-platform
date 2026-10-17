@@ -290,6 +290,9 @@ impl Plugin<RuntimeAssembly> for ComponentResourcesPlugin {
             }
             assembly.require_service::<dyn super::ComponentDatabaseProvider>();
             assembly.require_service::<dyn super::ObjectStorageProvider>();
+            // 组件环境持有同一身份实例；不能依赖脚本服务间接提供初始化顺序。
+            #[cfg(feature = "sidecar")]
+            assembly.require_service::<dyn crate::identity::IdentityProvider>();
             assembly.optional_service::<super::super::enhancements::Enhancements>();
             assembly.observe_catalog();
             assembly.declare_resource::<Components>()?;
