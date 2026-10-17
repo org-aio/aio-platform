@@ -15,4 +15,4 @@ node tests/browser/component-lifecycle.cjs
 
 `AIO_URL=https://your-host AIO_COOKIE_FILE=/private/test-cookies.txt node tests/browser/document-encoding.cjs` 使用 Netscape 格式的验收会话文件，检查首页 UTF-8 响应头、前 1024 字节内的字符集声明，以及桌面 / 移动壳中与目录一致的中文场景和插件名称。报告保存在 `target/encoding-regression/live/`；`AIO_TEST_OUTPUT` 可覆盖输出目录。
 
-`component-lifecycle.cjs` 使用 Playwright 自带 Chromium（可用 `AIO_BROWSER_EXECUTABLE` 指定）。真实 opaque iframe 加载正式宿主与 guest SDK，模拟服务端票据 API，验证暂停释放、原实例恢复、过期续期、20 次切换及 bfcache；管理请求独立分发、暂停拒绝、恢复使用新票据，成功写操作通知目录刷新。CI 自动执行，不替代真实管理权限和产品市场 UI 验收。
+`component-lifecycle.cjs` 使用 Playwright 自带 Chromium（可用 `AIO_BROWSER_EXECUTABLE` 指定）。真实 opaque iframe 加载正式宿主与 guest SDK，模拟服务端票据 API，验证暂停释放、原实例恢复、过期续期、20 次切换及 bfcache；管理请求独立分发、暂停拒绝、恢复使用新票据。成功写操作等待宿主提交本次请求对应的新目录，实际目录监听器覆盖并发请求、旧通知隔离、刷新失败和暂停取消。CI 自动执行，不替代真实管理权限和产品市场 UI 验收。

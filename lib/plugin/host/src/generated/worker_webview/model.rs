@@ -12,6 +12,7 @@ pub struct ViewOwner {
     pub mount: String,
 }
 
+#[cfg(feature = "server")]
 #[derive(Deserialize)]
 #[serde(tag = "operation", rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) enum ViewRequest {
@@ -25,6 +26,7 @@ pub(crate) enum ViewRequest {
     },
 }
 
+#[cfg(feature = "server")]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Access {
@@ -36,6 +38,7 @@ pub(crate) struct Access {
 }
 
 /// 网页只接收短期视图地址，不接收设备凭据或本机 CDP 地址。
+#[cfg(feature = "server")]
 #[derive(Serialize)]
 pub(crate) struct OpenView {
     pub id: String,

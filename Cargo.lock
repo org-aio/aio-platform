@@ -671,6 +671,7 @@ dependencies = [
  "tonic-prost",
  "tower",
  "tower-http",
+ "tracing",
  "urlencoding",
  "uuid",
  "wasmtime",

@@ -6,6 +6,7 @@ const { chromium } = require('playwright');
 const lifecycle = readFile('sdk/web/lifecycle.js', 'utf8');
 const guest = readFile('sdk/web/guest.js', 'utf8');
 const bridge = readFile('sdk/web/host.mjs', 'utf8');
+const catalogWatch = readFile('lib/plugin/host/src/runtime/catalog_watch.js', 'utf8');
 const component = Promise.all([
   readFile('lib/plugin/host/src/runtime/frontend_lifecycle.js', 'utf8'),
   readFile('lib/plugin/host/src/runtime/frontend_cache.js', 'utf8'),
@@ -143,9 +144,9 @@ const server = createServer(async (request, response) => {
       document.body.innerHTML = `<div id="page" data-aio-page-active="true" data-aio-workspace-active="true" data-aio-workspace-context="${config.context}"><div class="application-frontend-shell"><div id="frontend-loading" class="application-frontend-loading"></div><iframe id="frame" sandbox="allow-scripts allow-forms"></iframe></div></div>`;
       window.__hostMessages = [];
       window.__catalogChanges = 0;
+      window.__catalogRequests = [];
       window.__settings = [];
       window.addEventListener('aio:plugin-settings', event => window.__settings.push(event.detail.pageId));
-      window.addEventListener('aio:catalog-invalidated', () => window.__catalogChanges++);
       let receive = 0;
       window.dioxus = {
         recv: () => receive++ === 0 ? Promise.resolve({ ...config, id: 'frame', development: false }) : new Promise(resolve => { window.__finish = resolve; }),
@@ -155,6 +156,18 @@ const server = createServer(async (request, response) => {
         },
       };
     }, mount);
+    await page.evaluate(source => {
+      const watcher = {
+        send: requests => {
+          if (requests === null) return;
+          window.__catalogChanges++;
+          window.__catalogRequests = requests;
+          if (!window.__holdCatalog) requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('aio:catalog-refreshed', { detail: { requests, success: true } })));
+        },
+        recv: () => new Promise(resolve => { window.__stopCatalog = resolve; }),
+      };
+      void new Function('dioxus', `return (async () => { ${source} })();`)(watcher);
+    }, await catalogWatch);
     await page.addScriptTag({ content: `(async () => {\n${await component}\n})().catch(error => { window.__hostMessages.push({ error: error.message }); });` });
 
     const frame = page.frameLocator('#frame');
@@ -170,8 +183,24 @@ const server = createServer(async (request, response) => {
     assert.equal(management[0].token, mount.token);
     assert.equal(counts.request, 0);
     assert.equal(await page.evaluate(() => window.__catalogChanges), 0);
-    await manage('POST');
+    await page.evaluate(() => { window.__holdCatalog = true; });
+    let managed = false;
+    const writing = manage('POST').then(value => { managed = true; return value; });
     await page.waitForFunction(() => window.__catalogChanges === 1);
+    assert.equal(managed, false, '管理调用必须等待宿主完成目录更新');
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('aio:catalog-refreshed', { detail: { requests: ['older-request'], success: true } })));
+    await page.waitForTimeout(50);
+    assert.equal(managed, false, '更早的目录刷新不能确认本次写入');
+    let nextManaged = false;
+    const nextWriting = manage('POST').then(() => { nextManaged = true; return null; }, error => error.message);
+    await page.waitForFunction(() => window.__catalogChanges === 2);
+    assert.equal(await page.evaluate(() => window.__catalogRequests.length), 2, '刷新期间的并发请求不能丢失');
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('aio:catalog-refreshed', { detail: { requests: [window.__catalogRequests[0]], success: true } })));
+    await writing;
+    assert.equal(nextManaged, false, '前一次完成不能放行后一次写入');
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('aio:catalog-refreshed', { detail: { requests: window.__catalogRequests, success: false } })));
+    assert.match(await nextWriting, /操作已提交.*更新插件目录失败/);
+    await page.evaluate(() => { window.__holdCatalog = false; window.dispatchEvent(new CustomEvent('aio:catalog-refreshed', { detail: { requests: window.__catalogRequests, success: true } })); });
 
     await frame.locator('#image').click();
     await frame.locator('#document-image').evaluate(image => image.decode());
@@ -186,9 +215,15 @@ const server = createServer(async (request, response) => {
     await page.waitForFunction(() => window.__settings.length === 1);
     assert.equal(await page.evaluate(() => window.__settings[0]), 'component:other:settings');
 
+    await page.evaluate(() => { window.__holdCatalog = true; });
+    const interruptedWrite = manage('POST').then(() => null, error => error.message);
+    await page.waitForFunction(() => window.__catalogChanges === 3);
+    assert.equal(await page.evaluate(() => window.__catalogRequests.length), 1, '已确认请求必须从待更新集合移除');
     deleteDelay = 250;
     await page.evaluate(() => document.querySelector('#page').dataset.aioWorkspaceActive = 'false');
     await waitFor(() => counts.delete === 1);
+    assert.match(await interruptedWrite, /暂停|替换/);
+    await page.evaluate(() => { window.__holdCatalog = false; });
     assert.equal(await page.locator('#frame').getAttribute('src'), initialSource);
     assert.equal(await frame.locator('body').evaluate(() => window.marker), 'initial');
     const beforeSuspended = counts.manage;
@@ -255,6 +290,7 @@ const server = createServer(async (request, response) => {
     await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
     await waitFor(() => grants.size === 1);
     assert.deepEqual(errors, []);
+    await page.evaluate(() => window.__stopCatalog());
     console.log(JSON.stringify({ retainedFrame: true, releasedOnSuspend: true, restoredWithNewGrant: true, expiredLeaseRecoveredInPlace: true, repeatedCycles: 20, bfcache: true, maxGrants: 1, management: { isolated: true, suspended: true, renewed: true, catalogInvalidated: true, largeDownload: true, settings: true, suspendedActionCancelled: true, authorizedImage: true, renewedImage: true } }));
   } finally {
     await context.close();

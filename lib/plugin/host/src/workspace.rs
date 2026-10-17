@@ -52,37 +52,68 @@ pub fn Workspace(config: crate::composition::BrowserComposition) -> dioxus::prel
     });
     let mut last_application = use_signal(|| None::<startup::LoadedApplication>);
     let mut preparations = use_signal(|| (String::new(), Vec::<String>::new()));
+    let mut refresh_requests = use_signal(Vec::<String>::new);
     let mut application = use_resource(move || {
         let previous = last_application.peek().clone();
-        async move { startup::load(previous).await }
+        let requests = refresh_requests.peek().clone();
+        async move { (requests, startup::load(previous).await) }
     });
     use_effect(move || {
-        if let Some(Ok(value)) = application.read().as_ref() {
+        let result = application.read();
+        let Some((requests, result)) = result.as_ref() else {
+            return;
+        };
+        if let Ok(value) = result {
             last_application.set(Some(value.clone()));
         }
+        let completion = serde_json::json!({ "requests": requests, "success": result.is_ok() });
+        // 等本轮 DOM 提交和旧挂载释放后，再允许管理页面读取更新后的目录。
+        spawn(async move {
+            let script = "const detail = await dioxus.recv(); await new Promise(requestAnimationFrame); window.dispatchEvent(new CustomEvent('aio:catalog-refreshed', { detail }));";
+            let evaluation = document::eval(script);
+            if let Err(error) = evaluation.send(completion) {
+                tracing::error!("通知插件目录更新失败: {error}");
+                return;
+            }
+            if let Err(error) = evaluation.await {
+                tracing::error!("通知插件目录更新失败: {error}");
+            }
+        });
     });
     use_effect(move || {
         if application
             .read()
             .as_ref()
-            .is_some_and(|result| result.as_ref().is_ok_and(|value| value.snapshot.is_none()))
+            .is_some_and(|(_, result)| result.as_ref().is_ok_and(|value| value.snapshot.is_none()))
         {
             spawn(async {
                 let _ = document::eval("if (typeof caches !== 'undefined') { await Promise.all((await caches.keys()).filter(name => name.startsWith('aio-plugin-assets-v1-')).map(name => caches.delete(name))); } return true;").await;
             });
         }
     });
+    let mut catalog_listener = use_signal(|| None::<document::Eval>);
     use_future(move || async move {
-        loop {
-            let Ok(reason) = document::eval(include_str!("runtime/catalog_watch.js")).await else {
-                break;
-            };
-            if application.finished() || reason.as_str() == Some("invalidated") {
+        let mut listener = document::eval(include_str!("runtime/catalog_watch.js"));
+        catalog_listener.set(Some(listener));
+        while let Ok(requests) = listener.recv::<Option<Vec<String>>>().await {
+            if let Some(requests) = requests {
+                refresh_requests.set(requests);
+                application.restart();
+            } else if application.finished() {
+                refresh_requests.write().clear();
                 application.restart();
             }
         }
     });
-    let result = application.read().as_ref().cloned();
+    use_drop(move || {
+        if let Some(listener) = catalog_listener() {
+            let _ = listener.send(());
+        }
+    });
+    let result = application
+        .read()
+        .as_ref()
+        .map(|(_, result)| result.clone());
     let result = match result {
         Some(Err(error)) => Some(
             last_application
