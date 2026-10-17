@@ -28,9 +28,9 @@ AIO_ENHANCEMENT_TEST_DATABASE_URL=postgresql://test@127.0.0.1:5432/kernel_test \
 
 ## 宿主能力与脚本自举
 
-从 `capabilities.rs` 的 `CapabilityProvider` 看扩展契约，再看 `plugins/worker_capabilities.rs` 的设备服务接入。提供者使用 Dill 与具体 TypeId 注册；重复类型、路径冲突和非法版本路径在启动时失败。目录及 schema 在校验后固定，同一请求不会因重新生成目录而切换实现。提供者的 Future 必须响应丢弃，不能创建无人管理的后台副作用；长期工作应交给已有任务服务。
+从 [独立能力服务](../capabilities/README.md) 的 `CapabilityProvider` 看扩展契约，再看 `plugins/worker_capabilities.rs` 的设备服务接入。提供者使用 Dill 与具体 TypeId 注册；重复类型、路径冲突和非法版本路径在启动时失败。目录及 schema 在校验后固定，同一请求不会因重新生成目录而切换实现。提供者的 Future 必须响应丢弃，不能创建无人管理的后台副作用；长期工作应交给已有任务服务。
 
-发布者可通过 `GET /api/runtime/capabilities` 查询路径、说明、输入输出 JSON Schema 与 `read` / `idempotent_write` / `write` 类型。该只读目录不授予执行权。默认设备能力为 `/v1/workers/list`、`/v1/workers/tasks/submit`、`/v1/workers/tasks/get`、`/v1/workers/tasks/cancel`，复用同一 `WorkerService`，可省略 `WorkerCapabilitiesPlugin` 或绑定替代提供者。未装配所需能力时，候选可保存但不能激活，在线工具目录也隐藏不可执行的增强。
+可选 `CapabilitiesPlugin` 独立提供 `GET /api/runtime/capabilities`，无需数据库和解释器；管理员可查询路径、说明、输入输出 JSON Schema 与 `read` / `idempotent_write` / `write` 类型。该只读目录不授予执行权。默认设备能力为 `/v1/workers/list`、`/v1/workers/tasks/submit`、`/v1/workers/tasks/get`、`/v1/workers/tasks/cancel`，复用同一 `WorkerService`，可省略 `WorkerCapabilitiesPlugin` 或绑定替代提供者。未装配所需能力时，候选可保存但不能激活，在线工具目录也隐藏不可执行的增强。
 
 MCP/gRPC 用户必须同时拥有 `enhancement:<增强路径>`（或已有增强管理权限）及每项 `runtime:<宿主能力路径>`。`plugin:manage` 不授予 runtime 权限。Wasm 插件声明 `[plugin.capabilities].runtime`，与交互用户的 runtime 权限求交集；交互请求结束、成员或会话撤销后拒绝调用。Sidecar 保存进程创建时的 runtime 能力快照；交互处理时向 `/enhancements/invoke` 回传宿主下发的 `x-aio-context`，运行时验证请求来源、租户和有效期，再与用户的显式 runtime 权限求交集。跨插件调用派生绑定目标来源的新上下文，上游请求结束即失效。不带上下文的后台调用只有租户和来源身份，不能调用要求交互会话的设备能力；无效上下文直接拒绝，不回退为后台调用。脚本输入或 `x-aio-user-id` 不能补出用户身份。使用新能力的整包应要求 `host_version = ">=2026.10.16"`。
 

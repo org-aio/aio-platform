@@ -57,6 +57,7 @@ jobs:
           for protocol_profile in remote-mcp remote-grpc remote; do
             cargo test -p az-plugin-host --no-default-features --features "$protocol_profile" remote::tests
           done
+          AIO_REMOTE_TEST_CREDENTIAL=remote-test cargo test -p az-plugin-host --no-default-features --features remote --test capability_plugins -- --include-ignored
           cargo test -p az-plugin-runtime --no-default-features
           cargo test -p az-plugin-manifest --no-default-features --features validation
           cargo clippy -p az-plugin-manifest --no-default-features --features validation --all-targets -- -D warnings

@@ -230,6 +230,8 @@ impl Fixture {
             Arc::new(GrpcPlugin),
             Arc::new(EnhancementsPlugin),
             Arc::new(EnhancementServicePlugin),
+            Arc::new(CapabilityServicePlugin),
+            Arc::new(CapabilitiesPlugin),
             Arc::new(ScriptRuntimePlugin),
             Arc::new(RhaiPlugin),
             Arc::new(TypeScriptPlugin),

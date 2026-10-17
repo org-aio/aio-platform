@@ -6,8 +6,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::{
-    CapabilityEffect, CapabilityProvider, CapabilityRequest, RuntimeAssembly, RuntimeCapability,
-    ScriptRuntimePlugin,
+    CapabilityEffect, CapabilityProvider, CapabilityRequest, CapabilityServicePlugin,
+    RuntimeAssembly, RuntimeCapability,
 };
 use crate::generated::worker::{
     WorkerService,
@@ -21,7 +21,7 @@ pub struct WorkerCapabilitiesPlugin;
 
 impl Plugin<RuntimeAssembly> for WorkerCapabilitiesPlugin {
     fn dependencies(&self) -> Vec<TypeId> {
-        vec![TypeId::of::<ScriptRuntimePlugin>()]
+        vec![TypeId::of::<CapabilityServicePlugin>()]
     }
 
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {

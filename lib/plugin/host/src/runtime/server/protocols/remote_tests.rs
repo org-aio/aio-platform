@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use super::support::*;
 use crate::runtime::server::plugins::{RemoteCapabilitiesPlugin, RuntimeCapabilities};
 
-#[path = "remote_fixture.rs"]
+#[path = "../../../../tests/support/remote.rs"]
 mod upstream;
 use upstream::Upstream;
 

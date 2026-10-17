@@ -3,6 +3,7 @@
 use std::{future::Future, sync::Mutex};
 
 use anyhow::{Result, ensure};
+use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::{JoinError, JoinSet};
 use tokio_util::sync::CancellationToken;
 
@@ -10,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 pub struct PluginTasks {
     cancellation: CancellationToken,
     state: Mutex<TaskState>,
+    active: RwLock<()>,
 }
 
 #[derive(Default)]
@@ -25,12 +27,21 @@ impl PluginTasks {
         Self {
             cancellation,
             state: Mutex::new(TaskState::default()),
+            active: RwLock::new(()),
         }
     }
 
     /// 在安全边界检查取消；已经开始的持久化变更应先完成提交或补偿。
     pub fn cancellation(&self) -> CancellationToken {
         self.cancellation.clone()
+    }
+
+    /// 纳入直接等待的宿主调用；Future 结束或丢弃后释放，资源关闭前统一排空。
+    pub(in crate::runtime::server) async fn enter(&self) -> Result<RwLockReadGuard<'_, ()>> {
+        ensure!(!self.cancellation.is_cancelled(), "插件正在停止");
+        let permit = self.active.read().await;
+        ensure!(!self.cancellation.is_cancelled(), "插件正在停止");
+        Ok(permit)
     }
 
     /// 收容任务直至完成；任务必须响应取消，或者是能够自行结束的有限工作。
@@ -66,6 +77,7 @@ impl PluginTasks {
                 .map_err(|_| anyhow::anyhow!("插件任务锁已损坏"))?
                 .record(result);
         }
+        let _active = self.active.write().await;
         let state = self
             .state
             .lock()

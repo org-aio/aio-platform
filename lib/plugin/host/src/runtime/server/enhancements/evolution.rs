@@ -5,8 +5,11 @@ use az_plugin_enhancement::Package;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::super::capabilities::{
+    CapabilityEffect, CapabilityProvider, CapabilityRequest, RuntimeCapability,
+};
 use super::{
-    CapabilityEffect, CapabilityProvider, CapabilityRequest, Enhancements, RuntimeCapability,
+    Enhancements,
     model::{Activation, Event, Head, Observation},
 };
 use crate::identity::IdentityProvider;

@@ -4,7 +4,7 @@ use az_plugin_core::{Plugin, PluginFuture};
 
 use super::super::remote::RemoteCapabilities;
 use super::{
-    CapabilityProvider, Resource, RuntimeAssembly, RuntimeCapabilities, ScriptRuntimePlugin,
+    CapabilityProvider, CapabilityServicePlugin, Resource, RuntimeAssembly, RuntimeCapabilities,
 };
 
 /// 可选的远端能力提供者；地址、契约和租户绑定由部署方文件提供，不开放任意 URL 代理。
@@ -14,7 +14,7 @@ pub struct RemoteCapabilitiesPlugin;
 
 impl Plugin<RuntimeAssembly> for RemoteCapabilitiesPlugin {
     fn dependencies(&self) -> Vec<TypeId> {
-        vec![TypeId::of::<ScriptRuntimePlugin>()]
+        vec![TypeId::of::<CapabilityServicePlugin>()]
     }
 
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {

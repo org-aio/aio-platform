@@ -10,11 +10,14 @@ anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 url.workspace = true
+jsonschema = { version = "0.58.6", default-features = false, optional = true }
+schemars = { workspace = true, optional = true }
 prost = { version = "0.14.4", optional = true }
 tonic = { version = "0.14.6", optional = true }
 tonic-prost = { version = "0.14.6", optional = true }
 
 [features]
+validation = ["dep:jsonschema", "dep:schemars"]
 grpc = ["dep:prost", "dep:tonic", "dep:tonic-prost", "dep:tonic-prost-build", "dep:protoc-bin-vendored"]
 
 [build-dependencies]

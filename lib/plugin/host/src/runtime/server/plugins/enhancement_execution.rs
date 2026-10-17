@@ -12,10 +12,7 @@ use sqlx::PgPool;
 
 use super::super::enhancements::CapabilityEnvironment;
 use super::super::enhancements::Enhancements;
-pub use super::super::enhancements::{
-    CapabilityEffect, CapabilityProvider, CapabilityRequest, RuntimeCapabilities, RuntimeCapability,
-};
-use super::{DatabasePlugin, Resource, RuntimeAssembly};
+use super::{CapabilityServicePlugin, DatabasePlugin, Resource, RuntimeAssembly};
 
 /// 默认 Rhai 实现；应用可以省略该插件并注册自己的同语言执行器。
 #[cfg(feature = "rhai")]
@@ -58,18 +55,9 @@ impl Plugin<RuntimeAssembly> for ScriptRuntimePlugin {
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
             assembly.services.add::<ScriptRuntime>();
-            assembly.services.add::<RuntimeCapabilities>();
             assembly.require_service::<ScriptRuntime>();
-            assembly.require_service::<RuntimeCapabilities>();
             assembly.on_initialize::<Self>(|state, _| {
                 Box::pin(async move { state.service::<ScriptRuntime>()?.validate() })
-            });
-            // 提供者可能依赖异步资源，全部 initialize 完成后才解析；开发宿主也校验。
-            assembly.requirements.push(|services, resolve| {
-                if resolve {
-                    services.get_one::<RuntimeCapabilities>()?.validate()?;
-                }
-                Ok(())
             });
             Ok(())
         })
@@ -86,6 +74,7 @@ impl Plugin<RuntimeAssembly> for EnhancementServicePlugin {
         vec![
             TypeId::of::<DatabasePlugin>(),
             TypeId::of::<ScriptRuntimePlugin>(),
+            TypeId::of::<CapabilityServicePlugin>(),
         ]
     }
 

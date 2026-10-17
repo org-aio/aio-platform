@@ -37,7 +37,7 @@ impl Enhancements {
     pub(in crate::runtime::server) fn runtime_catalog(
         &self,
         tenant: &str,
-    ) -> Result<Vec<super::RuntimeCapability>> {
+    ) -> Result<Vec<super::super::capabilities::RuntimeCapability>> {
         self.capabilities
             .as_ref()
             .map(|environment| environment.runtime()?.catalog(tenant))

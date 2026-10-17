@@ -39,6 +39,7 @@ async fn clients_survive_native_executor_database_restart_and_protocol_unload() 
             Arc::new(GrpcPlugin),
             Arc::new(EnhancementsPlugin),
             Arc::new(EnhancementServicePlugin),
+            Arc::new(CapabilityServicePlugin),
             Arc::new(ScriptRuntimePlugin),
             Arc::new(RhaiPlugin),
             Arc::new(TypeScriptPlugin),

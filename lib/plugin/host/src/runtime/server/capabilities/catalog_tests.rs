@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use serde_json::Value;
 
-use super::capabilities::*;
+use super::*;
 
 struct First;
 struct Second;
@@ -77,6 +77,16 @@ fn dynamic_publication_is_atomic_and_reserves_retired_contracts() -> Result<()> 
     );
     assert!(!committed, "路径冲突不能调用提交动作");
     capability.path = "/v1/dynamic/read".into();
+    let mut invalid = capability.clone();
+    invalid.input_schema = serde_json::json!({"$ref":"file:///unavailable-schema"}).try_into()?;
+    assert!(
+        runtime
+            .publish::<Dynamic>(Arc::new(Definitions(vec![invalid])), || {
+                panic!("无效 schema 不能提交候选")
+            })
+            .is_err()
+    );
+    assert_eq!(runtime.catalog("test")?.len(), 1);
     assert!(
         runtime
             .publish::<First>(Arc::new(Definitions(vec![capability.clone()])), || Ok(()))

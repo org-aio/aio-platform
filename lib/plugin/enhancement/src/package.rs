@@ -19,8 +19,8 @@ pub struct PreparedPackage {
 
 pub(crate) struct PreparedEnhancement {
     pub program: Arc<dyn ScriptProgram>,
-    pub input: Option<jsonschema::Validator>,
-    pub output: Option<jsonschema::Validator>,
+    pub input: az_plugin_contract::ValueSchema,
+    pub output: az_plugin_contract::ValueSchema,
 }
 
 impl ScriptRuntime {
@@ -42,8 +42,10 @@ impl ScriptRuntime {
                 "增强路径重复: {}",
                 enhancement.path
             );
-            let input = crate::value_schema::compile(enhancement.input_schema.as_ref())?;
-            let output = crate::value_schema::compile(enhancement.output_schema.as_ref())?;
+            let input =
+                az_plugin_contract::ValueSchema::compile(enhancement.input_schema.as_ref())?;
+            let output =
+                az_plugin_contract::ValueSchema::compile(enhancement.output_schema.as_ref())?;
             let program = self.compile(enhancement.language, &enhancement.source)?;
             let implementation = PreparedEnhancement {
                 program,

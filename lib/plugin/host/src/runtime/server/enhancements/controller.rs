@@ -16,7 +16,6 @@ use az_plugin_enhancement::Package;
 pub(in crate::runtime::server) fn router() -> Router<RuntimeState> {
     Router::new()
         .route("/api/runtime/enhancements", get(head))
-        .route("/api/runtime/capabilities", get(capabilities))
         .route(
             "/api/runtime/enhancements/revisions",
             get(revisions).post(propose),
@@ -30,26 +29,6 @@ pub(in crate::runtime::server) fn router() -> Router<RuntimeState> {
         .layer(DefaultBodyLimit::max(
             az_plugin_enhancement::MAX_PACKAGE_BYTES,
         ))
-}
-
-async fn capabilities(
-    State(state): State<RuntimeState>,
-    headers: HeaderMap,
-) -> Result<Json<Vec<super::RuntimeCapability>>, RuntimeError> {
-    // 只读目录向发布者描述可组合的能力；列出能力不等于授予执行权限。
-    let session = authenticate_manager(&state, &headers).await?;
-    if !state
-        .service::<dyn crate::identity::IdentityProvider>()?
-        .session_active(&session.session_id, &session.tenant_id, &session.user_id)
-        .await?
-    {
-        return Err(RuntimeError::unauthorized("会话已撤销"));
-    }
-    Ok(Json(
-        state
-            .service::<Enhancements>()?
-            .runtime_catalog(&session.tenant_id)?,
-    ))
 }
 
 async fn head(

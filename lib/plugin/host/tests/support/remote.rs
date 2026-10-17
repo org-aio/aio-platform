@@ -1,3 +1,5 @@
+// 协议入口与原生异步入口共用真实上游；各用例只使用所需的观察量。
+
 use std::{
     future::Future,
     pin::Pin,
@@ -176,8 +178,7 @@ async fn authenticate(
         let timeout = timeout
             .to_str()
             .ok()
-            .and_then(super::super::super::grpc::timeout)
-            .map(|value| value.as_micros() as usize)
+            .and_then(timeout_micros)
             .unwrap_or_default();
         counts.last_timeout_micros.store(timeout, Ordering::SeqCst);
     }
@@ -333,4 +334,23 @@ fn descriptor() -> Vec<u8> {
         }],
     }
     .encode_to_vec()
+}
+
+// 独立观察线上 grpc-timeout，避免复用被测入口的解析函数。
+fn timeout_micros(value: &str) -> Option<usize> {
+    if !value.is_ascii() || value.len() < 2 {
+        return None;
+    }
+    let (amount, unit) = value.split_at(value.len() - 1);
+    let amount: u64 = amount.parse().ok()?;
+    let nanos = match unit {
+        "H" => 3_600_000_000_000,
+        "M" => 60_000_000_000,
+        "S" => 1_000_000_000,
+        "m" => 1_000_000,
+        "u" => 1_000,
+        "n" => 1,
+        _ => return None,
+    };
+    usize::try_from(amount.checked_mul(nanos)? / 1000).ok()
 }

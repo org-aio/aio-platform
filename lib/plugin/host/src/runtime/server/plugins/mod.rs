@@ -2,6 +2,7 @@
 
 mod admission;
 mod builtins;
+mod capability_execution;
 mod component_execution;
 mod component_resources;
 mod composition;
@@ -42,6 +43,7 @@ use super::RuntimeState;
 
 pub(super) use admission::{admit, admit_router};
 pub use builtins::*;
+pub use capability_execution::*;
 pub use component_execution::*;
 pub use component_resources::*;
 pub use enhancement_execution::*;

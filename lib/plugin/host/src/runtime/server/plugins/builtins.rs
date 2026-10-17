@@ -6,7 +6,9 @@ use anyhow::Result;
 use az_plugin_core::{DynPlugin, Plugin, PluginFuture};
 use dill::CatalogBuilder;
 
-use super::{RuntimeAssembly, enhancement_execution::*, infrastructure::*};
+use super::{
+    CapabilityServicePlugin, RuntimeAssembly, enhancement_execution::*, infrastructure::*,
+};
 use crate::generated::{clipboard, personal_config, worker, worker_webview};
 
 // 每项能力声明自己的服务、路由和具体类型依赖；宏只展开同一套注册步骤。
@@ -39,6 +41,9 @@ route_plugin!(FrontendPlugin, [StorePlugin, RepositoryPlugin], [], |_| {
 });
 route_plugin!(EnhancementsPlugin, [EnhancementServicePlugin], [], |_| {
     super::super::enhancements::router()
+});
+route_plugin!(CapabilitiesPlugin, [CapabilityServicePlugin], [], |_| {
+    super::super::capabilities::router()
 });
 #[cfg(feature = "mcp")]
 route_plugin!(McpPlugin, [EnhancementServicePlugin], [], |state| {
@@ -211,7 +216,10 @@ pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
         .add::<KeyringPlugin>()
         .add::<StorePlugin>()
         .add::<RepositoryPlugin>()
+        .add::<CapabilityServicePlugin>()
+        .add::<CapabilitiesPlugin>()
         .add::<WorkerServicePlugin>()
+        .add::<super::WorkerCapabilitiesPlugin>()
         .add::<WorkerWebviewServicePlugin>()
         .add::<PersonalConfigServicePlugin>()
         .add::<ClipboardServicePlugin>()
@@ -233,15 +241,12 @@ pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
         feature = "rhai",
         feature = "typescript",
         feature = "mcp",
-        feature = "grpc",
-        feature = "remote-mcp",
-        feature = "remote-grpc"
+        feature = "grpc"
     ))]
     catalog
         .add::<ScriptRuntimePlugin>()
         .add::<EnhancementServicePlugin>()
         .add::<super::EvolutionPlugin>()
-        .add::<super::WorkerCapabilitiesPlugin>()
         .add::<EnhancementsPlugin>();
     #[cfg(feature = "mcp")]
     catalog.add::<McpPlugin>();

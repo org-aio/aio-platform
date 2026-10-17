@@ -3,8 +3,8 @@ mod metering;
 use super::*;
 use crate::identity::{IdentityProvider, SessionContext};
 use crate::runtime::server::plugins::{
-    CapabilityEffect, CapabilityProvider, CapabilityRequest, RuntimeAssembly, RuntimeCapabilities,
-    RuntimeCapability,
+    CapabilityEffect, CapabilityProvider, CapabilityRequest, CapabilityServicePlugin,
+    RuntimeAssembly, RuntimeCapability,
 };
 use crate::runtime::server::{components::Components, store::PluginStore};
 use anyhow::{Context, ensure};
@@ -88,7 +88,6 @@ impl az_plugin_core::Plugin<RuntimeAssembly> for ScopePlugin {
         Box::pin(async move {
             assembly
                 .services
-                .add::<RuntimeCapabilities>()
                 .add_value(ScopeProvider)
                 .bind::<dyn CapabilityProvider, ScopeProvider>();
             Ok(())
@@ -113,8 +112,8 @@ async fn verify_sidecar(metering: bool) -> Result<()> {
     PluginStore::new(pool.clone()).migrate().await?;
     let root = tempfile::tempdir()?;
     let identity = Arc::new(Identity::default());
-    let extensions = crate::runtime::server::plugins::assemble(
-        Arc::new(crate::configuration::HostConfig {
+    let capability_state = crate::runtime::server::RuntimeState::initialize(
+        crate::configuration::HostConfig {
             remote_capabilities: None,
             database_url: database.clone(),
             public_origin: "http://localhost".into(),
@@ -123,8 +122,11 @@ async fn verify_sidecar(metering: bool) -> Result<()> {
             default_plugins: vec![],
             delivery: None,
             development: None,
-        }),
-        vec![Arc::new(ScopePlugin)],
+        },
+        crate::runtime::server::admin_test_support::with_identity(
+            identity.clone(),
+            vec![Arc::new(CapabilityServicePlugin), Arc::new(ScopePlugin)],
+        ),
     )
     .await?;
     let enhancements = Arc::new(
@@ -133,7 +135,7 @@ async fn verify_sidecar(metering: bool) -> Result<()> {
             az_plugin_enhancement::default_runtime()?,
             Some(
                 crate::runtime::server::enhancements::CapabilityEnvironment {
-                    services: Arc::downgrade(&extensions),
+                    services: Arc::downgrade(&capability_state.extensions),
                     identity: identity.clone(),
                 },
             ),
@@ -333,5 +335,6 @@ async fn verify_sidecar(metering: bool) -> Result<()> {
         Ok::<_, anyhow::Error>(())
     }.await;
     server.abort();
+    capability_state.shutdown().await?;
     outcome
 }

@@ -34,7 +34,8 @@ use az_plugin_host::{
 use az_plugin_host::{
     identity::{IdentityProvider, SessionContext},
     runtime::server::plugins::{
-        DatabasePlugin, EnhancementServicePlugin, EnhancementsPlugin, PostgresPlugin,
+        CapabilityServicePlugin, DatabasePlugin, EnhancementServicePlugin, EnhancementsPlugin,
+        PostgresPlugin,
     },
 };
 use serde_json::{Value, json};
@@ -297,6 +298,7 @@ async fn external_executor_handles_publication_protocol_calls_and_persisted_rest
                     Arc::new(McpPlugin),
                     Arc::new(EnhancementsPlugin),
                     Arc::new(EnhancementServicePlugin),
+                    Arc::new(CapabilityServicePlugin),
                     Arc::new(ScriptRuntimePlugin),
                     Arc::new(ReplacementPlugin(calls.clone())),
                     Arc::new(DatabasePlugin),

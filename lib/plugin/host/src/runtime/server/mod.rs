@@ -3,6 +3,7 @@ mod activation_store;
 mod admin_test_support;
 mod bootstrap;
 mod bootstrap_document;
+mod capabilities;
 mod components;
 mod delivery;
 pub mod development;

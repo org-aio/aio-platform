@@ -157,8 +157,10 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 | `RepositoryPlugin` | 提供包缓存与仓库能力 |
 | `ProcessPlugin` / `WasmPlugin` | 持有旧进程 / Wasm 执行资源，并负责停止 |
 | `RhaiPlugin` / `TypeScriptPlugin` | 向 Dill 提供对应的 `ScriptExecutor`，省略后不接受该语言 |
+| `CapabilityServicePlugin` | 汇集能力提供者，持有调用生命周期；原生异步执行不需要脚本或数据库 |
+| `CapabilitiesPlugin` | 依赖能力服务与身份提供者，仅提供管理员 HTTP 能力目录 |
 | `ScriptRuntimePlugin` | 汇集所选脚本执行器，统一候选与样例验证，不连接数据库或创建文件 |
-| `EnhancementServicePlugin` | 依赖数据库与脚本运行时，提供统一的增强版本、授权和调用服务 |
+| `EnhancementServicePlugin` | 依赖数据库、脚本运行时与能力服务，提供统一的增强版本、授权和调用服务 |
 | `WasmComponentPlugin` / `SidecarPlugin` | 向 Dill 提供 v2 整包的 `ComponentExecutor`；省略后不初始化对应引擎或监督器客户端 |
 | `ComponentExecutionPlugin` | 汇集整包执行器并拒绝重复类型；本身不创建执行资源 |
 | `ComponentResourcesPlugin` | 依赖存储、密钥与整包执行器，可选依赖增强服务；配置组件存储时初始化所选实现，停止时卸载实例并关闭组件连接 |

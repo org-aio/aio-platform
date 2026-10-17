@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, ensure};
+use az_plugin_contract::ValueSchema;
 use serde_json::Value;
 
 use super::super::plugins::{
@@ -32,8 +33,8 @@ pub(super) struct Bindings {
 
 struct Route {
     capability: RuntimeCapability,
-    input: jsonschema::Validator,
-    output: jsonschema::Validator,
+    input: ValueSchema,
+    output: ValueSchema,
     tenants: BTreeMap<String, Binding>,
 }
 
@@ -83,8 +84,8 @@ impl Bindings {
                     "不同租户的同一路径必须具有相同契约"
                 );
             } else {
-                let input = validator(&import.capability.input_schema)?;
-                let output = validator(&import.capability.output_schema)?;
+                let input = ValueSchema::compile(Some(&import.capability.input_schema))?;
+                let output = ValueSchema::compile(Some(&import.capability.output_schema))?;
                 routes.insert(
                     import.capability.path.clone(),
                     Route {
@@ -153,14 +154,6 @@ impl Bindings {
             tasks,
         })
     }
-}
-
-pub(super) fn validator(schema: &schemars::Schema) -> Result<jsonschema::Validator> {
-    // 显式禁用外部解析，即使其他 Cargo feature 启用网络也不能从 schema 读取远端或文件。
-    jsonschema::options()
-        .offline()
-        .build(schema.as_value())
-        .map_err(|error| anyhow::anyhow!("远端能力 schema 无效: {error}"))
 }
 
 #[async_trait::async_trait]
