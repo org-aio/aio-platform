@@ -28,13 +28,23 @@ impl PreparedComponents {
                 sources.insert(component.bundle.git.clone()),
                 "首次引导来源重复"
             );
+            let metadata_size = [
+                &component.bundle.git,
+                &component.bundle.commit,
+                &component.bundle.version,
+                &component.bundle.manifest,
+                &component.bundle.digest,
+            ]
+            .iter()
+            .map(|value| value.len())
+            .sum::<usize>();
             let size = component
                 .bundle
                 .files
                 .iter()
                 .map(|(path, value)| path.len() + value.len())
                 .sum::<usize>()
-                + component.bundle.manifest.len();
+                + metadata_size;
             remaining = remaining
                 .checked_sub(size)
                 .context("首次引导整批解包超过 256 MiB")?;
