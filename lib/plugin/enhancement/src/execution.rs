@@ -38,21 +38,32 @@ impl ScriptRuntime {
         Ok(())
     }
 
+    /// 查询当前装配是否支持语言；有多个实现时仍报错，不能伪装成暂不可用。
+    pub fn supports(&self, language: Language) -> Result<bool> {
+        Ok(self.executor(language)?.is_some())
+    }
+
     pub(crate) fn compile(
         &self,
         language: Language,
         source: &str,
     ) -> Result<Arc<dyn ScriptProgram>> {
+        self.executor(language)?
+            .context("未装配支持该语言的脚本执行器")?
+            .compile(source)
+    }
+
+    fn executor(&self, language: Language) -> Result<Option<&Arc<dyn ScriptExecutor>>> {
         let mut executors = self
             .executors
             .iter()
             .filter(|executor| executor.supports(language));
-        let executor = executors.next().context("未装配支持该语言的脚本执行器")?;
+        let executor = executors.next();
         ensure!(
             executors.next().is_none(),
             "同一语言存在多个脚本执行器，必须明确选择实现"
         );
-        executor.compile(source)
+        Ok(executor)
     }
 }
 

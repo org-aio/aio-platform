@@ -176,6 +176,46 @@ async fn clients_survive_native_executor_database_restart_and_protocol_unload() 
         host.reconfigure(plugins.clone()).await?;
         compare(&mcp, &mut grpc, &revision).await?;
         native(&native_mcp, &mut native_grpc).await?;
+        // 混合包是一个执行单元；移除任一语言后原生能力仍可发现与调用。
+        let mut mixed = package(Language::Rhai);
+        let mut extra = package(Language::TypeScript).enhancements.remove(0);
+        extra.path = "/v1/math/base".into();
+        mixed.enhancements.push(extra);
+        let revision = publish(&base, mixed, 2).await?;
+        for removed in [
+            std::any::TypeId::of::<RhaiPlugin>(),
+            std::any::TypeId::of::<TypeScriptPlugin>(),
+        ] {
+            host.reconfigure(
+                plugins
+                    .iter()
+                    .filter(|plugin| plugin.as_ref().type_id() != removed)
+                    .cloned()
+                    .collect(),
+            )
+            .await?;
+            native(&native_mcp, &mut native_grpc).await?;
+            assert!(mcp.list_all_tools().await?.is_empty());
+            let catalog = grpc
+                .list(super::auth(
+                    az_plugin_contract::grpc::ListRequest {},
+                    "limited",
+                )?)
+                .await?
+                .into_inner();
+            assert_eq!(catalog.revision.as_deref(), Some(revision.as_str()));
+            assert!(catalog.paths.is_empty());
+            assert_eq!(
+                grpc.invoke(super::auth(super::invoke(), "limited")?)
+                    .await
+                    .err()
+                    .context("混合包仍在执行")?
+                    .code(),
+                tonic::Code::PermissionDenied
+            );
+            host.reconfigure(plugins.clone()).await?;
+            compare(&mcp, &mut grpc, &revision).await?;
+        }
         let without_mcp = plugins
             .iter()
             .filter(|plugin| plugin.as_ref().type_id() != std::any::TypeId::of::<McpPlugin>())

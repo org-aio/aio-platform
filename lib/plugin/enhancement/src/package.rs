@@ -23,12 +23,20 @@ pub(crate) struct PreparedEnhancement {
     pub output: az_plugin_contract::ValueSchema,
 }
 
+impl Package {
+    /// 按与候选编译相同的序列化规则计算摘要，持久恢复在检查语言之前验证完整性。
+    pub fn revision(&self) -> Result<String> {
+        let encoded = serde_json::to_vec(self)?;
+        ensure!(encoded.len() <= crate::MAX_PACKAGE_BYTES, "增强包超过配额");
+        Ok(format!("{:x}", Sha256::digest(&encoded)))
+    }
+}
+
 impl ScriptRuntime {
     /// 使用已装配的执行器编译候选并重放样例，成功后返回不可变的准备版本。
     pub fn prepare(&self, package: Package) -> Result<PreparedPackage> {
         self.validate()?;
-        let encoded = serde_json::to_vec(&package)?;
-        ensure!(encoded.len() <= crate::MAX_PACKAGE_BYTES, "增强包超过配额");
+        let revision = package.revision()?;
         ensure!(package.schema_version == 1, "增强包协议版本不受支持");
         ensure!(
             !package.enhancements.is_empty() && package.enhancements.len() <= 16,
@@ -55,7 +63,7 @@ impl ScriptRuntime {
             compiled.insert(enhancement.path.clone(), implementation);
         }
         let prepared = PreparedPackage {
-            revision: format!("{:x}", Sha256::digest(&encoded)),
+            revision,
             package: Arc::new(package),
             compiled: Arc::new(compiled),
         };

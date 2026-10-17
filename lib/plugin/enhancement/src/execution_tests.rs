@@ -118,8 +118,11 @@ fn missing_or_conflicting_executor_never_falls_back_to_builtin() -> Result<()> {
         .build()
         .get_one::<ScriptRuntime>()?;
     assert!(empty.validate().is_err());
+    assert!(!empty.supports(Language::Rhai)?);
     let calls = Arc::new(AtomicUsize::new(0));
     let runtime = catalog(calls.clone()).build().get_one::<ScriptRuntime>()?;
+    assert!(runtime.supports(Language::Rhai)?);
+    assert!(!runtime.supports(Language::TypeScript)?);
     let mut typescript = candidate();
     typescript.enhancements[0].language = Language::TypeScript;
     assert!(runtime.prepare(typescript).is_err());
@@ -128,6 +131,7 @@ fn missing_or_conflicting_executor_never_falls_back_to_builtin() -> Result<()> {
         .bind::<dyn ScriptExecutor, ConflictingExecutor>()
         .build()
         .get_one::<ScriptRuntime>()?;
+    assert!(runtime.supports(Language::Rhai).is_err());
     assert!(runtime.prepare(candidate()).is_err());
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     Ok(())

@@ -6,6 +6,13 @@ use sqlx::PgPool;
 
 use super::Enhancements;
 
+#[cfg(all(
+    feature = "rhai",
+    feature = "typescript",
+    any(feature = "mcp", feature = "grpc")
+))]
+#[path = "availability_tests.rs"]
+mod availability;
 #[path = "cancellation_tests.rs"]
 mod cancellation;
 

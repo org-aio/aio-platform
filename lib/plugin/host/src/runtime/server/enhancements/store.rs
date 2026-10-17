@@ -55,7 +55,9 @@ impl Enhancements {
         let Some(revision) = self.head(tenant).await?.revision else {
             return Ok((None, Vec::new()));
         };
-        let prepared = self.load(tenant, &revision).await?;
+        let Some(prepared) = self.load_available(tenant, &revision).await? else {
+            return Ok((Some(revision), Vec::new()));
+        };
         let available = self.runtime_catalog(tenant)?;
         let mut contracts = Vec::new();
         for item in &prepared.package().enhancements {
@@ -145,6 +147,17 @@ impl Enhancements {
     }
 
     async fn load(&self, tenant: &str, revision: &str) -> Result<Arc<PreparedPackage>> {
+        self.load_available(tenant, revision)
+            .await?
+            .context("未装配增强包所需的脚本执行器")
+    }
+
+    // 整包仍是编译执行单元；缺失语言只暂停发现，持久化或编译错误不得被吞掉。
+    async fn load_available(
+        &self,
+        tenant: &str,
+        revision: &str,
+    ) -> Result<Option<Arc<PreparedPackage>>> {
         // 缓存按租户和摘要隔离，只有已持久验证的版本才能入缓存，命中时不重读源码。
         if let Some(prepared) = self
             .cache
@@ -153,13 +166,20 @@ impl Enhancements {
             .get(&(tenant.to_owned(), revision.to_owned()))
             .cloned()
         {
-            return Ok(prepared);
+            return Ok(Some(prepared));
         }
         let package = self.package(tenant, revision).await?;
+        ensure!(package.revision()? == revision, "持久增强版本摘要不匹配");
+        let mut available = true;
+        for enhancement in &package.enhancements {
+            available &= self.runtime.supports(enhancement.language)?;
+        }
+        if !available {
+            return Ok(None);
+        }
         let prepared = self.prepare(package).await?;
-        ensure!(prepared.revision() == revision, "持久增强版本摘要不匹配");
         self.remember(tenant, prepared.clone())?;
-        Ok(prepared)
+        Ok(Some(prepared))
     }
 
     /// 返回 None 表示活动代数已变化，调用方必须重新审阅后再发布。

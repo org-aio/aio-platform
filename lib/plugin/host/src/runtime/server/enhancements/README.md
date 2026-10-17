@@ -15,6 +15,8 @@
 
 普通升级必须保留已有路径、输入输出 schema 和样例，并用候选实现重新执行旧样例。回滚是显式恢复历史版本，可能使新版本新增的能力暂不可用。每个租户已激活路径的 schema 会永久保留约束，停用或回滚不能让同名路径被重新赋予不兼容契约；检查复用不可变版本和激活历史，不另设协议契约仓库。其他租户可使用各自的契约。版本指针和审计事件在同一事务提交；代数冲突返回 HTTP 409，不能用重试覆盖别人的发布。重新创建宿主后从数据库恢复，执行前仍需重新编译和验证。
 
+增强包是完整编译单元。运行时移除包所需的任一语言后，MCP/gRPC 增强目录保留当前 revision 并返回空契约，原生能力目录和调用仍可用；暂停不修改活动指针或代数。重新装配所需语言后，按持久摘要重新编译并验证全部样例。此状态只适用于明确缺少执行器，摘要损坏、数据库失败、重复执行器及执行器齐备后的编译错误仍返回错误；不做部分包编译或捕获所有错误后忽略。
+
 每个宿主实例最多同时进行 4 个增强编译、验证或执行任务。任务进入 blocking pool 前就取得配额；等待方取消后，执行中的调用链收到取消信号，配额随实际工作线程结束才释放。代码缓存最多 16 个包，无租户业务状态。
 
 Rhai 和 TypeScript 通过 `call_enhancement(path, input)` 组合包内增强；声明、授权与预算见[增强执行器](../../../../../enhancement/README.md)。服务把原始调用者的能力清单传入整条调用链，不给子调用追加管理员权限，也不为每一层重新申请并发槽或读取活动版本。升级增加依赖不会自动给旧插件增加权限。
@@ -23,7 +25,7 @@ Rhai 和 TypeScript 通过 `call_enhancement(path, input)` 组合包内增强；
 
 ```sh
 AIO_ENHANCEMENT_TEST_DATABASE_URL=postgresql://test@127.0.0.1:5432/kernel_test \
-  cargo test -p az-plugin-host --features rhai,typescript enhancements::tests -- --ignored
+  cargo test -p az-plugin-host --features rhai,typescript,mcp,grpc enhancements::tests -- --ignored
 ```
 
 ## 宿主能力与脚本自举
