@@ -4,7 +4,7 @@ use wasmtime::{Collector, Config, Engine, Store, StoreLimits, StoreLimitsBuilder
 use wit_component::{DecodedWasm, decode};
 use wit_parser::{Function, FunctionKind, Type, WorldItem, WorldKey};
 
-use crate::{PageDefinition, validate_page_definitions};
+use crate::{PageDefinition, WasmArtifactValidator, validate_page_definitions};
 
 // Component 适配层在 definition 阶段会初始化序列化和页面模型，跨语言产物通常比业务调用消耗更多 fuel。
 const FUEL_PER_DEFINITION: u64 = 25_000_000;
@@ -16,43 +16,48 @@ struct StoreState {
     limits: StoreLimits,
 }
 
-pub fn validate_wasm_component(bytes: &[u8]) -> Result<Vec<PageDefinition>> {
-    validate_component_abi(bytes)?;
-    let engine = component_engine()?;
-    let component = Component::new(&engine, bytes)
-        .map_err(|error| anyhow!("编译 Wasm Component 失败: {error:#}"))?;
-    let linker = Linker::new(&engine);
-    let limits = StoreLimitsBuilder::new()
-        .memory_size(MAX_MEMORY_BYTES)
-        .table_elements(MAX_TABLE_ELEMENTS)
-        .instances(128)
-        .tables(32)
-        .memories(8)
-        .trap_on_grow_failure(true)
-        .build();
-    let mut store = Store::new(&engine, StoreState { limits });
-    store.limiter(|state| &mut state.limits);
-    store
-        .set_fuel(FUEL_PER_DEFINITION)
-        .map_err(|error| anyhow!("设置 Wasm 校验 fuel 失败: {error:#}"))?;
-    let instance = linker
-        .instantiate(&mut store, &component)
-        .map_err(|error| anyhow!("实例化 Wasm Component 失败: {error:#}"))?;
-    let definition = instance
-        .get_typed_func::<(), (String,)>(&mut store, "definition")
-        .map_err(|error| anyhow!("Wasm Component 缺少 definition 导出: {error:#}"))?;
-    let (definition,) = definition
-        .call(&mut store, ())
-        .map_err(|error| anyhow!("调用 Wasm Component definition 失败: {error:#}"))?;
-    ensure!(
-        definition.len() <= MAX_DEFINITION_BYTES,
-        "Wasm Component PageDefinition 不能超过 {MAX_DEFINITION_BYTES} 字节"
-    );
-    let pages = crate::parse_page_definitions(definition.as_bytes())
-        .context("解析 Wasm Component PageDefinition 失败")?;
-    ensure!(!pages.is_empty(), "Wasm Component 至少需要贡献一个页面");
-    validate_page_definitions(&pages)?;
-    Ok(pages)
+/// CLI 与内置 Wasm 执行器显式选择的产物校验实现。
+pub struct WasmtimeValidator;
+
+impl WasmArtifactValidator for WasmtimeValidator {
+    fn validate(&self, bytes: &[u8]) -> Result<Vec<PageDefinition>> {
+        validate_component_abi(bytes)?;
+        let engine = component_engine()?;
+        let component = Component::new(&engine, bytes)
+            .map_err(|error| anyhow!("编译 Wasm Component 失败: {error:#}"))?;
+        let linker = Linker::new(&engine);
+        let limits = StoreLimitsBuilder::new()
+            .memory_size(MAX_MEMORY_BYTES)
+            .table_elements(MAX_TABLE_ELEMENTS)
+            .instances(128)
+            .tables(32)
+            .memories(8)
+            .trap_on_grow_failure(true)
+            .build();
+        let mut store = Store::new(&engine, StoreState { limits });
+        store.limiter(|state| &mut state.limits);
+        store
+            .set_fuel(FUEL_PER_DEFINITION)
+            .map_err(|error| anyhow!("设置 Wasm 校验 fuel 失败: {error:#}"))?;
+        let instance = linker
+            .instantiate(&mut store, &component)
+            .map_err(|error| anyhow!("实例化 Wasm Component 失败: {error:#}"))?;
+        let definition = instance
+            .get_typed_func::<(), (String,)>(&mut store, "definition")
+            .map_err(|error| anyhow!("Wasm Component 缺少 definition 导出: {error:#}"))?;
+        let (definition,) = definition
+            .call(&mut store, ())
+            .map_err(|error| anyhow!("调用 Wasm Component definition 失败: {error:#}"))?;
+        ensure!(
+            definition.len() <= MAX_DEFINITION_BYTES,
+            "Wasm Component PageDefinition 不能超过 {MAX_DEFINITION_BYTES} 字节"
+        );
+        let pages = crate::parse_page_definitions(definition.as_bytes())
+            .context("解析 Wasm Component PageDefinition 失败")?;
+        ensure!(!pages.is_empty(), "Wasm Component 至少需要贡献一个页面");
+        validate_page_definitions(&pages)?;
+        Ok(pages)
+    }
 }
 
 fn component_engine() -> Result<Engine> {

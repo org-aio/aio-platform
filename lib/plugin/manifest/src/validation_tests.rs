@@ -12,9 +12,8 @@ kind = "page-definition"
 artifact = "dist/pages.json"
 "#;
 
-#[cfg(not(feature = "wasm-validation"))]
 #[test]
-fn disabled_wasm_validation_rejects_the_repository_instead_of_skipping_execution() -> Result<()> {
+fn missing_wasm_validator_rejects_the_repository_instead_of_skipping_execution() -> Result<()> {
     let repository = tempdir()?;
     fs::write(
         repository.path().join("aio-plugin.toml"),
@@ -24,8 +23,8 @@ fn disabled_wasm_validation_rejects_the_repository_instead_of_skipping_execution
         repository.path().join("plugin.wasm"),
         b"not an executable component",
     )?;
-    let result = validate_repository(repository.path());
-    assert!(result.is_err_and(|error| error.to_string().contains("未启用 Wasm")));
+    let result = validate_repository(repository.path(), None);
+    assert!(result.is_err_and(|error| error.to_string().contains("未安装 Wasm")));
     Ok(())
 }
 
@@ -223,8 +222,8 @@ fn rejects_runtime_actions_in_static_page_artifact() -> Result<()> {
         r#"[{"id":"actions","label":"Actions","icon":null,"scene":{"id":"examples","label":"Examples"},"required_permission":null,"body":{"kind":"actions","title":"Counter","content":"0","actions":[{"id":"increment","label":"+1"}]}}]"#,
     )?;
 
-    let error =
-        validate_repository(repository.path()).expect_err("静态页面不能声明需要运行时处理的动作");
+    let error = validate_repository(repository.path(), None)
+        .expect_err("静态页面不能声明需要运行时处理的动作");
     assert!(error.to_string().contains("不能声明需要运行时处理"));
     Ok(())
 }
@@ -262,7 +261,7 @@ fn rejects_non_component_artifact() -> Result<()> {
     let mut file = NamedTempFile::new()?;
     file.write_all(b"not wasm")?;
     let bytes = fs::read(file.path())?;
-    assert!(crate::validate_wasm_component(&bytes).is_err());
+    assert!(crate::WasmtimeValidator.validate(&bytes).is_err());
     Ok(())
 }
 
@@ -279,7 +278,7 @@ fn validates_page_artifact_against_subplugin_declarations() -> Result<()> {
         r#"[{"id":"counter","label":"Counter","icon":null,"scene":{"id":"examples","label":"Examples"},"required_permission":null,"body":{"kind":"counter","title":"Counter","button":"+1"}}]"#,
     )?;
 
-    let report = validate_repository(repository.path())?;
+    let report = validate_repository(repository.path(), None)?;
     assert_eq!(report.runtime, PluginRuntime::PageDefinition);
     assert_eq!(report.page_count, 1);
 
@@ -287,8 +286,8 @@ fn validates_page_artifact_against_subplugin_declarations() -> Result<()> {
         repository.path().join("aio-plugin.toml"),
         format!("{RUNTIME}\n[[plugin.subplugins]]\nid='other'\npages=['other']"),
     )?;
-    let error =
-        validate_repository(repository.path()).expect_err("清单与 PageDefinition 不一致必须失败");
+    let error = validate_repository(repository.path(), None)
+        .expect_err("清单与 PageDefinition 不一致必须失败");
     assert!(error.to_string().contains("不一致"));
     Ok(())
 }

@@ -3,6 +3,7 @@ use std::{
     io::Cursor,
     path::{Path, PathBuf},
     process::Stdio,
+    sync::Arc,
     time::Duration,
 };
 
@@ -16,6 +17,7 @@ use serde_json::Value;
 use tar::Archive;
 use tokio::process::Command;
 
+use super::plugins::{WasmArtifactValidator, WasmExecutor};
 use super::publication_validation::{ensure_publish_capabilities, ensure_publish_runtime};
 #[cfg(test)]
 use super::remote_access::is_public_ip;
@@ -42,13 +44,15 @@ pub struct DiscoveredPlugin {
 pub struct RepositoryInstaller {
     pub(super) cache_root: PathBuf,
     pub(super) cache_operations: tokio::sync::Mutex<()>,
+    wasm: Option<Arc<dyn WasmExecutor>>,
 }
 
 impl RepositoryInstaller {
-    pub fn new(cache_root: PathBuf) -> Self {
+    pub fn new(cache_root: PathBuf, wasm: Option<Arc<dyn WasmExecutor>>) -> Self {
         Self {
             cache_root,
             cache_operations: tokio::sync::Mutex::new(()),
+            wasm,
         }
     }
 
@@ -76,9 +80,16 @@ impl RepositoryInstaller {
             let manifest = read_manifest(&checkout_root)?;
             validate_host_compatibility(&manifest, env!("CARGO_PKG_VERSION"))?;
             let validation_root = checkout_root.clone();
-            let report = tokio::task::spawn_blocking(move || validate_repository(&validation_root))
-                .await
-                .context("等待插件 artifact 校验失败")??;
+            let wasm = self.wasm.clone();
+            let report = tokio::task::spawn_blocking(move || {
+                validate_repository(
+                    &validation_root,
+                    wasm.as_deref()
+                        .map(|executor| executor as &dyn WasmArtifactValidator),
+                )
+            })
+            .await
+            .context("等待插件 artifact 校验失败")??;
             let runtime = manifest
                 .plugin
                 .runtime
@@ -151,9 +162,16 @@ impl RepositoryInstaller {
         ensure_publish_runtime(runtime.kind)?;
         ensure_publish_capabilities(&manifest)?;
         let validation_root = root.clone();
-        let report = tokio::task::spawn_blocking(move || validate_repository(&validation_root))
-            .await
-            .context("等待发布 artifact 校验失败")??;
+        let wasm = self.wasm.clone();
+        let report = tokio::task::spawn_blocking(move || {
+            validate_repository(
+                &validation_root,
+                wasm.as_deref()
+                    .map(|executor| executor as &dyn WasmArtifactValidator),
+            )
+        })
+        .await
+        .context("等待发布 artifact 校验失败")??;
         let pages = if runtime.kind == PluginRuntime::PageDefinition {
             az_plugin_manifest::parse_page_definitions(
                 &tokio::fs::read(artifact_path(&root, &runtime.artifact)?).await?,

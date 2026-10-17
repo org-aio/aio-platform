@@ -51,7 +51,7 @@ async fn stores_immutable_binary_packages_and_restores_deleted_cache() -> Result
             .context("数据库缺少上传包")?;
         assert_eq!(PluginPackage::decode(&archive)?, first);
         let cache = tempfile::tempdir()?;
-        let repository = RepositoryInstaller::new(cache.path().join("runtime"));
+        let repository = RepositoryInstaller::new(cache.path().join("runtime"), None);
         let discovered = repository.publish(&first).await?;
         store
             .activate("test-tenant", discovered, None, None)

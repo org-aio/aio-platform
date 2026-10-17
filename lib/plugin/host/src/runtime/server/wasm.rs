@@ -1,4 +1,4 @@
-use super::plugins::{WasmActivation, WasmExecutor};
+use super::plugins::{WasmActivation, WasmArtifactValidator, WasmExecutor};
 use std::{
     collections::{HashMap, hash_map::Entry},
     path::{Path, PathBuf},
@@ -133,6 +133,12 @@ impl WasmManager {
     #[cfg(test)]
     fn active_instances(&self) -> Result<usize> {
         Ok(self.instances()?.len())
+    }
+}
+
+impl WasmArtifactValidator for WasmManager {
+    fn validate(&self, bytes: &[u8]) -> Result<Vec<PageDefinition>> {
+        az_plugin_manifest::WasmtimeValidator.validate(bytes)
     }
 }
 
@@ -311,8 +317,10 @@ mod tests {
     fn activates_reuses_and_destroys_tenant_instances() -> Result<()> {
         let artifact = std::env::var("AIO_TEST_WASM_COMPONENT")?;
         let manager = WasmManager::with_cache(None)?;
+        let validated = manager.validate(&std::fs::read(&artifact)?)?;
         let revision = "a".repeat(40);
         let first = manager.activate("tenant-a", "source-a", &revision, Path::new(&artifact))?;
+        assert_eq!(first.pages, validated);
         assert!(first.created);
         assert!(!first.pages.is_empty());
         let action_page = first

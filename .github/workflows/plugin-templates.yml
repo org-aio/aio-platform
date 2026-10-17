@@ -5,11 +5,15 @@ on:
     branches: [main]
     paths:
       - "cli/**"
+      - "lib/plugin/host/**"
+      - "lib/plugin/manifest/**"
       - "docs/plugin/**"
       - ".github/workflows/plugin-templates.yml"
   pull_request:
     paths:
       - "cli/**"
+      - "lib/plugin/host/**"
+      - "lib/plugin/manifest/**"
       - "docs/plugin/**"
       - ".github/workflows/plugin-templates.yml"
 
@@ -120,18 +124,9 @@ jobs:
           pnpm build
           "$GITHUB_WORKSPACE/target/debug/aio" plugin validate
 
-      - name: 检出运行时宿主
-        uses: actions/checkout@v7
-        with:
-          repository: zjarlin/aio-idea
-          ref: a4b7f4cab26be73a417e5321bc6368027d23da3e
-          path: aio-idea
-
       - name: 验证生成 Component 的租户隔离
         run: |
-          cp -R aio-idea "$RUNNER_TEMP/aio-idea"
-          cd "$RUNNER_TEMP/aio-idea"
           AIO_TEST_WASM_COMPONENT="$RUNNER_TEMP/aio-plugin-generated-ts/dist/plugin.wasm" \
-            cargo test --no-default-features --features server activates_reuses_and_destroys_tenant_instances -- --ignored
+            cargo test -p az-plugin-host --no-default-features --features wasm --lib activates_reuses_and_destroys_tenant_instances -- --ignored
           AIO_TEST_WASM_COMPONENT="$RUNNER_TEMP/aio-plugin-generated-kmp-component/dist/plugin.wasm" \
-            cargo test --no-default-features --features server activates_reuses_and_destroys_tenant_instances -- --ignored
+            cargo test -p az-plugin-host --no-default-features --features wasm --lib activates_reuses_and_destroys_tenant_instances -- --ignored

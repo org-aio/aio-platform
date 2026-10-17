@@ -12,7 +12,9 @@
 
 组件管理插件允许装配零个 `ComponentExecutor`，保留安装记录与管理入口。恢复时先验证持久整包及安装摘要，只有缺少匹配实现才暂停；重复匹配、数据损坏及实现恢复失败仍拒绝启动。`suspended` 表示租户已启用但当前代没有运行绑定；目录、页面、设置、账户入口和权限均依据运行绑定，不能仅看数据库 `enabled`。暂停时可停用或卸载，也可以显式迁移到可用执行器支持的版本；提交失败保持原安装及暂停状态，不伪造旧实例恢复。自动升级暂缓暂停实例，保留队列且不阻塞其他租户。
 
-v1 页面分发使用 `WasmExecutor` / `ProcessExecutor` 的 Dill 绑定。内置实现拥有资源初始化与停止钩子，替代实现也必须声明相应生命周期。v1 Wasm 仓库校验仍需 `wasm-validation`；关闭该 feature 明确拒绝该格式，不跳过产物验证。v2 整包的候选验证由所选 `ComponentExecutor` 完成。v1 缺少执行服务时也保留安装意图并隐藏入口，动态请求返回 503；静态页面仍可用。安装和启用要求真实执行器，停用和卸载不要求重新创建执行器。
+v1 页面分发使用 `WasmExecutor` / `ProcessExecutor` 的 Dill 绑定。`WasmExecutor` 同时实现 `WasmArtifactValidator`：Git 发现、已发布包和开发快照都交给当前执行器校验产物，公共层继续检查页面模型、清单和前端文件。`RepositoryPlugin` 声明这个可选服务依赖，在线增删或替换执行器会重建仓库服务；编译了内置 Wasmtime 也不能代替未装配的执行器。替代实现只需 `server` feature，并声明资源初始化与停止钩子。v2 整包的候选验证由所选 `ComponentExecutor` 完成。v1 缺少执行服务时保留安装意图并隐藏入口，动态请求返回 503；静态页面仍可用。安装和启用要求真实执行器，停用和卸载不要求重新创建执行器。
+
+`component_executors` 集成测试通过真实 HTTP 与 PostgreSQL 验证替代 v1 执行器的校验、发布、调用、非法页面拒绝、在线替换、缺失暂停、重复绑定拒绝和重新初始化恢复。测试执行器使用有限夹具格式，证明宿主契约可替换，不是额外发布的 Wasm 引擎；内置实现另用真实 TypeScript/Kotlin 组件验证校验结果与激活页面一致。
 
 宿主通过 `Plugin<RuntimeAssembly>` 复用 `az-plugin-core` 的 TypeId 身份和依赖排序，通过 Dill 提供服务。`RuntimeState` 不再拥有剪贴板、个人配置、设备、设备视图、数据库、包仓库和执行资源的固定字段；HTTP、组件 broker 和 sidecar 使用同一个服务容器。
 

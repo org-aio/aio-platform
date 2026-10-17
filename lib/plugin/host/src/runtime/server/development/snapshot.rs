@@ -78,7 +78,12 @@ pub(super) fn prepare(state: &RuntimeState, artifact: &DevArtifact) -> Result<st
                 artifact.content_digest.clone(),
             )?;
         } else {
-            az_plugin_manifest::validate_repository(&staging)?;
+            let wasm = state.optional_service::<dyn super::super::plugins::WasmExecutor>()?;
+            az_plugin_manifest::validate_repository(
+                &staging,
+                wasm.as_deref()
+                    .map(|executor| executor as &dyn az_plugin_manifest::WasmArtifactValidator),
+            )?;
         }
         if root.exists() {
             ensure!(

@@ -174,7 +174,7 @@ pub(super) fn prepare_package(
         remaining -= content.len();
         frontend.insert(relative, content);
     }
-    az_plugin_manifest::validate_repository(&root)?;
+    az_plugin_manifest::validate_repository(&root, Some(&az_plugin_manifest::WasmtimeValidator))?;
     let repository = own_git_repository(&root);
     let git = git
         .or_else(|| {

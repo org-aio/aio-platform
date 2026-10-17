@@ -24,6 +24,15 @@ mod management;
 #[path = "component_execution/legacy_availability.rs"]
 mod legacy_availability;
 
+#[path = "component_execution/legacy_executor.rs"]
+mod legacy_executor;
+
+#[path = "component_execution/legacy_validation.rs"]
+mod legacy_validation;
+
+#[path = "component_execution/legacy_development.rs"]
+mod legacy_development;
+
 use anyhow::{Context, Result};
 use az_plugin_host::runtime::server::{RuntimeState, plugins::*};
 use fixture::*;

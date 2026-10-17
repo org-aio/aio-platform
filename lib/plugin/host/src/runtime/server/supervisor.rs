@@ -143,7 +143,7 @@ impl DockerSupervisor {
         let repository = self.cache_root.join(&request.revision);
         let manifest = read_manifest(&repository)?;
         validate_host_compatibility(&manifest, env!("CARGO_PKG_VERSION"))?;
-        let report = validate_repository(&repository)?;
+        let report = validate_repository(&repository, None)?;
         ensure!(
             report.runtime == PluginRuntime::Process,
             "监督器只启动 process 插件"

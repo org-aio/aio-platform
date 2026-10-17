@@ -64,7 +64,7 @@ pub use remote_capabilities::RemoteCapabilitiesPlugin;
 pub use resource::Resource;
 pub use service_bindings::ServiceBindings;
 pub use tasks::PluginTasks;
-pub use wasm_execution::{WasmActivation, WasmExecutor};
+pub use wasm_execution::{WasmActivation, WasmArtifactValidator, WasmExecutor};
 pub use worker_capabilities::WorkerCapabilitiesPlugin;
 
 /// 插件贡献的 HTTP 路由；认证仍由各能力的正式入口执行。

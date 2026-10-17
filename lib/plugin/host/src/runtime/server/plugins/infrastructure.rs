@@ -5,7 +5,6 @@ use super::super::process::ProcessManager;
 use super::super::wasm::WasmManager;
 #[cfg(feature = "sidecar")]
 use super::ProcessExecutor;
-#[cfg(feature = "wasm")]
 use super::WasmExecutor;
 
 use std::{
@@ -187,9 +186,19 @@ pub struct RepositoryPlugin;
 impl Plugin<RuntimeAssembly> for RepositoryPlugin {
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
-            assembly
-                .services
-                .add_value(RepositoryInstaller::new(assembly.config.cache_root.clone()));
+            assembly.optional_service::<dyn WasmExecutor>();
+            assembly.declare_resource::<RepositoryInstaller>()?;
+            assembly.on_initialize::<Self>(|state, _| {
+                Box::pin(async move {
+                    let repository = RepositoryInstaller::new(
+                        state.config.cache_root.clone(),
+                        state.optional_service::<dyn WasmExecutor>()?,
+                    );
+                    state
+                        .service::<Resource<RepositoryInstaller>>()?
+                        .provide(Arc::new(repository))
+                })
+            });
             Ok(())
         })
     }

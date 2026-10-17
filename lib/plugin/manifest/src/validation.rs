@@ -184,7 +184,18 @@ fn validate_container_image(image: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn validate_repository(root: &Path) -> Result<ValidationReport> {
+/// 由执行器验证 v1 Wasm 产物的 ABI、资源限制及 definition 执行，返回实际页面。
+/// 仓库层继续校验页面模型、声明和前端文件，不以执行器的结果替代共同契约。
+pub trait WasmArtifactValidator: std::any::Any + Send + Sync {
+    /// 只验证候选，不修改已激活实例或租户状态；错误必须原样上报。
+    fn validate(&self, bytes: &[u8]) -> Result<Vec<PageDefinition>>;
+}
+
+/// 校验仓库内容；Wasm 产物必须由调用方明确提供执行器，缺失时拒绝安装。
+pub fn validate_repository(
+    root: &Path,
+    wasm: Option<&dyn WasmArtifactValidator>,
+) -> Result<ValidationReport> {
     let manifest = read_manifest(root)?;
     for package in [
         manifest.plugin.client.as_ref(),
@@ -230,12 +241,13 @@ pub fn validate_repository(root: &Path) -> Result<ValidationReport> {
             )?;
             pages.len()
         }
-        #[cfg(feature = "wasm-validation")]
         PluginRuntime::WasmComponent => {
-            let pages =
-                crate::validate_wasm_component(&fs::read(&artifact).with_context(|| {
-                    format!("读取 Wasm Component 产物失败: {}", artifact.display())
-                })?)?;
+            let validator = wasm.context("宿主未安装 Wasm 产物验证执行器")?;
+            let bytes = fs::read(&artifact)
+                .with_context(|| format!("读取 Wasm Component 产物失败: {}", artifact.display()))?;
+            let pages = validator.validate(&bytes)?;
+            ensure!(!pages.is_empty(), "Wasm Component 至少需要贡献一个页面");
+            validate_page_definitions(&pages)?;
             validate_declared_pages(&manifest, &pages)?;
             crate::validate_frontend_pages(
                 &manifest,
@@ -244,8 +256,6 @@ pub fn validate_repository(root: &Path) -> Result<ValidationReport> {
             )?;
             pages.len()
         }
-        #[cfg(not(feature = "wasm-validation"))]
-        PluginRuntime::WasmComponent => bail!("当前构建未启用 Wasm 产物验证"),
         PluginRuntime::Process => 0,
         PluginRuntime::RustSource => bail!("rust-source 不使用 plugin.runtime"),
     };

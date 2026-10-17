@@ -53,7 +53,10 @@ pub fn validate(root: &Path) -> Result<()> {
         );
         return Ok(());
     }
-    let report = az_plugin_manifest::validate_repository(root)?;
+    let report = az_plugin_manifest::validate_repository(
+        root,
+        Some(&az_plugin_manifest::WasmtimeValidator),
+    )?;
     let artifact = report
         .artifact
         .as_deref()

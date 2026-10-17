@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+#[cfg(all(test, feature = "validation"))]
+mod artifact_validation_tests;
+
 #[cfg(feature = "dependency-validation")]
 mod dependencies;
 #[cfg(feature = "validation")]
@@ -32,8 +35,9 @@ pub use navigation::{MenuBranch, MenuNode, MenuPage, PageDocument, SceneTree};
 pub use schema::{PluginSchema, schemas};
 #[cfg(feature = "validation")]
 pub use validation::{
-    ValidationReport, artifact_path, parse_manifest, read_manifest, validate_declared_pages,
-    validate_host_compatibility, validate_manifest, validate_page_definitions, validate_repository,
+    ValidationReport, WasmArtifactValidator, artifact_path, parse_manifest, read_manifest,
+    validate_declared_pages, validate_host_compatibility, validate_manifest,
+    validate_page_definitions, validate_repository,
 };
 #[cfg(feature = "wasm-validation")]
-pub use wasm_component::validate_wasm_component;
+pub use wasm_component::WasmtimeValidator;

@@ -182,7 +182,7 @@ async fn stages_complete_frontend_bundle_and_rejects_corrupted_cache() -> Result
         .collect(),
     )?;
     let temporary = tempfile::tempdir()?;
-    let repository = RepositoryInstaller::new(temporary.path().to_path_buf());
+    let repository = RepositoryInstaller::new(temporary.path().to_path_buf(), None);
     repository.stage_publish(&package).await?;
     let asset = temporary
         .path()
@@ -334,7 +334,7 @@ pages = ["published-page"]
         Default::default(),
     )?;
     let temporary = tempfile::tempdir()?;
-    let installer = RepositoryInstaller::new(temporary.path().join("cache"));
+    let installer = RepositoryInstaller::new(temporary.path().join("cache"), None);
 
     let published = installer.publish(&request).await?;
 
@@ -394,7 +394,7 @@ database = false
         Default::default(),
     )?;
     let temporary = tempfile::tempdir()?;
-    let installer = RepositoryInstaller::new(temporary.path().join("cache"));
+    let installer = RepositoryInstaller::new(temporary.path().join("cache"), None);
 
     let published = installer.publish(&request).await?;
 
@@ -413,7 +413,7 @@ async fn rejects_published_artifact_with_mismatched_digest() -> Result<()> {
     let mut request = package_test_request(b"[]")?;
     request.artifact_base64 = base64::engine::general_purpose::STANDARD.encode(b"[1]");
     let temporary = tempfile::tempdir()?;
-    let installer = RepositoryInstaller::new(temporary.path().join("cache"));
+    let installer = RepositoryInstaller::new(temporary.path().join("cache"), None);
 
     let error = match installer.publish(&request).await {
         Ok(_) => panic!("摘要错误的 artifact 不能发布"),

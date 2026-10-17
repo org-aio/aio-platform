@@ -1,6 +1,8 @@
 //! v1 页面执行契约独立于内置 Wasmtime；整包执行使用 ComponentExecutor。
 
-use std::{any::Any, path::Path};
+use std::path::Path;
+
+pub use az_plugin_manifest::WasmArtifactValidator;
 
 use crate::runtime::{ComponentResponse, PageDefinition};
 use anyhow::Result;
@@ -12,7 +14,7 @@ pub struct WasmActivation {
 }
 
 /// v1 Wasm 页面执行服务；所有入口从 Dill 获取同一个实现。
-pub trait WasmExecutor: Any + Send + Sync {
+pub trait WasmExecutor: WasmArtifactValidator {
     fn activate(
         &self,
         tenant_id: &str,

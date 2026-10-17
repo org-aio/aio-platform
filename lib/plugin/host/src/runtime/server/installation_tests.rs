@@ -56,7 +56,7 @@ pages = ["offline-page"]
         br#"[{"id":"offline-page","label":"Offline","icon":null,"scene":{"id":"community","label":"Community"},"required_permission":null,"body":{"kind":"text","title":"Offline","content":"cached"}}]"#,
     )
     .await?;
-    let repository = RepositoryInstaller::new(cache);
+    let repository = RepositoryInstaller::new(cache, None);
     let git = "https://github.com/example/aio-plugin-offline.git";
     let request = InstallPluginRequest {
         git: git.to_owned(),
@@ -80,7 +80,7 @@ pages = ["offline-page"]
 #[tokio::test]
 async fn missing_published_cache_fails_without_git_fallback() -> Result<()> {
     let temporary = tempfile::tempdir()?;
-    let repository = RepositoryInstaller::new(temporary.path().join("cache"));
+    let repository = RepositoryInstaller::new(temporary.path().join("cache"), None);
     let revision = "b".repeat(40);
     let git = "https://github.com/example/aio-plugin-offline.git";
     let request = InstallPluginRequest {
