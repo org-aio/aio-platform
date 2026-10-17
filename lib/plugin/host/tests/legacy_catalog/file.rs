@@ -17,6 +17,9 @@ use uuid::Uuid;
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub(super) struct Snapshot {
     #[serde(default)]
+    pub delivery_sources:
+        BTreeMap<String, az_plugin_host::runtime::server::delivery::DeliverySource>,
+    #[serde(default)]
     pub builds: Vec<super::delivery::Build>,
     #[serde(default)]
     pub documents: BTreeMap<String, az_plugin_delivery::Documentation>,

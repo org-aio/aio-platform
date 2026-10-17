@@ -71,7 +71,7 @@ pub(in crate::runtime::server) async fn finish_publication(
     Ok(())
 }
 
-pub(in crate::runtime::server) async fn tick(state: &RuntimeState) -> Result<()> {
+pub(in crate::runtime::server) async fn publish_pending(state: &RuntimeState) -> Result<()> {
     let Some(components) =
         state.optional_service::<crate::runtime::server::components::Components>()?
     else {
@@ -92,5 +92,5 @@ pub(in crate::runtime::server) async fn tick(state: &RuntimeState) -> Result<()>
         }
     }
     sqlx::query("DELETE FROM delivery_component_packages p USING delivery_jobs j WHERE p.job_id=j.id AND j.state IN ('superseded','active')").execute(state.service::<sqlx::PgPool>()?.as_ref()).await?;
-    components.rollout().await
+    Ok(())
 }

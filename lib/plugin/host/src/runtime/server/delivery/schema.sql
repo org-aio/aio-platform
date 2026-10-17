@@ -49,3 +49,5 @@ CREATE TABLE IF NOT EXISTS delivery_component_packages (
     archive BYTEA NOT NULL,
     readme TEXT NOT NULL DEFAULT ''
 );
+
+ALTER TABLE delivery_sources ADD COLUMN IF NOT EXISTS generation BIGINT NOT NULL DEFAULT 0;

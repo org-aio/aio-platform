@@ -1,6 +1,9 @@
 //! 宿主能力装配入口；插件统一复用核心的 TypeId 身份、依赖排序和 Dill。
 mod delivery;
-pub use delivery::{PostgresDeliveryPlugin, PostgresDocumentationPlugin};
+pub use delivery::{
+    GithubDeliveryDiscoveryPlugin, PostgresDeliveryPlugin, PostgresDeliveryRolloutPlugin,
+    PostgresDocumentationPlugin,
+};
 
 mod admission;
 mod builtins;

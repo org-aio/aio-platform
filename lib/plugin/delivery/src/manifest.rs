@@ -6,17 +6,22 @@ pub fn parse(source: &str) -> Result<DeliveryManifest> {
     ensure!(source.len() <= 16384, "交付清单过大");
     let manifest: DeliveryManifest = toml::from_str(source)?;
     ensure!(manifest.version == 1, "不支持的交付协议版本");
-    ensure!(!manifest.build.command.is_empty(), "缺少构建命令");
-    ensure!(manifest.build.command.len() <= 32, "构建参数过多");
+    validate_recipe(&manifest.build)?;
+    Ok(manifest)
+}
+
+/// 发现插件提交构建配方时复用与文件清单相同的参数限制。
+pub fn validate_recipe(recipe: &crate::BuildRecipe) -> Result<()> {
+    ensure!(!recipe.command.is_empty(), "缺少构建命令");
+    ensure!(recipe.command.len() <= 32, "构建参数过多");
     ensure!(
-        manifest
-            .build
+        recipe
             .command
             .iter()
             .all(|arg| !arg.contains('\0') && arg.len() <= 4096),
         "构建参数无效"
     );
-    Ok(manifest)
+    Ok(())
 }
 
 #[cfg(test)]

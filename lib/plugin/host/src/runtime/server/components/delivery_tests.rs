@@ -54,7 +54,8 @@ async fn delivery_publishes_bundles_and_respects_tenant_choices() -> Result<()> 
     let first_job = target(&state, &git, 1).await?;
     let first = create(&first_job)?;
     upload(&client, &base, &token, &first_job, &first).await?;
-    delivery::components::tick(&state).await?;
+    delivery::components::publish_pending(&state).await?;
+    state.service::<Components>()?.rollout().await?;
     let (source, published) = components
         .catalog
         .published(&git, None)
@@ -70,7 +71,8 @@ async fn delivery_publishes_bundles_and_respects_tenant_choices() -> Result<()> 
     let next_job = target(&state, &git, 2).await?;
     let second = create(&next_job)?;
     upload(&client, &base, &token, &next_job, &second).await?;
-    delivery::components::tick(&state).await?;
+    delivery::components::publish_pending(&state).await?;
+    state.service::<Components>()?.rollout().await?;
     assert_installed(
         &components,
         &tenants[0],
@@ -104,7 +106,8 @@ async fn delivery_publishes_bundles_and_respects_tenant_choices() -> Result<()> 
     let stale = create(&stale_job)?;
     upload(&client, &base, &token, &stale_job, &stale).await?;
     let current_job = target(&state, &git, 4).await?;
-    delivery::components::tick(&state).await?;
+    delivery::components::publish_pending(&state).await?;
+    state.service::<Components>()?.rollout().await?;
     assert_eq!(
         components
             .catalog
@@ -135,7 +138,8 @@ async fn delivery_publishes_bundles_and_respects_tenant_choices() -> Result<()> 
         .await?;
     assert!(!mismatch.status().is_success());
     upload(&client, &base, &token, &current_job, &third).await?;
-    delivery::components::tick(&state).await?;
+    delivery::components::publish_pending(&state).await?;
+    state.service::<Components>()?.rollout().await?;
     assert_installed(
         &components,
         &tenants[0],
@@ -172,7 +176,8 @@ async fn delivery_publishes_bundles_and_respects_tenant_choices() -> Result<()> 
         failed_job.version.clone(),
     )?;
     upload(&client, &base, &token, &failed_job, &broken).await?;
-    delivery::components::tick(&state).await?;
+    delivery::components::publish_pending(&state).await?;
+    state.service::<Components>()?.rollout().await?;
     assert_eq!(
         components
             .catalog

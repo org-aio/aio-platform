@@ -20,7 +20,10 @@ impl Plugin<RuntimeAssembly> for FileDelivery {
                 .bind::<dyn PluginCatalog, FileCatalog>()
                 .bind::<dyn PluginDocumentation, FileCatalog>();
             if self.1 {
-                assembly.services.bind::<dyn DeliveryService, FileCatalog>();
+                assembly
+                    .services
+                    .bind::<dyn DeliveryService, FileCatalog>()
+                    .bind::<dyn DeliverySources, FileCatalog>();
             }
             Ok(())
         })
@@ -53,7 +56,10 @@ impl AuthorizationProvider for ReaderIdentity {
         Ok(session.permissions.iter().any(|p| p == "plugin:manage"))
     }
 }
-fn selection(catalog: Arc<FileCatalog>, delivery: bool) -> Vec<DynPlugin<RuntimeAssembly>> {
+pub(super) fn selection(
+    catalog: Arc<FileCatalog>,
+    delivery: bool,
+) -> Vec<DynPlugin<RuntimeAssembly>> {
     let mut plugins: Vec<DynPlugin<RuntimeAssembly>> = vec![
         Arc::new(ManagementPlugin),
         Arc::new(RepositoryPlugin),

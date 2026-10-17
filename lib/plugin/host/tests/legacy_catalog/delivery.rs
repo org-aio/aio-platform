@@ -58,6 +58,94 @@ impl FileCatalog {
     }
 }
 #[async_trait::async_trait]
+impl DeliverySources for FileCatalog {
+    async fn get(&self, git: &str) -> Result<Option<DeliverySource>> {
+        Ok(self.read().await?.delivery_sources.get(git).cloned())
+    }
+    async fn enabled(&self) -> Result<Vec<DeliverySource>> {
+        Ok(self
+            .read()
+            .await?
+            .delivery_sources
+            .values()
+            .filter(|s| s.enabled)
+            .cloned()
+            .collect())
+    }
+    async fn update(
+        &self,
+        git: &str,
+        expected: Option<i64>,
+        target: Option<DeliveryTarget>,
+    ) -> Result<bool> {
+        if let Some(target) = &target {
+            target.validate()?;
+        }
+        self.change(|data| {
+            let current = data.delivery_sources.get(git).map(|s| s.generation);
+            if current != expected {
+                return Ok(false);
+            }
+            let source = DeliverySource {
+                git: git.into(),
+                branch: target
+                    .as_ref()
+                    .map(|t| t.branch.clone())
+                    .unwrap_or_default(),
+                source_revision: target
+                    .as_ref()
+                    .map(|t| t.source_revision.clone())
+                    .unwrap_or_default(),
+                enabled: target.is_some(),
+                generation: current.unwrap_or(0) + 1,
+            };
+            for old in data.builds.iter_mut().filter(|b| {
+                b.job.git == git
+                    && (target.is_none() || b.job.source_revision != source.source_revision)
+            }) {
+                if matches!(
+                    old.state.as_str(),
+                    "queued" | "building" | "uploaded" | "publishing"
+                ) {
+                    old.state = "superseded".into();
+                    old.until = 0;
+                }
+            }
+            if let Some(target) = target {
+                if let Some(build) = data
+                    .builds
+                    .iter_mut()
+                    .find(|b| b.job.git == git && b.job.source_revision == target.source_revision)
+                {
+                    if build.state == "superseded" {
+                        build.state = "queued".into();
+                        build.until = 0;
+                    }
+                } else {
+                    let id = data.builds.len() as i64 + 1;
+                    data.builds.push(Build {
+                        job: BuildJob {
+                            id,
+                            lease: String::new(),
+                            git: git.into(),
+                            version: format!("0.0.0-dev.{id}+{}", target.source_revision),
+                            source_revision: target.source_revision,
+                            recipe: target.recipe,
+                        },
+                        state: "queued".into(),
+                        until: 0,
+                        error: None,
+                        package: None,
+                    });
+                }
+            }
+            data.delivery_sources.insert(git.into(), source);
+            Ok(true)
+        })
+        .await
+    }
+}
+#[async_trait::async_trait]
 impl DeliveryService for FileCatalog {
     async fn claim(&self) -> Result<Option<BuildJob>> {
         let now = now()?;

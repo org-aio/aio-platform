@@ -361,19 +361,23 @@ impl Host {
         database: &str,
         selected: Vec<DynPlugin<RuntimeAssembly>>,
     ) -> Result<Self> {
+        Self::start_configured(config(root, database, "http://localhost"), selected).await
+    }
+    pub async fn start_configured(
+        mut config: HostConfig,
+        selected: Vec<DynPlugin<RuntimeAssembly>>,
+    ) -> Result<Self> {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let base = format!("http://{}", listener.local_addr()?);
+        config.public_origin = base.clone();
         let current = Arc::new(std::sync::Mutex::new(None));
         let observed = current.clone();
-        let runtime = RuntimeHost::initialize_with_router(
-            config(root, database, &base),
-            selected.clone(),
-            move |state, router| {
+        let runtime =
+            RuntimeHost::initialize_with_router(config, selected.clone(), move |state, router| {
                 *observed.lock().map_err(|_| anyhow::anyhow!("代数锁损坏"))? = Some(state.clone());
                 Ok(router)
-            },
-        )
-        .await?;
+            })
+            .await?;
         let state = current
             .lock()
             .map_err(|_| anyhow::anyhow!("代数锁损坏"))?

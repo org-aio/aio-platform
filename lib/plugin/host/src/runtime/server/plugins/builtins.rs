@@ -255,6 +255,9 @@ pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
         .add::<ComponentResourcesPlugin>()
         .add::<ComponentsPlugin>()
         .add::<super::PostgresDeliveryPlugin>()
+        .add::<super::PostgresDeliveryRolloutPlugin>()
+        .add_value(super::GithubDeliveryDiscoveryPlugin::default())
+        .bind::<dyn Plugin<RuntimeAssembly>, super::GithubDeliveryDiscoveryPlugin>()
         .add::<DeliveryPlugin>();
     let catalog = catalog.build();
     Ok(catalog
