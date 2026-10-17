@@ -45,4 +45,4 @@ tenants = ["default"]
 
 `lib/plugin/host/tests/component_execution/bootstrap.rs` 使用替代执行器、真实 HTTP/PostgreSQL，覆盖旧引导包与最新发布共存、租户回滚/停用/卸载、历史回填、来源删除、在线执行器恢复、延迟提交失败后的续装、父子排序与整批输入拒绝。它随 `component_executors` 进入已有 CI。
 
-这个入口解决首次装载，不代表市场、身份或其余系统 UI 已经迁为动态整包，也不提供原生宿主二进制自更新。
+字典 Sidecar 与市场 Wasm 已通过此入口完成真实产品的首次装载；市场另需按摘要授予管理信任。市场自停用后重启不会被引导重新启用，恢复使用正式安装接口，验收见[市场整包测试](https://github.com/org-aio/aio-plugin-marketplace/blob/main/tests/README.md)。身份及其余系统 UI 的动态交付、原生宿主二进制自更新仍待完成。

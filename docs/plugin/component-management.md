@@ -48,7 +48,7 @@ if (response.status !== 200) throw new Error(new TextDecoder().decode(response.b
 const catalog = JSON.parse(new TextDecoder().decode(response.body));
 ```
 
-请求通过当前挂载票据进入 `/api/runtime/components/{token}/manage`。宿主检查页面、租户、会话、版本、代数和实际权限。前端入口不占用插件执行器，因此可以升级、回滚、停用及卸载自身；成功的管理写操作触发宿主目录刷新。暂停或撤销挂载后旧票据失效，恢复使用新票据。设备视图与开发预览不开放此能力。
+请求通过当前挂载票据进入 `/api/runtime/components/{token}/manage`。宿主检查页面、租户、会话、版本、代数和实际权限。挂载与安装提交共用版本变更锁，不能从混合的新旧状态签发票据。前端入口不占用插件执行器，因此可以升级、回滚、停用及卸载自身；成功的管理写操作等待宿主提交对应请求的新目录；并发请求不会被旧刷新通知提前确认，旧页面替换或暂停会取消等待。目录刷新失败明确报告“操作已提交”，不能据此自动重试写操作。暂停或撤销挂载后旧票据失效，恢复使用新票据。设备视图与开发预览不开放此能力。
 
 Wasm 使用现有 WIT `management.invoke`，Sidecar 向其宿主 broker Unix socket 的 `POST /management/invoke` 提交与组件 HTTP 请求相同的 JSON：`method`、`path`、`query`、`headers`、`body`。Sidecar 同时传进程 `x-aio-token` 和当前宿主登记的 `x-aio-context`；响应为 `status`、`headers`、`body`。进程授权固定为启动该版本时的快照，不继承后续包新增能力。
 
@@ -94,6 +94,8 @@ await aioPlugin.installTool(toolId, version);
 
 `tests/component_execution/management.rs` 使用真实 HTTP/PostgreSQL 与替代执行器，覆盖无信任拒绝、新版单独授权、自升级/回滚/停用/卸载、撤权、撤信任和重启恢复。`components/management_tests.rs` 使用真实 Wasm 和 Sidecar Unix broker，监督器为测试夹具，验证上下文归属、不可转授、实时撤权和旧票据失效。后者需要 `AIO_COMPONENT_TEST_DATABASE_URL`、`AIO_TEST_HEALTHY_COMPONENT` 及专用进程目录，随 CI 执行。
 
-`node --test sdk/web/*.test.mjs` 验证消息边界；`tests/browser/component-lifecycle.cjs` 用真实 Chromium 和模拟挂载 API 验证正式 SDK、独立管理入口、暂停/续期票据与目录刷新。它不证明真实市场 UI 或 Docker 隔离已验收；市场系统包仍待迁移。
+`node --test sdk/web/*.test.mjs` 验证消息边界；`tests/browser/component-lifecycle.cjs` 用真实 Chromium 和模拟挂载 API 验证正式 SDK、独立管理入口、暂停/续期票据与目录刷新。它不替代真实产品市场 UI 或 Docker 隔离验收。
 
 `tests/component_execution/management_actions.rs` 通过真实 PostgreSQL/HTTP 下载超过 32 MiB 的有效整包并逐字节核对，覆盖设置目录、工具版本、服务停用、会话和权限撤销；浏览器用例另覆盖真实下载、设置事件与待处理动作取消。Rust 客户绑定见 `lib/plugin/guest`，从唯一 WIT 定义生成，正式生命周期夹具使用该 crate 编译。
+
+市场已从 `aio-idea` 的静态前后端依赖、账户入口和原生服务组合中移出，以 v2 Wasm 整包动态贡献工作区及账户页面。真实产品、PostgreSQL 和 Chromium 覆盖固定摘要首次引导、安装/指定版本/升级/回滚、自升级/自停用、跨重启停用及显式恢复，宿主二进制摘要不变。另覆盖文档图片、逐字节下载、设置、分享/刷新/前后退/滚动及桌面/手机布局；CLI 的正式任务链使用模拟设备回报，本机助手只验收协议动作，未执行实际软件安装。见[市场整包验收](https://github.com/org-aio/aio-plugin-marketplace/blob/main/tests/README.md)。
