@@ -70,10 +70,19 @@ async fn services(
     let identity = device(&state, &headers).await?;
     allowed(&identity, CAPABILITY).map_err(|_| RuntimeError::forbidden("Skill 同步尚未开启"))?;
     let components = state.components()?;
-    let sources: Vec<Uuid> = sqlx::query_scalar("SELECT source_id FROM component_installations WHERE tenant_id=$1 AND enabled ORDER BY source_id")
-        .bind(&identity.tenant).fetch_all(&components.pool).await?;
+    let installations = components
+        .catalog
+        .installations(Some(&identity.tenant), true)
+        .await?;
     let mut result = Vec::new();
-    for source in sources {
+    for entry in installations {
+        let source = entry.source.id;
+        if !components
+            .is_active(source, &identity.tenant, &entry.version.digest)
+            .await
+        {
+            continue;
+        }
         let bundle = components.bundle(source, &identity.tenant).await?;
         if !bundle.manifest().plugin.required_permissions.is_empty() {
             continue;
@@ -104,8 +113,11 @@ async fn invoke(
     let identity = device(&state, &headers).await?;
     allowed(&identity, &capability).map_err(|_| RuntimeError::forbidden("设备能力未授权"))?;
     let components = state.components()?;
-    let installed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM component_installations WHERE tenant_id=$1 AND source_id=$2 AND enabled)")
-        .bind(&identity.tenant).bind(source).fetch_one(&components.pool).await?;
+    let installed = components
+        .current_installation(&identity.tenant, source)
+        .await?
+        .and_then(|entry| entry.installation)
+        .is_some_and(|installation| installation.enabled);
     if !installed {
         return Err(RuntimeError::forbidden("目标插件未启用"));
     }

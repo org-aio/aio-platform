@@ -169,7 +169,7 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 | `EnhancementServicePlugin` | 依赖数据库、脚本运行时与能力服务，提供统一的增强版本、授权和调用服务 |
 | `WasmComponentPlugin` / `SidecarPlugin` | 向 Dill 提供 v2 整包的 `ComponentExecutor`；省略后不初始化对应引擎或监督器客户端 |
 | `ComponentExecutionPlugin` | 汇集整包执行器并拒绝重复类型；本身不创建执行资源 |
-| `ComponentResourcesPlugin` | 依赖存储、密钥与整包执行器，可选依赖增强服务；配置组件存储时初始化所选实现，停止时卸载实例并关闭组件连接 |
+| `ComponentResourcesPlugin` | 依赖目录契约、密钥与整包执行器，可选依赖增强服务；配置组件存储时初始化所选实现，停止时卸载实例并关闭组件连接 |
 
 替换数据库连接方式时保留 `DatabasePlugin`，省略 `PostgresPlugin`，在自己的插件中使用 Dill 绑定 `dyn DatabaseProvider`；密钥同理。Provider 返回的连接池属于本次宿主，会在关闭或初始化失败时关闭，不应返回另一个宿主仍在使用的池。所有服务和 Sidecar 消费同一个容器提供的实例。
 
@@ -215,3 +215,7 @@ assembly.services
 `WorkerCapabilitiesPlugin` 将已装配的设备服务提供给 Rhai/TypeScript，不依赖某个默认 `WorkerService` 实现。其他原生插件将自己的实现绑定到 `CapabilityProvider` 即可贡献版本化路径、schema 和受控异步调用；目录在异步资源初始化完成后校验，开发宿主同样执行。详见 [宿主能力与脚本自举](../enhancements/README.md#宿主能力与脚本自举)。
 
 `EvolutionPlugin` 依赖同一个 `EnhancementServicePlugin`，通过 `CapabilityProvider` 提供候选、激活、回滚、观察和审计。可以省略该插件；身份提供者未实现实时权限查询时默认拒绝演进。策略由 Rhai/TypeScript 普通增强实现，模型通过独立能力提供，详见[脚本演进](../../../../../../../docs/plugin/evolution/README.md)。
+
+### 整包目录
+
+`PostgresComponentCatalogPlugin` 是默认 v2 目录提供者，依赖 `StorePlugin` 准备正式表。替换它时绑定 `dyn ComponentCatalog`，保留资源与执行器组合；默认实现不会作为缺失绑定的回退。文件目录夹具证明最小组合无需连接 PostgreSQL，公共管理路由的 v1 目录仍需数据库。持久化、并发提交及生命周期约束见 [ComponentCatalog](../component_catalog/README.md)。

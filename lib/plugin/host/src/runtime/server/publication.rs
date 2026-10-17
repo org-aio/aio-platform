@@ -101,10 +101,7 @@ pub(super) async fn download_package(
         .optional_service::<crate::runtime::server::components::Components>()?
         .is_some()
     {
-        sqlx::query_scalar("SELECT archive FROM component_versions WHERE digest=$1")
-            .bind(&revision)
-            .fetch_optional(&state.store()?.pool)
-            .await?
+        state.components()?.catalog.archive(&revision).await?
     } else {
         None
     };

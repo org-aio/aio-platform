@@ -257,7 +257,10 @@ impl Processes {
         );
         let user = context.user_id.context("process 调用缺少用户")?;
         let components = self.components.upgrade().context("宿主已停止")?;
-        sqlx::query("INSERT INTO component_process_actors(source_id,tenant_id,user_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING").bind(source).bind(tenant).bind(&user).execute(&components.pool).await?;
+        components
+            .catalog
+            .record_process_actor(source, tenant, &user)
+            .await?;
         let mut url = reqwest::Url::parse("http://localhost")?;
         url.set_path(&request.path);
         url.set_query(request.query.as_deref());

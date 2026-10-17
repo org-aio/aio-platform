@@ -8,6 +8,7 @@ use axum::{
 };
 use az_plugin_bundle::Bundle;
 use serde_json::json;
+use sqlx::PgPool;
 use std::path::Path;
 use std::path::PathBuf;
 use tokio::{net::UnixListener, task::JoinHandle};
@@ -136,7 +137,9 @@ async fn publication_preserves_running_singleton_process() -> Result<()> {
         .add::<crate::runtime::server::plugins::FileObjectStoragePlugin>()
         .build();
     let components = Components::open(
-        pool,
+        Arc::new(
+            crate::runtime::server::plugins::PostgresComponentCatalog::open(pool.clone()).await?,
+        ),
         &crate::configuration::ComponentStorage {
             database_url: database.clone(),
             root: root.path().into(),
@@ -271,7 +274,7 @@ async fn publication_preserves_running_singleton_process() -> Result<()> {
         "SELECT enabled FROM component_installations WHERE source_id=$1 AND tenant_id='default'",
     )
     .bind(source)
-    .fetch_one(&components.pool)
+    .fetch_one(&pool)
     .await?;
     assert!(enabled);
     assert_eq!(

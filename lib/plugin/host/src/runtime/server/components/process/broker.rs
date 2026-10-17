@@ -128,7 +128,13 @@ pub(super) async fn active(
     let enabled: bool = if let Some(local) = local {
         local
     } else {
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM component_installations WHERE source_id=$1 AND tenant_id=$2 AND digest=$3 AND enabled)").bind(gateway.start.source).bind(&gateway.start.tenant).bind(&gateway.start.revision).fetch_one(&components.pool).await?
+        components
+            .current_installation(&gateway.start.tenant, gateway.start.source)
+            .await?
+            .and_then(|entry| entry.installation)
+            .is_some_and(|installation| {
+                installation.enabled && installation.digest == gateway.start.revision
+            })
     };
     ensure!(enabled, "process 活动版本已撤销");
     Ok(components)
@@ -163,7 +169,10 @@ async fn invoke_inner(
         request.tenant_id == gateway.start.tenant && gateway.services.contains(&request.target),
         "跨插件调用未授权"
     );
-    let actor: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM component_process_actors WHERE source_id=$1 AND tenant_id=$2 AND user_id=$3)").bind(gateway.start.source).bind(&request.tenant_id).bind(&request.user_id).fetch_one(&components.pool).await?;
+    let actor: bool = components
+        .catalog
+        .process_actor_exists(gateway.start.source, &request.tenant_id, &request.user_id)
+        .await?;
     ensure!(
         actor
             && components
@@ -186,7 +195,18 @@ async fn invoke_inner(
     let source: Uuid = if let Some(source) = local_target {
         source
     } else {
-        sqlx::query_scalar("SELECT s.id FROM component_sources s JOIN component_installations i ON i.source_id=s.id WHERE s.git=$1 AND i.tenant_id=$2 AND i.enabled").bind(&request.target).bind(&request.tenant_id).fetch_optional(&components.pool).await?.context("目标插件未启用")?
+        let source = components
+            .catalog
+            .source(&request.target)
+            .await?
+            .context("目标插件不存在")?;
+        let installed = components
+            .current_installation(&request.tenant_id, source.id)
+            .await?
+            .and_then(|entry| entry.installation)
+            .is_some_and(|installation| installation.enabled);
+        ensure!(installed, "目标插件未启用");
+        source.id
     };
     let bundle = components.bundle(source, &request.tenant_id).await?;
     let caller = gateway.start.source.to_string();
@@ -297,7 +317,10 @@ async fn meter_inner(
             && request.idempotency_key.len() <= 128,
         "用量上报参数无效"
     );
-    let actor: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM component_process_actors WHERE source_id=$1 AND tenant_id=$2 AND user_id=$3)").bind(gateway.start.source).bind(&request.tenant_id).bind(&request.user_id).fetch_one(&components.pool).await?;
+    let actor: bool = components
+        .catalog
+        .process_actor_exists(gateway.start.source, &request.tenant_id, &request.user_id)
+        .await?;
     ensure!(
         actor
             && components

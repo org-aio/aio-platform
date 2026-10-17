@@ -24,15 +24,16 @@ impl Components {
                 .required_permissions
                 .clone());
         }
-        sqlx::query_scalar(
-            "SELECT v.required_permissions FROM component_installations i JOIN component_versions v ON v.digest=i.digest WHERE i.source_id=$1 AND i.tenant_id=$2 AND i.digest=$3 AND i.enabled",
-        )
-        .bind(source)
-        .bind(tenant)
-        .bind(digest)
-        .fetch_optional(&self.pool)
-        .await?
-        .context("插件活动版本已变化或未启用")
+        let entry = self
+            .current_installation(tenant, source)
+            .await?
+            .context("插件活动版本已变化或未启用")?;
+        let installation = entry.installation.context("安装记录缺失")?;
+        ensure!(
+            installation.enabled && installation.digest == digest,
+            "插件活动版本已变化或未启用"
+        );
+        Ok(entry.version.required_permissions)
     }
 
     // 空要求保持普通业务插件的访问语义；高权限包必须有真实且仍有效的交互会话。

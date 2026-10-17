@@ -3,6 +3,9 @@
 #[path = "support/identity.rs"]
 mod identity_support;
 
+#[path = "component_execution/catalog/mod.rs"]
+mod catalog;
+
 #[path = "component_execution/fixture.rs"]
 mod fixture;
 

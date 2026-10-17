@@ -94,15 +94,13 @@ impl Processes {
         };
         let encryption_key = if manifest.capabilities.cryptography {
             let key = random()?;
-            sqlx::query("INSERT INTO component_process_keys(source_id,tenant_id,ciphertext) VALUES($1,$2,$3) ON CONFLICT DO NOTHING")
-                .bind(start.source).bind(&start.tenant).bind(components.keyring.seal(&scope, "process-master", key.as_bytes())?).execute(&components.pool).await?;
-            let ciphertext: Vec<u8> = sqlx::query_scalar(
-                "SELECT ciphertext FROM component_process_keys WHERE source_id=$1 AND tenant_id=$2",
-            )
-            .bind(start.source)
-            .bind(&start.tenant)
-            .fetch_one(&components.pool)
-            .await?;
+            let candidate = components
+                .keyring
+                .seal(&scope, "process-master", key.as_bytes())?;
+            let ciphertext = components
+                .catalog
+                .process_key(start.source, &start.tenant, candidate)
+                .await?;
             Some(String::from_utf8(components.keyring.open(
                 &scope,
                 "process-master",

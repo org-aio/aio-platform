@@ -38,10 +38,7 @@ pub(super) async fn list(
         .optional_service::<crate::runtime::server::components::Components>()?
         .is_some()
     {
-        let archives: Vec<Vec<u8>> = sqlx::query_scalar("SELECT v.archive FROM component_versions v JOIN component_sources s ON s.id=v.source_id JOIN component_publications p ON p.source_id=s.id WHERE s.git=$1 ORDER BY v.created_at DESC LIMIT 100")
-            .bind(&git).fetch_all(&state.store()?.pool).await?;
-        for archive in archives {
-            let bundle = az_plugin_bundle::Bundle::decode(&archive)?;
+        for bundle in state.components()?.catalog.releases(&git).await? {
             releases.push(PublishedRelease {
                 git: git.clone(),
                 version: bundle.version,

@@ -3,6 +3,8 @@ use anyhow::Result;
 #[cfg(feature = "wasm")]
 use anyhow::ensure;
 use az_plugin_bundle::Bundle;
+#[cfg(feature = "wasm")]
+use sqlx::PgPool;
 use std::fs;
 use std::path::Path;
 
@@ -113,7 +115,9 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
         .add::<crate::runtime::server::plugins::FileObjectStoragePlugin>()
         .build();
     let components = Components::open(
-        pool.clone(),
+        Arc::new(
+            crate::runtime::server::plugins::PostgresComponentCatalog::open(pool.clone()).await?,
+        ),
         &crate::configuration::ComponentStorage {
             database_url: url.clone(),
             root: temp.path().into(),
@@ -194,7 +198,9 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
         .add::<crate::runtime::server::plugins::FileObjectStoragePlugin>()
         .build();
     let restored = Components::open(
-        pool,
+        Arc::new(
+            crate::runtime::server::plugins::PostgresComponentCatalog::open(pool.clone()).await?,
+        ),
         &crate::configuration::ComponentStorage {
             database_url: url.clone(),
             root: temp.path().into(),

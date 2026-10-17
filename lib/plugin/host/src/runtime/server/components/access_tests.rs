@@ -234,9 +234,10 @@ async fn tenant_installation_grants_members_and_menu_visibility_preserves_runtim
     // 旧版本元数据回填不依赖角色或当前成员。
     sqlx::query("UPDATE component_versions SET permissions=NULL WHERE digest=$1")
         .bind(&first.digest)
-        .execute(&components.pool)
+        .execute(&state.store()?.pool)
         .await?;
-    super::permissions::backfill(&components.pool).await?;
+    crate::runtime::server::plugins::PostgresComponentCatalog::open(state.store()?.pool.clone())
+        .await?;
     assert_eq!(
         components.permissions(&tenant).await?,
         vec![permission.clone()]
@@ -286,7 +287,7 @@ async fn tenant_installation_grants_members_and_menu_visibility_preserves_runtim
             )
             .bind(source)
             .bind(&tenant)
-            .fetch_one(&components.pool)
+            .fetch_one(&state.store()?.pool)
             .await?;
             assert_eq!(
                 selected,

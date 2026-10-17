@@ -287,7 +287,6 @@ pub struct ComponentResourcesPlugin;
 impl Plugin<RuntimeAssembly> for ComponentResourcesPlugin {
     fn dependencies(&self) -> Vec<TypeId> {
         vec![
-            TypeId::of::<StorePlugin>(),
             TypeId::of::<KeyringPlugin>(),
             TypeId::of::<ComponentExecutionPlugin>(),
         ]
@@ -299,6 +298,7 @@ impl Plugin<RuntimeAssembly> for ComponentResourcesPlugin {
             }
             assembly.require_service::<dyn super::ComponentDatabaseProvider>();
             assembly.require_service::<dyn super::ObjectStorageProvider>();
+            assembly.require_service::<dyn super::ComponentCatalog>();
             // 组件环境持有同一身份实例；不能依赖脚本服务间接提供初始化顺序。
             #[cfg(feature = "sidecar")]
             assembly.require_service::<dyn crate::identity::IdentityProvider>();
@@ -314,7 +314,7 @@ impl Plugin<RuntimeAssembly> for ComponentResourcesPlugin {
                         .as_ref()
                         .context("未配置组件存储")?;
                     let components = Components::open(
-                        state.service::<PgPool>()?.as_ref().clone(),
+                        state.service::<dyn super::ComponentCatalog>()?,
                         storage,
                         state.service::<Keyring>()?,
                         #[cfg(feature = "sidecar")]

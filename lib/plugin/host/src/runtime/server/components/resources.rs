@@ -4,18 +4,17 @@ use anyhow::{Context, Result, ensure};
 use az_plugin_bundle::VerifiedBundle;
 use az_plugin_runtime::{InvocationResources, Keyring, ObjectStore};
 use futures_util::FutureExt;
-use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::{
     Components,
     execution::{ComponentExecutors, ExecutionContext},
-    permissions, services,
+    services,
 };
 
 impl Components {
     pub async fn open(
-        pool: PgPool,
+        catalog: Arc<dyn super::super::component_catalog::ComponentCatalog>,
         storage: &crate::configuration::ComponentStorage,
         keyring: Arc<Keyring>,
         #[cfg(feature = "sidecar")] identity: Arc<dyn crate::identity::IdentityProvider>,
@@ -24,17 +23,13 @@ impl Components {
         executors: Arc<ComponentExecutors>,
     ) -> Result<Arc<Self>> {
         executors.validate()?;
-        sqlx::raw_sql(include_str!("schema.sql"))
-            .execute(&pool)
-            .await?;
-        permissions::backfill(&pool).await?;
         let backends =
             super::backends::ComponentBackends::open(&runtime_services.upgrade(), storage).await?;
         let services = Arc::new(services::Services::with_enhancements(enhancements.clone()));
         let components = Arc::new(Self {
             #[cfg(feature = "sidecar")]
             enhancements,
-            pool,
+            catalog,
             development: Default::default(),
             backends,
             keyring,

@@ -27,10 +27,12 @@ pub(super) async fn remove(
             .optional_service::<crate::runtime::server::components::Components>()?
             .is_some()
     {
-        exists = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM component_sources WHERE git=$1)")
-            .bind(&request.git)
-            .fetch_one(&state.store()?.pool)
-            .await?;
+        exists = state
+            .components()?
+            .catalog
+            .source(&request.git)
+            .await?
+            .is_some();
     }
     if !exists {
         return Err(RuntimeError::not_found("插件市场条目不存在"));

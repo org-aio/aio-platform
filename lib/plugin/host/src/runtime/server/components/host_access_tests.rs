@@ -259,7 +259,10 @@ async fn protected_wasm_and_sidecar_require_live_interaction_through_the_broker(
     )?;
     let local = start_local(&components, &caller_root, &caller_bundle, 1).await?;
     for user in ["admin", "member"] {
-        sqlx::query("INSERT INTO component_process_actors(source_id,tenant_id,user_id) VALUES($1,'development',$2)").bind(caller).bind(user).execute(&components.pool).await?;
+        components
+            .catalog
+            .record_process_actor(caller, "development", user)
+            .await?;
     }
     let process_root = root.path().join("target");
     let process_bundle = protect(

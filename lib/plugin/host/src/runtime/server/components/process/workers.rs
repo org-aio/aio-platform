@@ -58,8 +58,10 @@ async fn execute(gateway: &Gateway, headers: &HeaderMap, request: Request) -> Re
         request.tenant_id == gateway.start.tenant,
         "插件不能访问其他租户设备"
     );
-    let actor: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM component_process_actors WHERE source_id=$1 AND tenant_id=$2 AND user_id=$3)")
-        .bind(gateway.start.source).bind(&request.tenant_id).bind(&request.user_id).fetch_one(&components.pool).await?;
+    let actor: bool = components
+        .catalog
+        .process_actor_exists(gateway.start.source, &request.tenant_id, &request.user_id)
+        .await?;
     ensure!(
         actor
             && components

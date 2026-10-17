@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use super::super::component_catalog::ComponentInstallationCommit;
 use super::{Components, execution::ComponentExecutor};
 use anyhow::{Context, Result, ensure};
 use az_plugin_bundle::Bundle;
@@ -24,18 +25,41 @@ impl Components {
         excluded: Option<&str>,
     ) -> Result<()> {
         let (source, bundle) = self
+            .catalog
             .published(git, revision)
             .await?
             .context("插件尚未发布")?;
-        self.require_parent(tenant, source).await?;
+        ensure!(bundle.git == git, "发布来源与请求不匹配");
+        if let Some(parent) = bundle
+            .verify()?
+            .manifest()
+            .plugin
+            .marketplace
+            .as_ref()
+            .and_then(|m| m.parent.as_deref())
+        {
+            ensure!(
+                self.catalog.parent_enabled(tenant, parent).await?,
+                "请先启用父插件: {parent}"
+            );
+        }
+        let expected_generation = self
+            .current_installation(tenant, source)
+            .await?
+            .and_then(|entry| entry.installation)
+            .map(|installation| installation.generation);
         let executor = self.executor(&bundle)?;
         let previous = self.previous_execution(tenant, source).await?;
         let result = async {
             executor.activate(source, tenant, &bundle).await?;
-            let mut tx = self.pool.begin().await?;
-            self.save_installation(&mut tx, tenant, source, &bundle.digest, excluded)
-                .await?;
-            tx.commit().await?;
+            let commit = ComponentInstallationCommit {
+                tenant: tenant.into(),
+                source,
+                digest: bundle.digest.clone(),
+                excluded_digest: excluded.map(str::to_owned),
+                expected_generation,
+            };
+            self.catalog.install(commit).await?;
             Ok::<_, anyhow::Error>(())
         }
         .await;
@@ -112,26 +136,27 @@ impl Components {
         let _guard = self.mutations.lock().await;
         if action == "enable" {
             // 重新启用只恢复租户选择的版本，不能撤销回滚或隐式升级。
-            let (git, digest, excluded) = sqlx::query_as::<_, (String, String, Option<String>)>(
-                "SELECT s.git,i.digest,i.excluded_digest FROM component_sources s JOIN component_installations i ON i.source_id=s.id WHERE s.id=$1 AND i.tenant_id=$2",
-            )
-            .bind(source)
-            .bind(tenant)
-            .fetch_one(&self.pool)
-            .await?;
+            let entry = self
+                .current_installation(tenant, source)
+                .await?
+                .context("当前租户未安装插件")?;
+            let installation = entry.installation.context("安装记录缺失")?;
+            let git = entry.source.git;
+            let digest = installation.digest;
+            let excluded = installation.excluded_digest;
             return self
                 .install_locked(tenant, &git, Some(&digest), excluded.as_deref())
                 .await;
         }
         if action == "rollback" {
-            let row=sqlx::query_as::<_,(String,String)>("SELECT s.git,v.digest FROM component_versions v JOIN component_sources s ON s.id=v.source_id JOIN component_installations i ON i.source_id=s.id AND i.tenant_id=$2 JOIN component_versions current ON current.digest=i.digest WHERE s.id=$1 AND v.created_at<current.created_at ORDER BY v.created_at DESC LIMIT 1").bind(source).bind(tenant).fetch_optional(&self.pool).await?.context("没有可回滚的发布版本")?;
-            let excluded: String =
-                sqlx::query_scalar("SELECT digest FROM component_publications WHERE source_id=$1")
-                    .bind(source)
-                    .fetch_one(&self.pool)
-                    .await?;
+            let selection = self.catalog.rollback_target(tenant, source).await?;
             return self
-                .install_locked(tenant, &row.0, Some(&row.1), Some(&excluded))
+                .install_locked(
+                    tenant,
+                    &selection.git,
+                    Some(&selection.digest),
+                    selection.excluded_digest.as_deref(),
+                )
                 .await;
         }
         ensure!(action == "disable" || action == "uninstall", "未知管理操作");
@@ -139,19 +164,27 @@ impl Components {
         self.installed_bundle(tenant, source)
             .await?
             .context("当前租户未安装插件")?;
+        let installation = self
+            .current_installation(tenant, source)
+            .await?
+            .and_then(|entry| entry.installation)
+            .context("当前租户未安装插件")?;
         let previous = self.previous_execution(tenant, source).await?;
         let result = async {
             if let Some(previous) = &previous {
                 previous.executor.deactivate(source, tenant).await?;
             }
-            let sql = if action == "uninstall" {
-                "DELETE FROM component_installations WHERE source_id=$1 AND tenant_id=$2"
-            } else {
-                "UPDATE component_installations SET enabled=false,generation=gen_random_uuid() WHERE source_id=$1 AND tenant_id=$2"
-            };
-            sqlx::query(sql).bind(source).bind(tenant).execute(&self.pool).await?;
+            self.catalog
+                .remove(
+                    tenant,
+                    source,
+                    installation.generation,
+                    action == "uninstall",
+                )
+                .await?;
             Ok::<_, anyhow::Error>(())
-        }.await;
+        }
+        .await;
         if let Err(error) = result {
             let Some(previous) = previous.as_ref() else {
                 return Err(error);
@@ -167,21 +200,6 @@ impl Components {
             };
         }
         self.active.write().await.remove(&(source, tenant.into()));
-        Ok(())
-    }
-    pub(super) async fn save_installation(
-        &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        tenant: &str,
-        source: Uuid,
-        digest: &str,
-        excluded: Option<&str>,
-    ) -> Result<()> {
-        sqlx::query("INSERT INTO component_installations(tenant_id,source_id,digest,generation,excluded_digest) VALUES($1,$2,$3,$4,$5) ON CONFLICT(tenant_id,source_id) DO UPDATE SET digest=EXCLUDED.digest,enabled=true,generation=EXCLUDED.generation,excluded_digest=EXCLUDED.excluded_digest")
-            .bind(tenant).bind(source).bind(digest).bind(Uuid::new_v4()).bind(excluded).execute(&mut **tx).await?;
-        // 与安装共用提交点，失败不能留下已初始化标记，卸载也不清除此记录。
-        sqlx::query("INSERT INTO component_initializations(tenant_id,git) SELECT $1,git FROM component_sources WHERE id=$2 ON CONFLICT DO NOTHING")
-            .bind(tenant).bind(source).execute(&mut **tx).await?;
         Ok(())
     }
 }

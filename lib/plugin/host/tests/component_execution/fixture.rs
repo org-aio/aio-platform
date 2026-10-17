@@ -51,7 +51,12 @@ impl<const ID: u8> ComponentExecutor for Replacement<ID> {
     async fn initialize(&self, context: ExecutionContext) -> Result<()> {
         *self.0.context.lock().await = Some(context.clone());
         self.0.events.lock().await.push("initialize");
-        *self.0.pool.lock().await = Some(context.services()?.get::<dill::OneOf<PgPool>>()?);
+        let services = context.services()?;
+        *self.0.pool.lock().await = if services.builders_for::<PgPool>().count() == 0 {
+            None
+        } else {
+            Some(services.get_one::<PgPool>()?)
+        };
         self.0.entered.notify_one();
         match self.0.initialization.load(Ordering::SeqCst) {
             1 => anyhow::bail!("测试初始化失败"),
@@ -259,6 +264,7 @@ pub fn config(root: &Path, database: &str, origin: &str) -> HostConfig {
 pub fn plugins(probes: [Arc<Probe>; 2], surfaces: bool) -> Vec<DynPlugin<RuntimeAssembly>> {
     let mut plugins: Vec<DynPlugin<RuntimeAssembly>> = vec![
         Arc::new(ComponentsPlugin),
+        Arc::new(PostgresComponentCatalogPlugin),
         Arc::new(ComponentResourcesPlugin),
         Arc::new(PostgresComponentPlugin),
         Arc::new(FileObjectStoragePlugin),

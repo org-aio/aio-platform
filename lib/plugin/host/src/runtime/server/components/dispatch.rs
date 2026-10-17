@@ -13,13 +13,23 @@ use super::{
 
 impl Components {
     pub async fn restore(&self) -> Result<()> {
-        let rows = sqlx::query_as::<_, (Uuid, String, String, Vec<u8>)>(
-            "SELECT i.source_id,i.tenant_id,i.digest,v.archive FROM component_installations i JOIN component_versions v ON v.digest=i.digest WHERE i.enabled",
-        ).fetch_all(&self.pool).await?;
-        for (source, tenant, digest, archive) in rows {
+        let rows = self.catalog.installations(None, true).await?;
+        for row in rows {
+            let source = row.source.id;
+            let installation = row.installation.context("安装记录缺失")?;
+            ensure!(installation.enabled, "恢复列表含停用安装");
+            let tenant = installation.tenant;
+            let digest = installation.digest;
+            ensure!(row.version.digest == digest, "安装索引与版本不匹配");
+            let archive = self
+                .catalog
+                .archive(&digest)
+                .await?
+                .context("安装整包缺失")?;
             let bundle = Bundle::decode(&archive)?;
             let verified = bundle.verify()?;
             ensure!(verified.digest() == digest, "安装记录与整包摘要不匹配");
+            ensure!(bundle.git == row.source.git, "安装记录与整包来源不匹配");
             validate_manifest(&verified)?;
             if verified.manifest().plugin.capabilities.management
                 && !self.trusted_management(&verified)?
@@ -133,17 +143,25 @@ impl Components {
         source: Uuid,
         enabled_only: bool,
     ) -> Result<Option<Bundle>> {
-        let row: Option<(String, Vec<u8>)> = sqlx::query_as("SELECT i.digest,v.archive FROM component_installations i JOIN component_versions v ON v.digest=i.digest WHERE i.tenant_id=$1 AND i.source_id=$2 AND (NOT $3 OR i.enabled)")
-            .bind(tenant).bind(source).bind(enabled_only).fetch_optional(&self.pool).await?;
-        row.map(|(digest, bytes)| {
-            let bundle = Bundle::decode(&bytes)?;
-            ensure!(
-                bundle.verify()?.digest() == digest,
-                "安装记录与整包摘要不匹配"
-            );
-            Ok(bundle)
-        })
-        .transpose()
+        let Some(row) = self.current_installation(tenant, source).await? else {
+            return Ok(None);
+        };
+        let installation = row.installation.context("安装记录缺失")?;
+        if enabled_only && !installation.enabled {
+            return Ok(None);
+        }
+        let bytes = self
+            .catalog
+            .archive(&installation.digest)
+            .await?
+            .context("安装整包缺失")?;
+        let bundle = Bundle::decode(&bytes)?;
+        ensure!(
+            bundle.verify()?.digest() == installation.digest,
+            "安装记录与整包摘要不匹配"
+        );
+        ensure!(bundle.git == row.source.git, "安装记录与整包来源不匹配");
+        Ok(Some(bundle))
     }
 
     pub(super) async fn bundle(&self, source: Uuid, tenant: &str) -> Result<Arc<VerifiedBundle>> {

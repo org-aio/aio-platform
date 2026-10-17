@@ -154,7 +154,9 @@ async fn verify_sidecar(metering: bool) -> Result<()> {
     }
     let resource_catalog = resource_services.build();
     let components = Components::open(
-        pool.clone(),
+        Arc::new(
+            crate::runtime::server::plugins::PostgresComponentCatalog::open(pool.clone()).await?,
+        ),
         &crate::configuration::ComponentStorage {
             database_url: database.clone(),
             root: root.path().into(),
@@ -227,8 +229,8 @@ async fn verify_sidecar(metering: bool) -> Result<()> {
         .bind(format!("https://example.com/{source}.git"))
         .execute(&pool)
         .await?;
-    sqlx::query("INSERT INTO component_versions(digest,source_id,archive,version,source_commit,description,metadata,permissions,required_permissions) VALUES($1,$2,$3,'1.0.0',$4,$5,'{}','{}','{}')")
-        .bind(&revision).bind(source).bind(Vec::<u8>::new()).bind("a".repeat(40)).bind(json!({"label":"Fixture","pages":[]})).execute(&pool).await?;
+    sqlx::query("INSERT INTO component_versions(digest,source_id,archive,version,source_commit,description,metadata,permissions,required_permissions) VALUES($1,$2,$3,'1.0.0',$4,$5,$6,'{}','{}')")
+        .bind(&revision).bind(source).bind(Vec::<u8>::new()).bind("a".repeat(40)).bind(json!({"label":"Fixture","pages":[]})).bind(json!({"title":"Fixture","summary":"Broker fixture","license":"MIT"})).execute(&pool).await?;
     sqlx::query("INSERT INTO component_installations(tenant_id,source_id,digest,generation) VALUES($1,$2,$3,$4)")
         .bind(&tenant).bind(source).bind(&revision).bind(uuid::Uuid::new_v4()).execute(&pool).await?;
     let make_gateway = |grants, runtime_capabilities| {

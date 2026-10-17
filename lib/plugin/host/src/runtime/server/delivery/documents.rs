@@ -48,7 +48,7 @@ pub(super) async fn details(
     let session = authenticate(&state, &headers).await?;
     if let Some(components) =
         state.optional_service::<crate::runtime::server::components::Components>()?
-        && let Some(data) = components.details(&revision).await?
+        && let Some(data) = components.catalog.details(&revision).await?
     {
         return Ok(Json(RuntimeResponse { data }));
     }

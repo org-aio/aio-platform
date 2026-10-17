@@ -55,7 +55,11 @@ async fn delivery_publishes_bundles_and_respects_tenant_choices() -> Result<()> 
     let first = create(&first_job)?;
     upload(&client, &base, &token, &first_job, &first).await?;
     delivery::components::tick(&state).await?;
-    let (source, published) = components.published(&git, None).await?.context("未发布")?;
+    let (source, published) = components
+        .catalog
+        .published(&git, None)
+        .await?
+        .context("未发布")?;
     assert_eq!(published.digest, first.digest);
     let tenants: Vec<_> = (0..4).map(|_| Uuid::new_v4().to_string()).collect();
     for tenant in &tenants {
@@ -102,7 +106,13 @@ async fn delivery_publishes_bundles_and_respects_tenant_choices() -> Result<()> 
     let current_job = target(&state, &git, 4).await?;
     delivery::components::tick(&state).await?;
     assert_eq!(
-        components.published(&git, None).await?.unwrap().1.digest,
+        components
+            .catalog
+            .published(&git, None)
+            .await?
+            .unwrap()
+            .1
+            .digest,
         second.digest
     );
     assert!(
@@ -164,7 +174,13 @@ async fn delivery_publishes_bundles_and_respects_tenant_choices() -> Result<()> 
     upload(&client, &base, &token, &failed_job, &broken).await?;
     delivery::components::tick(&state).await?;
     assert_eq!(
-        components.published(&git, None).await?.unwrap().1.digest,
+        components
+            .catalog
+            .published(&git, None)
+            .await?
+            .unwrap()
+            .1
+            .digest,
         third.digest
     );
     assert_installed(
@@ -184,7 +200,7 @@ async fn delivery_publishes_bundles_and_respects_tenant_choices() -> Result<()> 
     )
     .bind(source)
     .bind(&tenants[0])
-    .fetch_one(&components.pool)
+    .fetch_one(&state.store()?.pool)
     .await?;
     components.rollout().await?;
     let unchanged: Uuid = sqlx::query_scalar(
@@ -192,7 +208,7 @@ async fn delivery_publishes_bundles_and_respects_tenant_choices() -> Result<()> 
     )
     .bind(source)
     .bind(&tenants[0])
-    .fetch_one(&components.pool)
+    .fetch_one(&state.store()?.pool)
     .await?;
     assert_eq!(generation, unchanged);
     for tenant in [&tenants[0], &tenants[1], &tenants[3]] {
@@ -268,17 +284,17 @@ async fn suspended_installations_keep_queued_upgrades_without_blocking_active_te
     sqlx::query("INSERT INTO delivery_sources(git,branch,desired_sha) VALUES($1,'main',$2)")
         .bind(&git)
         .bind("a".repeat(40))
-        .execute(&components.pool)
+        .execute(&state.store()?.pool)
         .await?;
     for (position, tenant) in tenants.iter().enumerate() {
         sqlx::query("INSERT INTO component_rollouts(tenant_id,source_id,digest,updated_at) VALUES($1,$2,$3,now()+$4*interval '1 second')")
-            .bind(tenant).bind(source).bind(&second.digest).bind(position as i32).execute(&components.pool).await?;
+            .bind(tenant).bind(source).bind(&second.digest).bind(position as i32).execute(&state.store()?.pool).await?;
     }
     components.rollout().await?;
     for tenant in &tenants[..8] {
         assert_installed(&components, tenant, source, Some((&first.digest, true))).await?;
         let state: String = sqlx::query_scalar("SELECT state FROM component_rollouts WHERE tenant_id=$1 AND source_id=$2 AND digest=$3")
-            .bind(tenant).bind(source).bind(&second.digest).fetch_one(&components.pool).await?;
+            .bind(tenant).bind(source).bind(&second.digest).fetch_one(&state.store()?.pool).await?;
         assert_eq!(state, "queued");
     }
     assert_installed(
@@ -343,13 +359,12 @@ async fn assert_installed(
     source: Uuid,
     expected: Option<(&str, bool)>,
 ) -> Result<()> {
-    let value: Option<(String, bool)> = sqlx::query_as(
-        "SELECT digest,enabled FROM component_installations WHERE tenant_id=$1 AND source_id=$2",
-    )
-    .bind(tenant)
-    .bind(source)
-    .fetch_optional(&components.pool)
-    .await?;
+    let value = components
+        .catalog
+        .installation(tenant, source)
+        .await?
+        .and_then(|entry| entry.installation)
+        .map(|i| (i.digest, i.enabled));
     assert_eq!(value.as_ref().map(|(d, e)| (d.as_str(), *e)), expected);
     Ok(())
 }

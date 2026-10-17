@@ -2,7 +2,7 @@
 
 原生 `aio:plugin@2.0.0` 整包进入独立的持久执行槽。发布校验只更新市场版本，租户安装由用户显式选择；父子依赖按租户校验，不自动安装子插件。页面转换仅用于共享壳导航，业务请求直接使用 v2 二进制契约。
 
-`AIO_COMPONENT_DATABASE_URL` 指向具有创建隔离角色权限的专用 PostgreSQL，数据库必须撤销 PUBLIC 权限。`AIO_COMPONENT_HOME` 是发布目录之外的持久目录，保存 0600 的 `keyring.json` 和 `objects/`；未配置数据库时不开启原生 Component 安装。
+`AIO_COMPONENT_DATABASE_URL` 指向具有创建隔离角色权限的专用 PostgreSQL，数据库必须撤销 PUBLIC 权限。`AIO_COMPONENT_HOME` 是发布目录之外的持久目录，保存 0600 的 `keyring.json` 和 `objects/`；默认组合未配置组件存储时不开启原生 Component 安装；替代目录和资源提供者可在不连接 PostgreSQL 的组合中启动。
 
 安装记录是版本激活的提交点。安装失败恢复上一执行槽，重启时按安装记录恢复执行槽；停用和卸载保留业务 schema、对象及版本历史。声明的业务权限由当前已启用安装版本派生，租户全部成员（包括新加入成员）自动获得，无需配置角色。停用、卸载或版本回退后，下一次请求即按当前版本重新授权。
 
@@ -67,6 +67,10 @@ Provider 的 `open` 返回本次宿主拥有的后端。资源准备、执行器
 
 `resources.rs` 按包授权创建 `InvocationResources`，校验来源和租户后交给 Wasm 或外部执行器。Sidecar 数据库配置也通过此入口；Sidecar 当前仍未开放对象存储能力。对象读写的租户命名空间、键校验和大小限制由运行时句柄执行，后端只消费已校验地址。
 
-`tests/component_execution/resources.rs` 移除默认 Provider，使用预先分配的 PostgreSQL 连接和测试对象后端，验证两个外部执行器共享资源、Wasm 的真实 WIT 读写与撤权、Sidecar 数据角色和表权限、持久槽恢复、错误归属拒绝及失败补偿。执行运行时另外以真实 SQLite 替代 `DatabaseBackend` 与 `ComponentReleases`，覆盖 WIT 读写、并发发布、失败回滚和持久恢复，见 runtime 的 `tests/database_backends.rs`。正式产品仍默认使用 PostgreSQL；平台安装目录尚未抽离，SQL 方言与迁移也不会自动转换。
+`tests/component_execution/resources.rs` 移除默认 Provider，使用预先分配的 PostgreSQL 连接和测试对象后端，验证两个外部执行器共享资源、Wasm 的真实 WIT 读写与撤权、Sidecar 数据角色和表权限、持久槽恢复、错误归属拒绝及失败补偿。执行运行时另外以真实 SQLite 替代 `DatabaseBackend` 与 `ComponentReleases`，覆盖 WIT 读写、并发发布、失败回滚和持久恢复，见 runtime 的 `tests/database_backends.rs`。正式产品仍默认使用 PostgreSQL；v2 安装目录已通过独立的 `ComponentCatalog` 契约替换；v1 平台目录仍依赖 PostgreSQL，SQL 方言与迁移也不会自动转换。
 
 数据库后端返回中立事务与值模型，发布槽通过 `ComponentDatabase::releases()` 获取持久存储。Sidecar 只消费同一绑定导出的 `ProcessDatabaseConnection`，按声明的 TCP/Unix 上游建立私有代理，不再解析 PostgreSQL 驱动选项。不支持网络直连的后端明确拒绝 Sidecar；不允许回退到平台数据库。
+
+## 可替换目录
+
+从 `plugins/component_catalog.rs` 注册 `ComponentCatalog`。默认提供者沿用正式 PostgreSQL 表；`ComponentResourcesPlugin` 只依赖契约。发布、安装、首次引导、目录、授权索引、归档、Sidecar 密钥和升级选择共用同一实例。安装与停用提交核对代数，拒绝覆盖并发选择。接口约束及无数据库与真实 HTTP 验收见 [目录说明](../component_catalog/README.md)。

@@ -4,27 +4,25 @@ use crate::runtime::{
     CapabilityManifest, InstalledPluginView, MarketplaceEntry, PageBody, PageDefinition,
     PluginRuntime, PluginState, RuntimeAccountItem, RuntimeCatalog,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use az_plugin_manifest::{MenuGroupDefinition, SceneDefinition};
-use sqlx::Row;
 use uuid::Uuid;
 
 impl Components {
     pub async fn entries(&self, tenant: &str) -> Result<Vec<MarketplaceEntry>> {
-        let rows=sqlx::query("SELECT s.id,s.git,s.parent_git,COALESCE(p.digest,i.digest) AS digest,v.metadata,v.capabilities,v.description,i.digest AS installed_revision,i.enabled FROM component_sources s LEFT JOIN component_publications p ON p.source_id=s.id LEFT JOIN component_installations i ON i.source_id=s.id AND i.tenant_id=$1 JOIN component_versions v ON v.digest=COALESCE(p.digest,i.digest) WHERE p.digest IS NOT NULL OR i.digest IS NOT NULL ORDER BY v.metadata->>'title'").bind(tenant).fetch_all(&self.pool).await?;
+        let rows = self.catalog.entries(tenant).await?;
         let mut entries = Vec::new();
         for row in rows {
-            let metadata: az_plugin_bundle::MarketplaceManifest =
-                serde_json::from_value(row.try_get("metadata")?)?;
-            let active_revision: Option<String> = row.try_get("installed_revision")?;
-            let source = row.try_get::<Uuid, _>("id")?;
-            let state = if let Some(digest) = &active_revision {
+            let metadata = row.version.metadata;
+            let active_revision = row.installation.as_ref().map(|i| i.digest.clone());
+            let source = row.source.id;
+            let state = if let Some(installation) = &row.installation {
                 Some(
                     self.installation_state(
                         source,
                         tenant,
-                        digest,
-                        row.get::<Option<bool>, _>("enabled") == Some(true),
+                        &installation.digest,
+                        installation.enabled,
                     )
                     .await,
                 )
@@ -32,8 +30,8 @@ impl Components {
                 None
             };
             entries.push(MarketplaceEntry {
-                git: row.try_get("git")?,
-                rev: row.try_get("digest")?,
+                git: row.source.git,
+                rev: row.version.digest,
                 title: metadata.title,
                 summary: metadata.summary,
                 license: metadata.license,
@@ -43,17 +41,13 @@ impl Components {
                 source_id: Some(source.to_string()),
                 state,
                 active_revision,
-                runtime: Some(
-                    if row.try_get::<serde_json::Value, _>("description")?["process"] == true {
-                        PluginRuntime::Process
-                    } else {
-                        PluginRuntime::WasmComponent
-                    },
-                ),
+                runtime: Some(if row.version.description.process {
+                    PluginRuntime::Process
+                } else {
+                    PluginRuntime::WasmComponent
+                }),
                 capabilities: CapabilityManifest {
-                    database: row.try_get::<serde_json::Value, _>("capabilities")?["database"]
-                        .as_bool()
-                        .unwrap_or(false),
+                    database: row.version.capabilities.database,
                     ..Default::default()
                 },
                 parent_git: metadata.parent,
@@ -69,32 +63,35 @@ impl Components {
         catalog: &mut RuntimeCatalog,
     ) -> Result<()> {
         let tenant = &session.tenant_id;
-        let rows=sqlx::query("SELECT s.id,s.git,coalesce(parent.id,s.id) AS menu_source,i.digest,i.enabled,i.generation::TEXT,v.description,v.required_permissions,v.capabilities,v.metadata->>'title' AS title FROM component_sources s LEFT JOIN component_sources parent ON parent.git=s.parent_git JOIN component_installations i ON i.source_id=s.id JOIN component_versions v ON v.digest=i.digest WHERE i.tenant_id=$1").bind(tenant).fetch_all(&self.pool).await?;
+        let rows = self.catalog.installations(Some(tenant), false).await?;
         for row in rows {
-            let source = row.try_get("id")?;
-            let digest: String = row.try_get("digest")?;
+            let source = row.source.id;
+            let installation = row.installation.context("安装记录缺失")?;
+            let digest = installation.digest;
             let state = self
-                .installation_state(source, tenant, &digest, row.try_get("enabled")?)
+                .installation_state(source, tenant, &digest, installation.enabled)
                 .await;
-            let required: Vec<String> = row.try_get("required_permissions")?;
             let accessible = state == PluginState::Active
                 && self
-                    .host_permissions(tenant, &session.user_id, &session.session_id, &required)
+                    .host_permissions(
+                        tenant,
+                        &session.user_id,
+                        &session.session_id,
+                        &row.version.required_permissions,
+                    )
                     .await?;
             append(
                 catalog,
                 source,
-                row.try_get("menu_source")?,
-                row.try_get("git")?,
+                row.menu_source,
+                row.source.git,
                 digest,
-                row.try_get("generation")?,
+                installation.generation.to_string(),
                 state,
                 accessible,
-                row.try_get("title")?,
-                serde_json::from_value(row.try_get("description")?)?,
-                row.try_get::<serde_json::Value, _>("capabilities")?["database"]
-                    .as_bool()
-                    .unwrap_or(false),
+                row.version.metadata.title,
+                row.version.description,
+                row.version.capabilities.database,
             );
         }
         if tenant == "development" {

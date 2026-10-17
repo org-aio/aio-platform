@@ -37,8 +37,8 @@ mod store;
 mod tests;
 mod worker_services;
 
+use super::component_catalog::ComponentCatalog;
 use az_plugin_runtime::Keyring;
-use sqlx::PgPool;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
@@ -53,7 +53,7 @@ pub(super) use resources::load_keyring;
 pub(super) struct Components {
     #[cfg(feature = "sidecar")]
     pub(super) enhancements: Option<Arc<super::enhancements::Enhancements>>,
-    pub pool: PgPool,
+    pub catalog: Arc<dyn ComponentCatalog>,
     development: RwLock<std::collections::BTreeMap<Uuid, development::Instance>>,
     backends: backends::ComponentBackends,
     keyring: Arc<Keyring>,

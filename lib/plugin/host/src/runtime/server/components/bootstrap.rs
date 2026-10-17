@@ -139,9 +139,10 @@ impl Components {
                 .is_some();
             let mut tenants = Vec::new();
             for tenant in &component.tenants {
-                let initialized: bool = sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM component_initializations WHERE tenant_id=$1 AND git=$2)",
-                ).bind(tenant).bind(&component.bundle.git).fetch_one(&self.pool).await?;
+                let initialized = self
+                    .catalog
+                    .initialized(tenant, &component.bundle.git)
+                    .await?;
                 if !initialized {
                     tenants.push(tenant);
                 }
@@ -185,12 +186,15 @@ impl Components {
     }
 
     async fn bootstrap_parent_ready(&self, tenant: &str, parent: &str) -> Result<bool> {
-        let installation: Option<(uuid::Uuid, String, bool)> = sqlx::query_as(
-            "SELECT i.source_id,i.digest,i.enabled FROM component_installations i JOIN component_sources s ON s.id=i.source_id WHERE i.tenant_id=$1 AND s.git=$2",
-        ).bind(tenant).bind(parent).fetch_optional(&self.pool).await?;
-        if let Some((source, digest, enabled)) = installation {
-            return Ok(enabled && self.is_active(source, tenant, &digest).await);
+        if let Some(source) = self.catalog.source(parent).await?
+            && let Some(entry) = self.current_installation(tenant, source.id).await?
+            && let Some(installation) = entry.installation
+        {
+            return Ok(installation.enabled
+                && self
+                    .is_active(source.id, tenant, &installation.digest)
+                    .await);
         }
-        self.parent_enabled(tenant, parent).await
+        self.catalog.parent_enabled(tenant, parent).await
     }
 }

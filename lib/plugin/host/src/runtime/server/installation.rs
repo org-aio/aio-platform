@@ -28,6 +28,7 @@ pub(super) async fn install(
     if let Some(components) =
         state.optional_service::<crate::runtime::server::components::Components>()?
         && let Some((source, bundle)) = components
+            .catalog
             .published(&request.git, request.rev.as_deref())
             .await?
     {
