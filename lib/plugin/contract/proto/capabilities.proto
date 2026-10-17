@@ -1,0 +1,35 @@
+syntax = "proto3";
+package aio.runtime.v1;
+
+import "enhancements.proto";
+
+// 原生与导入能力复用宿主目录和调用链，不要求安装脚本版本服务。
+service Capabilities {
+  rpc List(ListRequest) returns (CapabilityListResponse);
+  rpc Describe(DescribeRequest) returns (CapabilityDescriptor);
+  rpc Invoke(InvokeRequest) returns (CapabilityInvokeResponse);
+}
+
+message CapabilityListResponse {
+  repeated string paths = 1;
+}
+
+enum CapabilityEffect {
+  CAPABILITY_EFFECT_UNSPECIFIED = 0;
+  CAPABILITY_EFFECT_READ = 1;
+  CAPABILITY_EFFECT_IDEMPOTENT_WRITE = 2;
+  CAPABILITY_EFFECT_WRITE = 3;
+}
+
+// 版本路径是契约；原生实现没有脚本包摘要，不伪造增强 revision。
+message CapabilityDescriptor {
+  string path = 1;
+  string description = 2;
+  CapabilityEffect effect = 3;
+  bytes input_schema_json = 4;
+  bytes output_schema_json = 5;
+}
+
+message CapabilityInvokeResponse {
+  bytes output_json = 1;
+}

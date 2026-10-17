@@ -40,7 +40,13 @@ async fn stdio_uses_shared_languages_grants_schemas_and_environment_isolation() 
                 .publish(package("mcp", typescript)?, generation as i64)
                 .await?;
             assert_eq!(remote.count("json")?, before, "候选验证不得启动真实进程");
-            assert_eq!(mcp.list_all_tools().await?.len(), 1);
+            let tools = mcp.list_all_tools().await?;
+            assert_eq!(tools.len(), 2);
+            assert!(
+                tools
+                    .iter()
+                    .any(|tool| tool.name == "runtime.v1.remote.mcp")
+            );
             assert!(manager.list_all_tools().await?.is_empty());
             let response = grpc
                 .invoke(auth(invoke(json!({"value":21}))?, "remote")?)
@@ -260,6 +266,9 @@ async fn stdio_validates_entire_candidate_before_launch_and_keeps_active_binding
         let error = tokio::time::timeout(Duration::from_secs(8), reload(&fixture)).await?
             .err().context("挂起握手没有失败")?;
         assert!(format!("{error:#}").contains("MCP 握手超时"));
+        // 撤回坏候选并等待同一加载锁，避免观察器重试启动新进程时误判旧进程泄漏。
+        write_imports(&fixture, vec![original]).await?;
+        assert!(!reload(&fixture).await?);
         stalled.reaped().await?;
         let mut grpc = EnhancementsClient::connect(fixture.base.clone()).await?;
         let response = grpc.invoke(auth(invoke(json!({"value":7}))?, "remote")?).await?.into_inner();

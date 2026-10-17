@@ -54,6 +54,9 @@ jobs:
           for language_profile in rhai typescript; do
             cargo test -p az-plugin-host --no-default-features --features "$language_profile" --test executor_plugins
           done
+          for protocol_profile in mcp grpc; do
+            cargo test -p az-plugin-host --no-default-features --features "$protocol_profile" --test capability_protocols
+          done
           for protocol_profile in remote-mcp remote-grpc remote; do
             cargo test -p az-plugin-host --no-default-features --features "$protocol_profile" remote::tests
           done

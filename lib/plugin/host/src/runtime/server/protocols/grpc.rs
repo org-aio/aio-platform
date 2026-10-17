@@ -7,36 +7,43 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response as HttpResponse},
 };
-use az_plugin_contract::{
-    EnhancementRequest,
-    grpc::{
-        DescribeRequest, DescribeResponse, InvokeRequest, InvokeResponse, ListRequest,
-        ListResponse,
-        enhancements_server::{Enhancements, EnhancementsServer},
-    },
+use az_plugin_contract::grpc::{
+    capabilities_server::CapabilitiesServer, enhancements_server::EnhancementsServer,
 };
-use tonic::{Request, Response, Status};
+use tonic::Status;
 
 use super::{
     super::{RuntimeState, http_error::RuntimeError},
-    access,
+    grpc_capabilities::GrpcCapabilities,
+    grpc_enhancements::GrpcEnhancements,
 };
-
-struct GrpcEnhancements(RuntimeState);
 
 // 只存在于宿主请求扩展中，不能被脚本输入或协议载荷改写。
 #[derive(Clone, Copy)]
-struct Deadline(Instant);
+pub(super) struct Deadline(pub Instant);
 
-pub(in crate::runtime::server) fn router(state: RuntimeState) -> Router<RuntimeState> {
-    let service = EnhancementsServer::new(GrpcEnhancements(state))
+pub(in crate::runtime::server) fn router(
+    state: RuntimeState,
+) -> anyhow::Result<Router<RuntimeState>> {
+    let native = CapabilitiesServer::new(GrpcCapabilities(state.clone()))
         .max_decoding_message_size(az_plugin_enhancement::MAX_VALUE_BYTES + 1024)
-        .max_encoding_message_size(az_plugin_enhancement::MAX_VALUE_BYTES + 1024);
-    tonic::service::Routes::new(service)
+        // 目录最多 4096 条有界路径，Invoke 的 JSON 结果仍由公共调用链限制在 64 KiB。
+        .max_encoding_message_size(1024 * 1024);
+    let mut routes = tonic::service::Routes::new(native);
+    if state
+        .optional_service::<super::super::enhancements::Enhancements>()?
+        .is_some()
+    {
+        let enhancements = EnhancementsServer::new(GrpcEnhancements(state))
+            .max_decoding_message_size(az_plugin_enhancement::MAX_VALUE_BYTES + 1024)
+            .max_encoding_message_size(az_plugin_enhancement::MAX_VALUE_BYTES + 1024);
+        routes = routes.add_service(enhancements);
+    }
+    Ok(routes
         .into_axum_router()
         .reset_fallback()
         .route_layer(axum::middleware::from_fn(deadline))
-        .with_state(())
+        .with_state(()))
 }
 
 // Axum 合并路由不经过 Tonic 的监听器，在这里落实客户端截止时间和宿主等待上限。
@@ -65,7 +72,7 @@ async fn deadline(mut request: HttpRequest<Body>, next: Next) -> HttpResponse {
     {
         return response;
     }
-    Status::deadline_exceeded("增强调用超过截止时间").into_http::<Body>()
+    Status::deadline_exceeded("能力调用超过截止时间").into_http::<Body>()
 }
 
 pub(super) fn timeout(value: &str) -> Option<Duration> {
@@ -88,83 +95,24 @@ pub(super) fn timeout(value: &str) -> Option<Duration> {
     }
 }
 
-#[tonic::async_trait]
-impl Enhancements for GrpcEnhancements {
-    async fn list(&self, request: Request<ListRequest>) -> Result<Response<ListResponse>, Status> {
-        let headers = request.metadata().clone().into_headers();
-        let session = access::session(&self.0, &headers).await.map_err(status)?;
-        let (revision, contracts) = access::catalog(&self.0, &session).await.map_err(status)?;
-        let paths = contracts
-            .into_iter()
-            .map(|contract| contract.path)
-            .collect();
-        Ok(Response::new(ListResponse { revision, paths }))
+// 原生执行链和传输层可能在同一次轮询中到期，统一返回协议的截止时间状态。
+pub(super) fn invocation_result<T>(
+    result: Result<T, RuntimeError>,
+    deadline: Option<Instant>,
+) -> Result<T, Status> {
+    if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        return Err(Status::deadline_exceeded("能力调用超过截止时间"));
     }
-
-    async fn describe(
-        &self,
-        request: Request<DescribeRequest>,
-    ) -> Result<Response<DescribeResponse>, Status> {
-        let headers = request.metadata().clone().into_headers();
-        let session = access::session(&self.0, &headers).await.map_err(status)?;
-        let path = request.into_inner().path;
-        az_plugin_contract::validate_enhancement_path(&path)
-            .map_err(|_| Status::invalid_argument("增强路径无效"))?;
-        let (revision, contracts) = access::catalog(&self.0, &session).await.map_err(status)?;
-        let contract = contracts
-            .into_iter()
-            .find(|contract| contract.path == path)
-            .ok_or_else(|| Status::not_found("增强能力不可见或不存在"))?;
-        let revision = revision.ok_or_else(|| Status::not_found("增强未激活"))?;
-        let input_schema_json = serde_json::to_vec(&contract.input_schema)
-            .map_err(|_| Status::internal("编码增强输入契约失败"))?;
-        let output_schema_json = serde_json::to_vec(&contract.output_schema)
-            .map_err(|_| Status::internal("编码增强输出契约失败"))?;
-        Ok(Response::new(DescribeResponse {
-            revision,
-            path,
-            input_schema_json,
-            output_schema_json,
-        }))
-    }
-
-    async fn invoke(
-        &self,
-        request: Request<InvokeRequest>,
-    ) -> Result<Response<InvokeResponse>, Status> {
-        let deadline = request.extensions().get::<Deadline>().map(|value| value.0);
-        let headers = request.metadata().clone().into_headers();
-        let session = access::session(&self.0, &headers).await.map_err(status)?;
-        let request = request.into_inner();
-        let input = serde_json::from_slice(&request.input_json)
-            .map_err(|_| Status::invalid_argument("input_json 必须是完整 JSON 值"))?;
-        let response = access::invoke(
-            &self.0,
-            &session,
-            EnhancementRequest {
-                path: request.path,
-                input,
-            },
-            deadline,
-        )
-        .await
-        .map_err(status)?;
-        let output_json = serde_json::to_vec(&response.output)
-            .map_err(|_| Status::internal("编码增强结果失败"))?;
-        Ok(Response::new(InvokeResponse {
-            revision: response.revision,
-            output_json,
-        }))
-    }
+    result.map_err(status)
 }
 
-fn status(error: RuntimeError) -> Status {
+pub(super) fn status(error: RuntimeError) -> Status {
     match error.into_response().status() {
         StatusCode::UNAUTHORIZED => Status::unauthenticated("会话无效或已撤销"),
-        StatusCode::FORBIDDEN => Status::permission_denied("当前身份没有该增强能力权限"),
-        StatusCode::NOT_FOUND => Status::not_found("增强能力不存在"),
-        StatusCode::SERVICE_UNAVAILABLE => Status::unavailable("增强服务暂不可用"),
-        StatusCode::BAD_REQUEST => Status::failed_precondition("增强未激活、输入无效或执行失败"),
-        _ => Status::internal("增强服务调用失败"),
+        StatusCode::FORBIDDEN => Status::permission_denied("当前身份没有该能力权限"),
+        StatusCode::NOT_FOUND => Status::not_found("能力不可见或不存在"),
+        StatusCode::SERVICE_UNAVAILABLE => Status::unavailable("能力服务暂不可用"),
+        StatusCode::BAD_REQUEST => Status::failed_precondition("能力未就绪、输入无效或执行失败"),
+        _ => Status::internal("能力服务调用失败"),
     }
 }

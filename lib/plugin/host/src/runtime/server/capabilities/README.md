@@ -4,6 +4,8 @@
 
 `CapabilitiesPlugin` 是可选 HTTP 目录适配器，提供 `GET /api/runtime/capabilities`，实时检查管理权限、租户成员及会话。它不依赖 `EnhancementServicePlugin`，目录可见性不授予执行权限。原有增强管理 API 继续由 `EnhancementsPlugin` 提供。
 
+`McpPlugin` 与 `GrpcPlugin` 可直接暴露此服务，无需增强服务、解释器或数据库。MCP 的 `runtime.*` 工具和 gRPC `aio.runtime.v1.Capabilities` 都从本次认证结果建立范围，执行要求逐项 `runtime:<path>` 权限；协议入口详情见[原生与增强协议](../protocols/README.md)。
+
 原生插件通过公共异步入口消费同一服务：
 
 ```rust,ignore
@@ -12,7 +14,7 @@ let invocation = state.capability_invocation(&scope, Some(deadline))?;
 let output = invocation.invoke("/v1/calculator/double", &input).await?;
 ```
 
-原生代码属于可信宿主，入口负责建立身份和显式授权；这里继续检查 `scope.grants.runtime`、租户可用性、成员及会话存活。无用户的租户后台调用不能使用要求交互会话的能力。`available` 是同步目录与授权快照查询，不能替代执行时的会话核验。`IdentityProvider` 可以在只使用目录的组合中省略，创建执行链时必须存在。
+原生代码属于可信宿主，入口负责建立身份和显式授权；这里继续检查 `scope.grants.runtime`、租户可用性、成员及会话存活。无用户的租户后台调用不能使用要求交互会话的能力。`catalog` 按引用迭代同一快照中获准且租户可用的契约，协议分页只复制当前页的 schema。`available` 是同步目录与授权快照查询，不能替代执行时的会话核验。`IdentityProvider` 可以在只使用目录的组合中省略，创建执行链时必须存在。
 
 Rhai/TypeScript 的 `call_capability` 仅在阻塞解释器线程桥接这个异步执行链。能力服务固定提供者和身份快照，所有克隆共用最多 64 次调用、1 MiB 累计输入输出、单值 64 KiB 与最多 30 秒总截止时间；调用者可以指定更短期限。脚本还保留自身的计算、嵌套和总传输预算。预算耗尽取消整条链，捕获错误或克隆不能重置额度。
 

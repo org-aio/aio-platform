@@ -4,8 +4,16 @@
 mod access;
 #[cfg(feature = "grpc")]
 pub(super) mod grpc;
+#[cfg(feature = "grpc")]
+mod grpc_capabilities;
+#[cfg(feature = "grpc")]
+mod grpc_enhancements;
 #[cfg(feature = "mcp")]
 pub(super) mod mcp;
+#[cfg(feature = "mcp")]
+mod mcp_catalog;
+#[cfg(feature = "mcp")]
+mod mcp_schema;
 #[cfg(all(
     test,
     feature = "mcp",

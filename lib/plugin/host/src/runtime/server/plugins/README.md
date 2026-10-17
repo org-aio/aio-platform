@@ -4,9 +4,9 @@
 
 `az-plugin-host` 的 `server` feature 编译宿主契约与平台服务，不引入内置语言、Wasm、Sidecar 或 MCP/gRPC 实现。`rhai` 和 `typescript` 分别增加解释器，`mcp` 和 `grpc` 分别增加入站协议，`remote-mcp` 和 `remote-grpc` 分别导入外部工具；`remote` 同时选择两个出站实现。`wasm` 增加 Wasmtime、v1 Wasm 产物验证及 `WasmPlugin` / `WasmComponentPlugin`；`sidecar` 增加监督器、进程 broker 及 `ProcessPlugin` / `SidecarPlugin`。应用交付完整组合时显式启用这些 feature，随后仍通过 Dill 选择实际装配的插件；独立 `aio-host` 和产品宿主均如此。
 
-精简 MCP/gRPC 宿主只编译所需协议和执行器。只启用 `mcp` 或 `grpc` 也可以由应用装配外部 `ScriptExecutor`；显式选择脚本运行时却没有执行器仍然启动失败。替代整包执行器只需 `server`：`ComponentExecutor`、中立请求类型和执行资源不会引用 Wasmtime 生成类型。关闭实现不会回退到内置执行器；缺失或歧义匹配在调用前被拒绝。
+精简 MCP/gRPC 宿主只编译所需协议；原生能力调用不要求执行器或数据库。要提供增强版本服务时，也可以由应用装配外部 `ScriptExecutor`；显式选择脚本运行时却没有执行器仍然启动失败。替代整包执行器只需 `server`：`ComponentExecutor`、中立请求类型和执行资源不会引用 Wasmtime 生成类型。关闭实现不会回退到内置执行器；缺失或歧义匹配在调用前被拒绝。
 
-`default_plugins()` 按已编译能力选择组合。纯 `server`、`wasm` 或 `sidecar` 默认组合不依赖增强服务；没有内置整包执行器时不注册组件资源和交付任务。自定义组合可显式选择外部实现。协议默认组合需要至少一种内置语言，定制协议宿主可以自行提供执行器。组件安装和调用不强制依赖任何脚本运行时；未装配增强服务时，增强调用明确失败。
+`default_plugins()` 按已编译能力选择组合。未选择内置语言的默认组合不依赖增强服务；没有内置整包执行器时不注册组件资源和交付任务。自定义组合可显式选择外部实现。只选择入站协议时默认提供原生能力入口；定制宿主选择增强服务时需自行装配执行器。组件安装和调用不强制依赖任何脚本运行时；未装配增强服务时，增强调用明确失败。
 
 v1 页面分发使用 `WasmExecutor` / `ProcessExecutor` 的 Dill 绑定。内置实现拥有资源初始化与停止钩子，替代实现也必须声明相应生命周期。v1 Wasm 仓库校验仍需 `wasm-validation`；关闭该 feature 明确拒绝该格式，不跳过产物验证。v2 整包的候选验证由所选 `ComponentExecutor` 完成。
 
@@ -124,7 +124,7 @@ host.shutdown().await?;
 
 在线变更不执行任意 TypeId 的远程管理。应用负责提供有授权、可审计的管理入口；不要在被排空的请求、后台任务或生命周期回调中等待 `reconfigure`、`restart` 或 `shutdown`。脚本增强仍通过正式版本、契约、租户和权限流程交付，不能直接改变原生组合。进程外的强制终止和宿主二进制切换仍属于独立监督器。
 
-验证入口：`plugins::live_tests` 覆盖真实 HTTP 下的替换、重启、卸载、依赖重建、单例/任务保留、容器弱引用失效、取消、启动/panic/路由故障恢复、恢复失败和停止失败。`protocols::tests::lifecycle` 保持真实 MCP/gRPC 客户端连接，重启 Rhai、TypeScript 和数据库、卸载/恢复 MCP，并确认持久版本与实时撤权仍生效。
+验证入口：`plugins::live_tests` 覆盖真实 HTTP 下的替换、重启、卸载、依赖重建、单例/任务保留、容器弱引用失效、取消、启动/panic/路由故障恢复、恢复失败和停止失败。`protocols::tests::lifecycle` 保持真实 MCP/gRPC 客户端连接，重启 Rhai、TypeScript 和数据库、卸载/恢复 MCP 和整个脚本/数据库组合，确认原生调用继续工作、持久增强版本和实时撤权仍生效。
 
 ## 声明异步资源
 
@@ -175,7 +175,7 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 
 `EnhancementServicePlugin` 将此运行时用于候选编译、样例重放与持久版本恢复，编译产物用于在线调用。自定义原生执行器属于可信宿主代码，必须自行保持状态隔离、资源上限与取消约定；脚本无法替换执行器或扩大权限。增强服务统一保留输入输出配额、并发额度、租户授权和原子版本激活。
 
-只有 `ScriptRuntimePlugin` 和语言插件的宿主可以使用无效数据库配置启动并执行纯计算。增加 `EnhancementServicePlugin` 后才需要数据库；MCP/gRPC 直接依赖此服务，不再通过组件资源间接初始化执行引擎。Wasm 与 Sidecar 的 v2 整包执行统一使用 `ComponentExecutor`，同样不要求选择默认实现。
+只有 `ScriptRuntimePlugin` 和语言插件的宿主可以使用无效数据库配置启动并执行纯计算。增加 `EnhancementServicePlugin` 后才需要数据库；MCP/gRPC 仅把该服务作为可选依赖；协议插件只强制要求独立能力服务与身份提供者，不通过组件资源初始化执行引擎。Wasm 与 Sidecar 的 v2 整包执行统一使用 `ComponentExecutor`，同样不要求选择默认实现。
 
 ## 整包执行器
 

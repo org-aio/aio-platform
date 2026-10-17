@@ -1,6 +1,6 @@
 use std::{
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Instant,
@@ -24,6 +24,8 @@ pub const PATH: &str = "/v1/native/execute";
 pub struct Identity {
     pub revoked: AtomicBool,
     pub removed: AtomicBool,
+    pub runtime_revoked: AtomicBool,
+    pub additional_paths: Vec<String>,
 }
 
 #[async_trait::async_trait]
@@ -46,10 +48,16 @@ impl IdentityProvider for Identity {
             display_name: "User".into(),
             tenant_id: if actor == "other" { "other" } else { "test" }.into(),
             tenant_label: "Test".into(),
-            permissions: if actor == "limited" {
-                vec![]
-            } else {
-                vec!["plugin:manage".into()]
+            permissions: match actor {
+                "capable" | "other" if !self.runtime_revoked.load(Ordering::SeqCst) => {
+                    std::iter::once(PATH.to_owned())
+                        .chain(self.additional_paths.iter().cloned())
+                        .map(|path| format!("runtime:{path}"))
+                        .chain((actor == "other").then(|| "plugin:manage".into()))
+                        .collect()
+                }
+                "manager" => vec!["plugin:manage".into()],
+                _ => vec![],
             },
         }))
     }
@@ -103,6 +111,7 @@ pub struct Probe {
     pub calls: AtomicUsize,
     pub active: AtomicUsize,
     pub entered: tokio::sync::Notify,
+    pub scopes: Mutex<Vec<InvocationScope>>,
 }
 
 struct Active(Arc<Probe>);
@@ -135,6 +144,11 @@ impl CapabilityProvider for Provider {
     async fn invoke(&self, request: &CapabilityRequest) -> Result<Value> {
         assert!(Instant::now() < request.deadline());
         assert_eq!(request.session()?.tenant_id, "test");
+        self.0
+            .scopes
+            .lock()
+            .map_err(|_| anyhow::anyhow!("范围记录锁损坏"))?
+            .push(request.scope().clone());
         self.0.calls.fetch_add(1, Ordering::SeqCst);
         self.0.active.fetch_add(1, Ordering::SeqCst);
         let _active = Active(self.0.clone());

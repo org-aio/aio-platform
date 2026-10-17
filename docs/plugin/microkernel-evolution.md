@@ -78,7 +78,7 @@ Sidecar 通过已有 broker socket 向 `POST /enhancements/invoke` 发送：
 
 ## Rhai 与 TypeScript
 
-语言实现通过 Dill 注入的 `ScriptExecutor` 编译成 `ScriptProgram`，包验证与调用分发不再包含语言实现分支。默认实现分别由 `rhai`/`typescript` Cargo feature 编译，再由 `RhaiPlugin`、`TypeScriptPlugin` 装配；`ScriptRuntimePlugin` 不依赖数据库或组件存储。能力目录与调用由独立 `CapabilityServicePlugin` 持有，原生异步入口无需任何脚本执行器；可选 `CapabilitiesPlugin` 单独提供 HTTP 能力目录。`EnhancementServicePlugin` 单独持有持久化与版本服务，MCP/gRPC 无需初始化整个组件执行环境。入站 `mcp`、`grpc` 与出站 `remote-mcp`、`remote-grpc` 分别编译，不强制引入任何语言实现；仅组件/Sidecar 组合可完全省略增强服务。原生执行器替换仍通过受控宿主装配完成，不由候选脚本自行注册。
+语言实现通过 Dill 注入的 `ScriptExecutor` 编译成 `ScriptProgram`，包验证与调用分发不再包含语言实现分支。默认实现分别由 `rhai`/`typescript` Cargo feature 编译，再由 `RhaiPlugin`、`TypeScriptPlugin` 装配；`ScriptRuntimePlugin` 不依赖数据库或组件存储。能力目录与调用由独立 `CapabilityServicePlugin` 持有，原生异步入口无需任何脚本执行器；可选 `CapabilitiesPlugin` 单独提供 HTTP 能力目录。`EnhancementServicePlugin` 单独持有持久化与版本服务，MCP/gRPC 无需初始化整个组件执行环境。入站 `mcp`、`grpc` 与出站 `remote-mcp`、`remote-grpc` 分别编译，不强制引入任何语言实现；原生协议、组件/Sidecar 组合均可完全省略增强服务；入站原生协议无需任何解释器或数据库。原生执行器替换仍通过受控宿主装配完成，不由候选脚本自行注册。
 
 - Rhai 使用嵌入式引擎，关闭模块和动态 eval，限制操作数、调用深度、表达式深度、变量、函数及容器大小。
 - TypeScript 使用 Oxc 的 AST 转译，然后在 QuickJS 的独立上下文执行；不安装模块加载器、Node、文件或网络 API，拒绝外部模块声明和 Promise 返回值。
@@ -103,10 +103,10 @@ cargo run -p az-plugin-enhancement --example verify -- \
 | --- | --- | --- |
 | Sidecar | 原生依赖、长任务、进程隔离和独立重启 | 复用现有 process supervisor/broker，已接入同一增强服务 |
 | WIT | Wasm 与宿主之间的类型边界 | 已增加通用增强调用接口 |
-| MCP | 给 AI 提供工具发现和执行 | 官方 SDK 的 Streamable HTTP 已接入增强；工具发现提供业务输入及输出 schema；已授权演进脚本可以调用统一版本服务 |
-| gRPC | 有类型的跨进程/跨机器通信 | Tonic 与生成的 Protobuf 契约已接入增强发现、Describe 契约查询、执行、消息限额和截止时间；当前为 unary |
+| MCP | 给 AI 提供工具发现和执行 | 官方 SDK 的 Streamable HTTP 已接入原生能力与增强；原生目录有分页和大小限制；工具发现提供业务输入及输出 schema；已授权演进脚本可以调用统一版本服务 |
+| gRPC | 有类型的跨进程/跨机器通信 | Tonic 与生成的 Protobuf 契约已接入原生能力及增强发现、Describe 契约查询、执行、消息限额和截止时间；当前为 unary |
 
-MCP 和 gRPC 适配器消费同一份增强目录、请求响应与版本服务，不保存另一套活动指针，也不允许调用方自报租户。MCP 的工具发现不是授权；gRPC 的类型正确不代表权限正确。Sidecar 是执行边界，可以承载 MCP 或 gRPC 服务，但宿主仍决定哪些能力能被调用。接入方式、权限和真实客户端验收见 [协议入口](../../lib/plugin/host/src/runtime/server/protocols/README.md)。外部 MCP 工具与描述文件定义的 unary gRPC 方法现可通过可选 `RemoteCapabilitiesPlugin` 导入，配置租户、地址或本机 stdio 命令、契约和凭据环境变量名。导入者与协议入口共用同一能力层；两种语言均通过 `call_capability` 消费，原生插件可通过 `CapabilityInvocation::invoke` 异步消费。仅出站协议组合不安装脚本或增强服务。真实验收与配置见 [外部能力](../../lib/plugin/host/src/runtime/server/remote/README.md)。启动导入及部署文件在线变更已实现：候选整批校验后原子发布，拒绝更新保留旧版，调用链持有不可变能力快照。stdio 握手与调用由插件任务管理，取消和停止会回收进程组，已完成 Linux 实测；macOS/Windows 运行验收、streaming 和 MCP 交互/后台任务尚待完成。
+MCP 和 gRPC 适配器消费同一份原生能力服务及可选增强版本服务，不保存另一套活动指针，也不允许调用方自报租户。MCP 的工具发现不是授权；gRPC 的类型正确不代表权限正确。Sidecar 是执行边界，可以承载 MCP 或 gRPC 服务，但宿主仍决定哪些能力能被调用。接入方式、权限和真实客户端验收见 [协议入口](../../lib/plugin/host/src/runtime/server/protocols/README.md)。外部 MCP 工具与描述文件定义的 unary gRPC 方法现可通过可选 `RemoteCapabilitiesPlugin` 导入，配置租户、地址或本机 stdio 命令、契约和凭据环境变量名。导入者与协议入口共用同一能力层；两种语言均通过 `call_capability` 消费，原生插件可通过 `CapabilityInvocation::invoke` 异步消费。仅出站协议组合不安装脚本或增强服务。真实验收与配置见 [外部能力](../../lib/plugin/host/src/runtime/server/remote/README.md)。启动导入及部署文件在线变更已实现：候选整批校验后原子发布，拒绝更新保留旧版，调用链持有不可变能力快照。stdio 握手与调用由插件任务管理，取消和停止会回收进程组，已完成 Linux 实测；macOS/Windows 运行验收、streaming 和 MCP 交互/后台任务尚待完成。
 
 ## 下一层改进的验收门槛
 

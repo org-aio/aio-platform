@@ -6,7 +6,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.protoc_executable(protoc_bin_vendored::protoc_bin_path()?);
         tonic_prost_build::configure().compile_with_config(
             config,
-            &["proto/enhancements.proto"],
+            &["proto/enhancements.proto", "proto/capabilities.proto"],
             &["proto"],
         )?;
     }

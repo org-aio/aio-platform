@@ -174,7 +174,15 @@ async fn exercise(fixture: &Fixture) -> Result<()> {
     let mcp = mcp_client(&fixture.base, "capable").await?;
     let manager = mcp_client(&fixture.base, "manager").await?;
     let mut grpc = EnhancementsClient::connect(fixture.base.clone()).await?;
-    assert_eq!(mcp.list_all_tools().await?.len(), 2);
+    let tools = mcp.list_all_tools().await?;
+    assert_eq!(tools.len(), 6);
+    assert_eq!(
+        tools
+            .iter()
+            .filter(|tool| tool.name.starts_with("runtime."))
+            .count(),
+        4
+    );
     assert!(manager.list_all_tools().await?.is_empty());
     assert_eq!(
         manager

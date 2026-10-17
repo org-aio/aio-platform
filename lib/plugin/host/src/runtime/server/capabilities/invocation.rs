@@ -11,7 +11,7 @@ use az_plugin_contract::InvocationScope;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
-use super::{CapabilityRequest, RuntimeCapabilities, catalog::CapabilityRoutes};
+use super::{CapabilityRequest, RuntimeCapabilities, RuntimeCapability, catalog::CapabilityRoutes};
 use crate::runtime::server::plugins::PluginTasks;
 use crate::{identity::IdentityProvider, runtime::server::RuntimeState};
 
@@ -75,6 +75,17 @@ impl RuntimeCapabilities {
 }
 
 impl CapabilityInvocation {
+    /// 返回此执行快照中获显式授权且租户可用的契约；执行仍会再次核验会话。
+    pub fn catalog(&self) -> Result<impl Iterator<Item = &RuntimeCapability>> {
+        self.check()?;
+        Ok(self
+            .0
+            .routes
+            .values()
+            .filter(|route| self.available(&route.capability.path))
+            .map(|route| &route.capability))
+    }
+
     pub fn cancel(&self) {
         self.0.cancellation.cancel();
     }

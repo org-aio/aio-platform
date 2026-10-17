@@ -5,8 +5,8 @@ use az_plugin_contract::{
 use az_plugin_enhancement::EnhancementContract;
 
 use super::super::{
-    RuntimeState, enhancements::Enhancements, http_error::RuntimeError,
-    request_context::authenticate,
+    RuntimeState, capabilities::CapabilityInvocation, enhancements::Enhancements,
+    http_error::RuntimeError, request_context::authenticate,
 };
 use crate::identity::SessionContext;
 
@@ -45,8 +45,10 @@ pub(super) async fn catalog(
     state: &RuntimeState,
     session: &SessionContext,
 ) -> Result<(Option<String>, Vec<EnhancementContract>), RuntimeError> {
-    let (revision, contracts) = state
-        .service::<Enhancements>()?
+    let Some(enhancements) = state.optional_service::<Enhancements>()? else {
+        return Ok((None, vec![]));
+    };
+    let (revision, contracts) = enhancements
         .catalog(
             &session.tenant_id,
             |path| permitted(session, path),
@@ -74,8 +76,43 @@ pub(super) async fn invoke(
     if revision.is_some() && !grants.contains(&request.path) {
         return Err(RuntimeError::forbidden("当前身份缺少增强依赖权限"));
     }
+    let mut scope = scope(session);
+    scope.grants.enhancements = grants;
+    let enhancements = state
+        .optional_service::<Enhancements>()?
+        .ok_or_else(|| RuntimeError::not_found("宿主未安装增强服务"))?;
+    Ok(enhancements.invoke(&scope, request, deadline).await?)
+}
+
+/// 原生入口的范围只取自本次认证结果，管理增强的权限不能扩大 runtime 授权。
+pub(super) fn capability_invocation(
+    state: &RuntimeState,
+    session: &SessionContext,
+    deadline: Option<std::time::Instant>,
+) -> Result<CapabilityInvocation, RuntimeError> {
+    Ok(state.capability_invocation(&scope(session), deadline)?)
+}
+
+pub(super) async fn invoke_capability(
+    state: &RuntimeState,
+    session: &SessionContext,
+    request: EnhancementRequest,
+    deadline: Option<std::time::Instant>,
+) -> Result<serde_json::Value, RuntimeError> {
+    az_plugin_contract::validate_enhancement_path(&request.path)?;
+    if !permitted_capability(session, &request.path) {
+        return Err(RuntimeError::forbidden("当前身份没有该宿主能力权限"));
+    }
+    let invocation = capability_invocation(state, session, deadline)?;
+    if !invocation.available(&request.path) {
+        return Err(RuntimeError::not_found("宿主能力不可见或不存在"));
+    }
+    Ok(invocation.invoke(&request.path, &request.input).await?)
+}
+
+fn scope(session: &SessionContext) -> InvocationScope {
     // 外部用户调用明确标识为用户来源，不能伪装成已安装插件来借用包能力。
-    let scope = InvocationScope {
+    InvocationScope {
         source_id: format!("user:{}", session.user_id),
         revision: String::new(),
         context: RequestContext {
@@ -85,7 +122,6 @@ pub(super) async fn invoke(
             request_id: uuid::Uuid::new_v4().to_string(),
         },
         grants: CapabilityGrants {
-            enhancements: grants,
             runtime: session
                 .permissions
                 .iter()
@@ -93,9 +129,5 @@ pub(super) async fn invoke(
                 .collect(),
             ..Default::default()
         },
-    };
-    Ok(state
-        .service::<Enhancements>()?
-        .invoke(&scope, request, deadline)
-        .await?)
+    }
 }

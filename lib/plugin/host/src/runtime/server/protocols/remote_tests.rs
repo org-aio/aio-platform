@@ -4,7 +4,9 @@ use std::{
 };
 
 use anyhow::{Context, Result, ensure};
-use az_plugin_contract::grpc::{InvokeRequest, enhancements_client::EnhancementsClient};
+use az_plugin_contract::grpc::{
+    InvokeRequest, capabilities_client::CapabilitiesClient, enhancements_client::EnhancementsClient,
+};
 use az_plugin_enhancement::Package;
 use serde_json::{Value, json};
 
@@ -84,6 +86,37 @@ async fn exercise(fixture: &Fixture, remote: &Upstream) -> Result<()> {
     let manager = mcp_client(&fixture.base, "manager").await?;
     let other = mcp_client(&fixture.base, "other").await?;
     let mut grpc = EnhancementsClient::connect(fixture.base.clone()).await?;
+    let mut native = CapabilitiesClient::connect(fixture.base.clone()).await?;
+    // 尚未发布任何脚本时，两种入站协议已经可以直接调用两种真实上游。
+    for protocol in ["mcp", "grpc"] {
+        let result = native
+            .invoke(auth(
+                InvokeRequest {
+                    path: format!("/v1/remote/{protocol}"),
+                    input_json: serde_json::to_vec(&json!({"value":21}))?,
+                },
+                "remote",
+            )?)
+            .await?
+            .into_inner();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&result.output_json)?,
+            json!({"value":42})
+        );
+        let result = mcp
+            .call_tool(
+                rmcp::model::CallToolRequestParams::new(format!("runtime.v1.remote.{protocol}"))
+                    .with_arguments(serde_json::Map::from_iter([(
+                        "input".into(),
+                        json!({"value":21}),
+                    )])),
+            )
+            .await?;
+        assert_eq!(
+            result.structured_content,
+            Some(json!({"output":{"value":42}}))
+        );
+    }
     let mut generation = 0;
     for protocol in ["mcp", "grpc"] {
         for typescript in [false, true] {
@@ -116,7 +149,15 @@ async fn exercise(fixture: &Fixture, remote: &Upstream) -> Result<()> {
                 before,
                 "候选验证不能调用真实远端"
             );
-            assert_eq!(mcp.list_all_tools().await?.len(), 1);
+            let tools = mcp.list_all_tools().await?;
+            assert_eq!(tools.len(), 3);
+            assert_eq!(
+                tools
+                    .iter()
+                    .filter(|tool| tool.name.starts_with("runtime."))
+                    .count(),
+                2
+            );
             assert!(manager.list_all_tools().await?.is_empty());
             assert!(other.list_all_tools().await?.is_empty());
             let response = grpc

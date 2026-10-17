@@ -188,7 +188,15 @@ async fn exercise_updates(fixture: &Fixture, first: &Upstream, second: &Upstream
                 new_calls,
                 "候选校验不能执行工具"
             );
-            assert_eq!(mcp.list_all_tools().await?.len(), 1);
+            let tools = mcp.list_all_tools().await?;
+            assert_eq!(tools.len(), 3);
+            assert_eq!(
+                tools
+                    .iter()
+                    .filter(|tool| tool.name.starts_with("runtime."))
+                    .count(),
+                2
+            );
             let response = grpc
                 .invoke(auth(invoke(json!({"value":7}))?, "remote")?)
                 .await?

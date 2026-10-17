@@ -13,7 +13,7 @@ use crate::generated::{clipboard, personal_config, worker, worker_webview};
 
 // 每项能力声明自己的服务、路由和具体类型依赖；宏只展开同一套注册步骤。
 macro_rules! route_plugin {
-    ($name:ident, [$($dependency:ty),*], [$($required:ty),*], |$state:pat_param| $routes:expr) => {
+    ($name:ident, [$($dependency:ty),*], [$($required:ty),*], $(optional [$($optional:ty),*],)? |$state:pat_param| $routes:expr) => {
         /// 向宿主贡献该能力的服务与路由，由应用装配层决定是否安装。
         #[dill::component]
         #[dill::interface(dyn Plugin<RuntimeAssembly>)]
@@ -28,6 +28,7 @@ macro_rules! route_plugin {
                 Box::pin(async move {
                     assembly.require_service::<dyn crate::identity::IdentityProvider>();
                     $(assembly.require_service::<$required>();)*
+                    $($(assembly.optional_service::<$optional>();)*)?
                     assembly.add_routes(|$state| Ok($routes));
                     Ok(())
                 })
@@ -46,13 +47,21 @@ route_plugin!(CapabilitiesPlugin, [CapabilityServicePlugin], [], |_| {
     super::super::capabilities::router()
 });
 #[cfg(feature = "mcp")]
-route_plugin!(McpPlugin, [EnhancementServicePlugin], [], |state| {
-    super::super::protocols::mcp::router(state.clone())
-});
+route_plugin!(
+    McpPlugin,
+    [CapabilityServicePlugin],
+    [],
+    optional[super::super::enhancements::Enhancements],
+    |state| super::super::protocols::mcp::router(state.clone())
+);
 #[cfg(feature = "grpc")]
-route_plugin!(GrpcPlugin, [EnhancementServicePlugin], [], |state| {
-    super::super::protocols::grpc::router(state.clone())
-});
+route_plugin!(
+    GrpcPlugin,
+    [CapabilityServicePlugin],
+    [],
+    optional[super::super::enhancements::Enhancements],
+    |state| super::super::protocols::grpc::router(state.clone())?
+);
 route_plugin!(BootstrapPlugin, [StorePlugin], [], |_| {
     super::super::bootstrap::router()
 });
@@ -236,13 +245,8 @@ pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
     catalog.add::<RhaiPlugin>();
     #[cfg(feature = "typescript")]
     catalog.add::<TypeScriptPlugin>();
-    // 协议默认组合仍需执行器；只编译协议的定制宿主应显式装配外部执行器。
-    #[cfg(any(
-        feature = "rhai",
-        feature = "typescript",
-        feature = "mcp",
-        feature = "grpc"
-    ))]
+    // 仅装配协议时暴露原生能力；脚本版本服务由所选执行器独立引入。
+    #[cfg(any(feature = "rhai", feature = "typescript"))]
     catalog
         .add::<ScriptRuntimePlugin>()
         .add::<EnhancementServicePlugin>()
