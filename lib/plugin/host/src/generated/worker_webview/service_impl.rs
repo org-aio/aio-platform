@@ -44,23 +44,26 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
         device: &DeviceIdentity,
         enabled: bool,
         headless: bool,
-        runtime: WebviewRuntime,
+        runtime: &WebviewRuntime,
     ) -> Result<(), RuntimeError> {
         let _guard = self.lifecycle.lock().await;
-        // 每个运行时独立撤权，dsh 不得修改 Codex 的能力位。
-        match runtime {
-            WebviewRuntime::Codex => {
-                sqlx::query("UPDATE worker_devices SET capabilities=(capabilities-'codex.web'-'codex.cli') || CASE WHEN $2 AND $3 THEN '[\"codex.web\",\"codex.cli\"]'::jsonb WHEN $2 THEN '[\"codex.web\"]'::jsonb ELSE '[]'::jsonb END WHERE id=$1 AND state='active'")
-                    .bind(&device.id).bind(enabled).bind(headless).execute(&self.pool).await?;
+        super::protocol::validate_runtime(runtime)?;
+        let controlled: Vec<_> = std::iter::once(runtime.capability.clone())
+            .chain(runtime.headless_capability.iter().cloned())
+            .collect();
+        let mut granted = Vec::new();
+        if enabled {
+            granted.push(runtime.capability.clone());
+            if headless {
+                granted.extend(runtime.headless_capability.iter().cloned());
             }
-            WebviewRuntime::Dsh => {
-                sqlx::query("UPDATE worker_devices SET capabilities=(capabilities-'dsh.web') || CASE WHEN $2 THEN '[\"dsh.web\"]'::jsonb ELSE '[]'::jsonb END WHERE id=$1 AND state='active'")
-                    .bind(&device.id).bind(enabled).execute(&self.pool).await?;
-            }
-            WebviewRuntime::Tunnel => {
-                sqlx::query("UPDATE worker_devices SET capabilities=(capabilities-'tunnel.connect') || CASE WHEN $2 THEN '[\"tunnel.connect\"]'::jsonb ELSE '[]'::jsonb END WHERE id=$1 AND state='active'")
-                    .bind(&device.id).bind(enabled).execute(&self.pool).await?;
-            }
+        }
+        // 只替换该协议明确拥有的能力，不能覆盖同设备上其他插件的授权。
+        let changed = sqlx::query("UPDATE worker_devices SET capabilities=(capabilities-$2::text[]) || $3::jsonb WHERE id=$1 AND tenant_id=$4 AND user_id=$5 AND state='active'")
+            .bind(&device.id).bind(controlled).bind(serde_json::to_value(granted)?)
+            .bind(&device.tenant).bind(&device.user).execute(&self.pool).await?.rows_affected();
+        if changed != 1 {
+            return Err(RuntimeError::forbidden("设备归属无效或已撤销"));
         }
         if !enabled {
             let ids: Vec<String> = self
@@ -68,7 +71,7 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
                 .lock()
                 .map_err(|_| RuntimeError::unavailable("视图状态不可用"))?
                 .iter()
-                .filter(|(_, view)| view.worker == device.id && view.runtime == runtime)
+                .filter(|(_, view)| view.worker == device.id && &view.runtime == runtime)
                 .map(|(id, _)| id.clone())
                 .collect();
             for id in ids {
@@ -84,7 +87,7 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
 
     async fn devices(&self, owner: &ViewOwner) -> Result<Vec<Worker>, RuntimeError> {
         let rows = sqlx::query("SELECT id,label,platform,capabilities FROM worker_devices WHERE tenant_id=$1 AND user_id=$2 AND state='active' AND capabilities ? $3 ORDER BY created_at DESC LIMIT 100")
-            .bind(&owner.tenant).bind(&owner.user).bind(owner.runtime.capability()).fetch_all(&self.pool).await?;
+            .bind(&owner.tenant).bind(&owner.user).bind(&owner.runtime.capability).fetch_all(&self.pool).await?;
         let peers = self
             .peers
             .lock()
@@ -112,10 +115,11 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
         route: &str,
     ) -> Result<String, RuntimeError> {
         let _guard = self.lifecycle.lock().await;
+        super::protocol::validate_runtime(&owner.runtime)?;
         util::route(route)?;
         uuid::Uuid::parse_str(device)?;
         let active: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM worker_devices WHERE id=$1 AND tenant_id=$2 AND user_id=$3 AND state='active' AND capabilities ? $4)")
-            .bind(device).bind(&owner.tenant).bind(&owner.user).bind(owner.runtime.capability()).fetch_one(&self.pool).await?;
+            .bind(device).bind(&owner.tenant).bind(&owner.user).bind(&owner.runtime.capability).fetch_one(&self.pool).await?;
         if !active
             || !self
                 .peers
@@ -146,8 +150,8 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
             return Err(RuntimeError::conflict("该设备的网页连接已满"));
         }
         let id = uuid::Uuid::new_v4().to_string();
-        sqlx::query("INSERT INTO worker_webview_sessions(id,worker_id,tenant_id,user_id,session_id,source_id,revision,mount_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8)")
-            .bind(&id).bind(device).bind(&owner.tenant).bind(&owner.user).bind(&owner.session).bind(&owner.source).bind(&owner.revision).bind(util::digest(&owner.mount)).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO worker_webview_sessions(id,worker_id,tenant_id,user_id,session_id,source_id,revision,mount_digest,runtime) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)")
+            .bind(&id).bind(device).bind(&owner.tenant).bind(&owner.user).bind(&owner.session).bind(&owner.source).bind(&owner.revision).bind(util::digest(&owner.mount)).bind(serde_json::to_value(&owner.runtime)?).execute(&mut *tx).await?;
         tx.commit().await?;
         for id in old {
             self.close_channel(&id)?;
@@ -161,7 +165,7 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
                 id.clone(),
                 ViewChannel {
                     worker: device.into(),
-                    runtime: owner.runtime,
+                    runtime: owner.runtime.clone(),
                     sender,
                     receiver: Some(receiver),
                     budget: Arc::new(Semaphore::new(32 * 1024 * 1024)),
@@ -170,7 +174,7 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
             );
         if let Err(error) = self.send(
             device,
-            json!({"kind":"open","sessionId":id,"route":route,"runtime":owner.runtime}),
+            json!({"kind":"open","sessionId":id,"route":route,"runtime":owner.runtime.protocol}),
         ) {
             self.close(owner, &id).await?;
             return Err(error);
@@ -180,16 +184,16 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
 
     async fn authorize(&self, owner: &ViewOwner, id: &str) -> Result<String, RuntimeError> {
         uuid::Uuid::parse_str(id)?;
-        sqlx::query_scalar("SELECT v.worker_id FROM worker_webview_sessions v JOIN worker_devices w ON w.id=v.worker_id WHERE v.id=$1 AND v.tenant_id=$2 AND v.user_id=$3 AND v.session_id=$4 AND v.source_id=$5 AND v.revision=$6 AND v.mount_digest=$7 AND v.state!='closed' AND v.expires_at>now() AND w.state='active' AND w.tenant_id=v.tenant_id AND w.user_id=v.user_id AND w.capabilities ? $8")
-            .bind(id).bind(&owner.tenant).bind(&owner.user).bind(&owner.session).bind(&owner.source).bind(&owner.revision).bind(util::digest(&owner.mount)).bind(owner.runtime.capability())
+        sqlx::query_scalar("SELECT v.worker_id FROM worker_webview_sessions v JOIN worker_devices w ON w.id=v.worker_id WHERE v.id=$1 AND v.tenant_id=$2 AND v.user_id=$3 AND v.session_id=$4 AND v.source_id=$5 AND v.revision=$6 AND v.mount_digest=$7 AND v.state!='closed' AND v.expires_at>now() AND w.state='active' AND w.tenant_id=v.tenant_id AND w.user_id=v.user_id AND w.capabilities ? $8 AND v.runtime=$9")
+            .bind(id).bind(&owner.tenant).bind(&owner.user).bind(&owner.session).bind(&owner.source).bind(&owner.revision).bind(util::digest(&owner.mount)).bind(&owner.runtime.capability).bind(serde_json::to_value(&owner.runtime)?)
             .fetch_optional(&self.pool).await?.ok_or_else(|| RuntimeError::forbidden("网页连接已过期或设备授权已撤销"))
     }
 
     async fn renew(&self, owner: &ViewOwner, id: &str) -> Result<(), RuntimeError> {
         uuid::Uuid::parse_str(id)?;
         // 在同一次更新中检查有效期、归属和设备授权，禁止复活已失效的视图。
-        let renewed = sqlx::query("UPDATE worker_webview_sessions v SET expires_at=now()+interval '30 minutes' FROM worker_devices w WHERE w.id=v.worker_id AND v.id=$1 AND v.tenant_id=$2 AND v.user_id=$3 AND v.session_id=$4 AND v.source_id=$5 AND v.revision=$6 AND v.mount_digest=$7 AND v.state='active' AND v.expires_at>now() AND w.state='active' AND w.tenant_id=v.tenant_id AND w.user_id=v.user_id AND w.capabilities ? $8")
-            .bind(id).bind(&owner.tenant).bind(&owner.user).bind(&owner.session).bind(&owner.source).bind(&owner.revision).bind(util::digest(&owner.mount)).bind(owner.runtime.capability())
+        let renewed = sqlx::query("UPDATE worker_webview_sessions v SET expires_at=now()+interval '30 minutes' FROM worker_devices w WHERE w.id=v.worker_id AND v.id=$1 AND v.tenant_id=$2 AND v.user_id=$3 AND v.session_id=$4 AND v.source_id=$5 AND v.revision=$6 AND v.mount_digest=$7 AND v.state='active' AND v.expires_at>now() AND w.state='active' AND w.tenant_id=v.tenant_id AND w.user_id=v.user_id AND w.capabilities ? $8 AND v.runtime=$9")
+            .bind(id).bind(&owner.tenant).bind(&owner.user).bind(&owner.session).bind(&owner.source).bind(&owner.revision).bind(util::digest(&owner.mount)).bind(&owner.runtime.capability).bind(serde_json::to_value(&owner.runtime)?)
             .execute(&self.pool).await?.rows_affected();
         if renewed != 1 {
             return Err(RuntimeError::forbidden("网页连接已过期或设备授权已撤销"));
@@ -200,9 +204,11 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
     async fn register(
         &self,
         device: &DeviceIdentity,
+        capabilities: &[String],
     ) -> Result<(String, mpsc::Receiver<Value>), RuntimeError> {
         let _guard = self.lifecycle.lock().await;
-        let enabled: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM worker_devices WHERE id=$1 AND state='active' AND (capabilities ? 'codex.web' OR capabilities ? 'dsh.web' OR capabilities ? 'tunnel.connect'))").bind(&device.id).fetch_one(&self.pool).await?;
+        let enabled: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM worker_devices WHERE id=$1 AND tenant_id=$3 AND user_id=$4 AND state='active' AND capabilities ?| $2::text[])")
+            .bind(&device.id).bind(capabilities).bind(&device.tenant).bind(&device.user).fetch_one(&self.pool).await?;
         if !enabled {
             return Err(RuntimeError::forbidden("设备未启用网页访问"));
         }
@@ -399,8 +405,8 @@ impl WorkerWebviewService for WorkerWebviewServiceImpl {
 
     async fn close(&self, owner: &ViewOwner, id: &str) -> Result<(), RuntimeError> {
         // 关闭操作也验证归属，允许重复关闭本人的连接。
-        let worker: Option<String> = sqlx::query_scalar("UPDATE worker_webview_sessions SET state='closed' WHERE id=$1 AND tenant_id=$2 AND user_id=$3 AND mount_digest=$4 AND session_id=$5 AND source_id=$6 AND revision=$7 RETURNING worker_id")
-            .bind(id).bind(&owner.tenant).bind(&owner.user).bind(util::digest(&owner.mount)).bind(&owner.session).bind(&owner.source).bind(&owner.revision).fetch_optional(&self.pool).await?;
+        let worker: Option<String> = sqlx::query_scalar("UPDATE worker_webview_sessions SET state='closed' WHERE id=$1 AND tenant_id=$2 AND user_id=$3 AND mount_digest=$4 AND session_id=$5 AND source_id=$6 AND revision=$7 AND runtime=$8 RETURNING worker_id")
+            .bind(id).bind(&owner.tenant).bind(&owner.user).bind(util::digest(&owner.mount)).bind(&owner.session).bind(&owner.source).bind(&owner.revision).bind(serde_json::to_value(&owner.runtime)?).fetch_optional(&self.pool).await?;
         let worker = worker.ok_or_else(|| RuntimeError::forbidden("视图不属于此挂载"))?;
         let _ = self.send(&worker, json!({"kind":"close","sessionId":id}));
         self.close_channel(id)

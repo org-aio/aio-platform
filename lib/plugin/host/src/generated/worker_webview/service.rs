@@ -15,7 +15,7 @@ pub trait WorkerWebviewService: std::any::Any + Send + Sync {
         device: &DeviceIdentity,
         enabled: bool,
         headless: bool,
-        runtime: WebviewRuntime,
+        runtime: &WebviewRuntime,
     ) -> Result<(), RuntimeError>;
     async fn devices(&self, owner: &ViewOwner) -> Result<Vec<Worker>, RuntimeError>;
     async fn create(
@@ -30,6 +30,7 @@ pub trait WorkerWebviewService: std::any::Any + Send + Sync {
     async fn register(
         &self,
         device: &DeviceIdentity,
+        capabilities: &[String],
     ) -> Result<(String, mpsc::Receiver<Value>), RuntimeError>;
     async fn expire(&self, device: &str) -> Result<(), RuntimeError>;
     async fn unregister(&self, device: &str, generation: &str);

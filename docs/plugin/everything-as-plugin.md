@@ -12,6 +12,7 @@
 - 原生应用插件通过 TypeId 校验重复、缺失依赖和循环；在任何插件构建前完成依赖图检查，并按依赖关系排序。
 - `az-plugin-core` 关闭默认 feature 后只保留插件装配及 Dill，不强制引入 HTTP、PostgreSQL 或业务记录实现。
 - 宿主的 14 个能力组拥有各自路由；设备、设备视图、剪贴板、个人配置服务由插件注册，运行时及 sidecar 共享同一 Dill 容器。
+- 配对设备通道通过 Dill 聚合 `WebviewProtocolProvider`，Codex/dsh 和内网服务协议由 device 插件声明，宿主不维护固定枚举。会话绑定完整协议和权限契约；缺失、冲突或歧义声明被拒绝。增删 Provider 会重建路由并取消、排空旧连接；真实 HTTP/WebSocket/PostgreSQL 覆盖卸载后的断线与重新安装恢复。内网目标白名单、独立来源网关及目录归 device 插件；目前是本人账号的 HTTP/HTTPS、WebSocket 和 SSE 中继，未提供通用 TCP/UDP 或匿名分享。
 - MCP Streamable HTTP 与 gRPC unary 由独立插件提供；原生能力入口只要求能力服务和身份，不要求增强服务、执行器或数据库。MCP 使用 `runtime.*` 名称区分权限域并限制分页大小，gRPC 使用 `aio.runtime.v1.Capabilities`；原生结果不伪造脚本 revision。真实客户端共用增强版本、升级、回滚、权限与撤权检查。可选 `remote` feature 将外部 MCP 工具和 FileDescriptorSet 描述的 unary gRPC 方法导入同一能力层，支持双语言消费、租户绑定、schema 校验、短截止时间、取消和重启恢复。部署文件可在线更新，候选完整校验后原子发布，执行中的脚本固定使用同一能力快照。
 - 外部 MCP stdio 复用相同工具与能力契约，部署方声明本机命令及环境变量映射。Linux 真实进程覆盖受限输出、握手、发现、取消、并发配额、停止和进程组回收；进程创建纳入插件任务作用域，整批本地配置通过校验后才启动。它是受信任程序的连接方式，系统沙箱仍由 Sidecar 承担。
 - 产品同时关闭 Rhai/TypeScript 时自动移除脚本、增强及演进服务，MCP/gRPC 原生能力保留。重新启用语言不改变持久增强摘要和激活代数；只恢复不匹配语言或缺少混合包任一语言时，整包暂停发现与执行，原生目录不受影响。缺失 gRPC 服务返回协议级 Unimplemented；数据库、摘要和编译错误仍暴露。演进控制保留部署开关，不会擅自重新启用。

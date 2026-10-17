@@ -13,3 +13,6 @@ CREATE TABLE IF NOT EXISTS worker_webview_sessions (
 );
 CREATE INDEX IF NOT EXISTS worker_webview_owner ON worker_webview_sessions(tenant_id,user_id,mount_digest,state);
 CREATE INDEX IF NOT EXISTS worker_webview_expiry ON worker_webview_sessions(expires_at);
+
+-- 旧记录没有协议契约时不能再授权；设备重连仍统一关闭旧会话。
+ALTER TABLE worker_webview_sessions ADD COLUMN IF NOT EXISTS runtime JSONB;

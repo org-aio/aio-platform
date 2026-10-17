@@ -77,7 +77,34 @@ route_plugin!(
 route_plugin!(WorkersPlugin, [], [dyn worker::WorkerService], |_| {
     worker::controller::router()
 });
-route_plugin!(WorkerWebviewsPlugin, [], [dyn worker_webview::WorkerWebviewService, dyn worker::WorkerService], |_| worker_webview::controller::router());
+/// 设备网页入口消费由插件贡献的协议；汇集、校验和在线依赖重建仍使用 Dill。
+#[dill::component]
+#[dill::interface(dyn Plugin<RuntimeAssembly>)]
+pub struct WorkerWebviewsPlugin;
+
+impl Plugin<RuntimeAssembly> for WorkerWebviewsPlugin {
+    fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
+        Box::pin(async move {
+            assembly.require_service::<dyn crate::identity::IdentityProvider>();
+            assembly.require_service::<dyn worker::WorkerService>();
+            assembly.require_service::<dyn worker_webview::WorkerWebviewService>();
+            assembly.services.add::<worker_webview::WebviewProtocols>();
+            assembly.require_service::<worker_webview::WebviewProtocols>();
+            // 即使没有启动钩子，长连接也需要随协议提供者变更而取消的作用域。
+            assembly.hooks::<Self>();
+            assembly.requirements.push(|services, resolve| {
+                if resolve {
+                    services
+                        .get_one::<worker_webview::WebviewProtocols>()?
+                        .validate()?;
+                }
+                Ok(())
+            });
+            assembly.add_routes(|_| Ok(worker_webview::controller::router()));
+            Ok(())
+        })
+    }
+}
 route_plugin!(PersonalConfigPlugin, [], [dyn personal_config::PersonalConfigService, dyn worker::WorkerService], |state| personal_config::controller::router(state.clone()));
 route_plugin!(ClipboardPlugin, [], [dyn clipboard::ClipboardService, dyn worker::WorkerService], |state| clipboard::controller::router(state.clone()));
 

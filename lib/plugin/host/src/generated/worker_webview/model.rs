@@ -31,8 +31,7 @@ pub(crate) enum ViewRequest {
 #[serde(deny_unknown_fields)]
 pub(crate) struct Access {
     pub enabled: bool,
-    #[serde(default)]
-    pub runtime: WebviewRuntime,
+    pub runtime: String,
     #[serde(default)]
     pub headless: bool,
 }
@@ -45,23 +44,18 @@ pub(crate) struct OpenView {
     pub src: String,
 }
 
-/// 运行时由插件能力推导，浏览器不能跨插件切换设备授权。
-#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum WebviewRuntime {
-    #[default]
-    Codex,
-    Dsh,
-    /// device 插件登记的内网服务复用设备出站通道，目标授权留在设备端。
-    Tunnel,
+/// 原生插件声明的设备通道契约；protocol 是跨进程协议值，不参与 Dill 类型身份。
+/// 浏览器不能提交能力或放宽文档策略，宿主只从已装配提供者取得这些字段。
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct WebviewRuntime {
+    pub protocol: String,
+    pub capability: String,
+    pub headless_capability: Option<String>,
+    pub document: Option<WebviewDocument>,
 }
 
-impl WebviewRuntime {
-    pub fn capability(self) -> &'static str {
-        match self {
-            Self::Codex => "codex.web",
-            Self::Dsh => "dsh.web",
-            Self::Tunnel => "tunnel.connect",
-        }
-    }
+/// 可嵌入设备网页的脚本策略；没有文档策略的通道只供原生服务消费。
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct WebviewDocument {
+    pub allow_eval: bool,
 }

@@ -84,6 +84,7 @@ unsafe_code = "forbid"
 nix = { version = "0.31.1", default-features = false, features = ["signal"], optional = true }
 
 [dev-dependencies]
+tokio-tungstenite = "0.29"
 axum = { version = "0.8.6", features = ["http2"] }
 tokio = { version = "1.47.1", features = ["io-std"] }
 jsonschema = { version = "0.58.6", default-features = false }

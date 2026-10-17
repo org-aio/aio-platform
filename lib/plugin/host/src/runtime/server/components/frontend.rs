@@ -117,7 +117,7 @@ pub(in crate::runtime::server) async fn mount(
     })?;
     Ok(MountResponse {
         development: state.config.development.is_some(),
-        device_views: permits_device_views(bundle.manifest()),
+        device_views: permits_device_views(state, bundle.manifest())?,
         src: format!("/api/runtime/components/assets/{token}/{entry}"),
         token,
         revision,
@@ -172,7 +172,7 @@ pub(in crate::runtime::server) async fn device_view_grant(
         .components()?
         .bundle(Uuid::parse_str(&grant.source_id)?, &grant.tenant_id)
         .await?;
-    use crate::generated::worker_webview::model::WebviewRuntime;
+    use crate::generated::worker_webview::WebviewProtocols;
     let capabilities = &bundle
         .manifest()
         .plugin
@@ -181,29 +181,28 @@ pub(in crate::runtime::server) async fn device_view_grant(
         .as_ref()
         .ok_or_else(|| RuntimeError::forbidden("插件未声明网页运行时"))?
         .worker_capabilities;
-    let runtime = match (
-        capabilities.iter().any(|value| value == "codex.web"),
-        capabilities.iter().any(|value| value == "dsh.web"),
-    ) {
-        (true, false) => WebviewRuntime::Codex,
-        (false, true) => WebviewRuntime::Dsh,
-        _ => return Err(RuntimeError::forbidden("插件必须声明唯一的网页运行时")),
-    };
+    let runtime = state
+        .service::<WebviewProtocols>()?
+        .browser_runtime(capabilities)?
+        .ok_or_else(|| RuntimeError::forbidden("插件未声明已装配的网页运行时"))?;
     Ok((grant, runtime))
 }
 
-fn permits_device_views(manifest: &az_plugin_bundle::BundleManifest) -> bool {
-    manifest
-        .plugin
-        .runtime
-        .process
-        .as_ref()
-        .is_some_and(|process| {
-            process
-                .worker_capabilities
-                .iter()
-                .any(|capability| matches!(capability.as_str(), "codex.web" | "dsh.web"))
-        })
+fn permits_device_views(
+    state: &RuntimeState,
+    manifest: &az_plugin_bundle::BundleManifest,
+) -> Result<bool> {
+    let Some(protocols) =
+        state.optional_service::<crate::generated::worker_webview::WebviewProtocols>()?
+    else {
+        return Ok(false);
+    };
+    let Some(process) = manifest.plugin.runtime.process.as_ref() else {
+        return Ok(false);
+    };
+    Ok(protocols
+        .browser_runtime(&process.worker_capabilities)?
+        .is_some())
 }
 
 pub(super) async fn asset(
@@ -242,7 +241,7 @@ pub(super) async fn asset(
         "{}/api/runtime/components/assets/{token}/",
         state.transport.request_origin(&request_headers)
     );
-    let device_views = permits_device_views(bundle.manifest());
+    let device_views = permits_device_views(&state, bundle.manifest())?;
     let bytes = if path == grant.entry {
         render(
             bytes,

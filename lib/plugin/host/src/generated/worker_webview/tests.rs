@@ -3,7 +3,7 @@ use super::{
     model::{ViewOwner, WebviewRuntime},
 };
 use crate::generated::worker::model::DeviceIdentity;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::json;
 use std::time::Duration;
 
@@ -36,18 +36,18 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         id: uuid::Uuid::new_v4().to_string(),
         tenant: "tenant".into(),
         user: "user".into(),
-        capabilities: vec!["codex.web".into()],
+        capabilities: vec!["editor.web".into()],
     };
-    sqlx::query("INSERT INTO worker_devices(id,token_hash,label,platform,tenant_id,user_id,state,capabilities) VALUES($1,$2,'fixture','darwin','tenant','user','active','[\"codex.web\"]')")
+    sqlx::query("INSERT INTO worker_devices(id,token_hash,label,platform,tenant_id,user_id,state,capabilities) VALUES($1,$2,'fixture','darwin','tenant','user','active','[\"editor.web\"]')")
         .bind(&device.id).bind(uuid::Uuid::new_v4().to_string()).execute(&pool).await?;
     for (enabled, headless, expected) in [
-        (true, true, json!(["codex.web", "codex.cli"])),
-        (true, false, json!(["codex.web"])),
+        (true, true, json!(["editor.web", "editor.cli"])),
+        (true, false, json!(["editor.web"])),
         (false, true, json!([])),
-        (true, true, json!(["codex.web", "codex.cli"])),
+        (true, true, json!(["editor.web", "editor.cli"])),
     ] {
         service
-            .access(&device, enabled, headless, WebviewRuntime::Codex)
+            .access(&device, enabled, headless, &editor_runtime())
             .await
             .map_err(|_| anyhow::anyhow!("更新无界面模式失败"))?;
         let capabilities: serde_json::Value =
@@ -58,7 +58,7 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         assert_eq!(capabilities, expected);
     }
     let owner = ViewOwner {
-        runtime: WebviewRuntime::Codex,
+        runtime: editor_runtime(),
         tenant: device.tenant.clone(),
         user: device.user.clone(),
         session: "login-session".into(),
@@ -66,34 +66,62 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         revision: "revision1".into(),
         mount: "mount1".into(),
     };
-    for runtime in [WebviewRuntime::Dsh, WebviewRuntime::Tunnel] {
-        // dsh 与隧道独立授权，不能修改 Codex 模式。
+    for runtime in [
+        other_runtime("third-party", "custom.connect"),
+        other_runtime("stream", "stream.web"),
+    ] {
+        // 插件协议独立授权，不能修改同设备上其他协议的能力。
         service
-            .access(&device, true, false, runtime)
+            .access(&device, true, false, &runtime)
             .await
-            .map_err(|_| anyhow::anyhow!("dsh 授权失败"))?;
-        let dsh_owner = ViewOwner {
-            runtime,
+            .map_err(|_| anyhow::anyhow!("自定义协议授权失败"))?;
+        let custom_owner = ViewOwner {
+            runtime: runtime.clone(),
             mount: "separate-mount".into(),
             ..owner.clone()
         };
+        let (custom_generation, mut custom_commands) = service
+            .register(&device, std::slice::from_ref(&runtime.capability))
+            .await
+            .map_err(|_| anyhow::anyhow!("自定义协议注册失败"))?;
+        let custom_view = service
+            .create(&custom_owner, &device.id, "/custom")
+            .await
+            .map_err(|_| anyhow::anyhow!("自定义视图创建失败"))?;
+        let command = custom_commands
+            .recv()
+            .await
+            .context("缺少自定义协议打开消息")?;
+        assert_eq!(command["runtime"], runtime.protocol);
+        let mut forged = custom_owner.clone();
+        forged.runtime.protocol = "another-protocol".into();
+        assert!(service.authorize(&forged, &custom_view).await.is_err());
+        assert!(service.close(&forged, &custom_view).await.is_err());
+        assert!(service.authorize(&custom_owner, &custom_view).await.is_ok());
         assert_eq!(
             service
-                .devices(&dsh_owner)
+                .devices(&custom_owner)
                 .await
-                .map_err(|_| anyhow::anyhow!("dsh 设备读取失败"))?
+                .map_err(|_| anyhow::anyhow!("自定义协议设备读取失败"))?
                 .len(),
             1
         );
         service
-            .access(&device, false, false, runtime)
+            .access(&device, false, false, &runtime)
             .await
-            .map_err(|_| anyhow::anyhow!("dsh 撤权失败"))?;
+            .map_err(|_| anyhow::anyhow!("自定义协议撤权失败"))?;
         assert!(
             service
-                .devices(&dsh_owner)
+                .authorize(&custom_owner, &custom_view)
                 .await
-                .map_err(|_| anyhow::anyhow!("dsh 设备读取失败"))?
+                .is_err()
+        );
+        service.unregister(&device.id, &custom_generation).await;
+        assert!(
+            service
+                .devices(&custom_owner)
+                .await
+                .map_err(|_| anyhow::anyhow!("自定义协议设备读取失败"))?
                 .is_empty()
         );
     }
@@ -101,12 +129,12 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         service
             .devices(&owner)
             .await
-            .map_err(|_| anyhow::anyhow!("Codex 设备读取失败"))?
+            .map_err(|_| anyhow::anyhow!("设备读取失败"))?
             .len(),
         1
     );
     let (generation, mut commands) = service
-        .register(&device)
+        .register(&device, &["editor.web".into()])
         .await
         .map_err(|_| anyhow::anyhow!("注册失败"))?;
     let id = service
@@ -115,7 +143,7 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         .map_err(|_| anyhow::anyhow!("创建失败"))?;
     assert_eq!(
         commands.recv().await,
-        Some(json!({"kind":"open","sessionId":id,"route":"/","runtime":"codex"}))
+        Some(json!({"kind":"open","sessionId":id,"route":"/","runtime":"editor"}))
     );
     assert!(service.renew(&owner, &id).await.is_err());
     let mut browser = service
@@ -186,7 +214,7 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         sqlx::query(update).bind(&device.id).execute(&pool).await?;
         assert!(service.renew(&owner, &id).await.is_err());
     }
-    sqlx::query("UPDATE worker_devices SET capabilities='[\"codex.web\"]' WHERE id=$1")
+    sqlx::query("UPDATE worker_devices SET capabilities='[\"editor.web\"]' WHERE id=$1")
         .bind(&device.id)
         .execute(&pool)
         .await?;
@@ -257,7 +285,7 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         .map_err(|_| anyhow::anyhow!("第二个视图创建失败"))?;
     assert_eq!(
         commands.recv().await,
-        Some(json!({"kind":"open","sessionId":other_id,"route":"/","runtime":"codex"}))
+        Some(json!({"kind":"open","sessionId":other_id,"route":"/","runtime":"editor"}))
     );
     // 第二个网页尚未加载完成时，初始化突发不能挡住原网页及同一设备的资源回包。
     for index in 0..96 {
@@ -346,7 +374,7 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         .map_err(|_| anyhow::anyhow!("过期视图创建失败"))?;
     assert_eq!(
         commands.recv().await,
-        Some(json!({"kind":"open","sessionId":expired_id,"route":"/","runtime":"codex"}))
+        Some(json!({"kind":"open","sessionId":expired_id,"route":"/","runtime":"editor"}))
     );
     let _expired_browser = service
         .attach(&other_owner, &expired_id)
@@ -386,7 +414,7 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         .map_err(|_| anyhow::anyhow!("资源应答失败"))?;
     assert_eq!(waiting.await??, reply);
     service
-        .access(&device, false, false, WebviewRuntime::Codex)
+        .access(&device, false, false, &editor_runtime())
         .await
         .map_err(|_| anyhow::anyhow!("撤权失败"))?;
     assert!(service.authorize(&owner, &id).await.is_err());
@@ -397,7 +425,12 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
             .await
             .is_err()
     );
-    assert!(service.register(&device).await.is_err());
+    assert!(
+        service
+            .register(&device, &["editor.web".into()])
+            .await
+            .is_err()
+    );
     assert!(browser.recv().await.is_none());
     pool.close().await;
     sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
@@ -405,4 +438,21 @@ async fn webview_channel_roundtrip_isolation_and_revocation() -> Result<()> {
         .await?;
     admin.close().await;
     Ok(())
+}
+
+fn editor_runtime() -> WebviewRuntime {
+    WebviewRuntime {
+        protocol: "editor".into(),
+        capability: "editor.web".into(),
+        headless_capability: Some("editor.cli".into()),
+        document: None,
+    }
+}
+fn other_runtime(protocol: &str, capability: &str) -> WebviewRuntime {
+    WebviewRuntime {
+        protocol: protocol.into(),
+        capability: capability.into(),
+        headless_capability: None,
+        document: None,
+    }
 }

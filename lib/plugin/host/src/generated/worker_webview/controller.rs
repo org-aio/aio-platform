@@ -1,4 +1,7 @@
-use super::model::{Access, OpenView, ViewRequest, WebviewRuntime};
+use super::{
+    WebviewProtocols,
+    model::{Access, OpenView, ViewRequest},
+};
 use crate::generated::worker_webview::WorkerWebviewService as RuntimeWorkerWebviewService;
 use crate::{
     generated::worker::controller::device,
@@ -99,14 +102,13 @@ async fn access(
     Json(request): Json<Access>,
 ) -> Result<Response, RuntimeError> {
     let identity = device(&state, &headers).await?;
+    let runtime = state
+        .service::<WebviewProtocols>()?
+        .runtime(&request.runtime)
+        .map_err(|_| RuntimeError::forbidden("设备通道协议未装配"))?;
     state
         .service::<dyn RuntimeWorkerWebviewService>()?
-        .access(
-            &identity,
-            request.enabled,
-            request.headless,
-            request.runtime,
-        )
+        .access(&identity, request.enabled, request.headless, &runtime)
         .await?;
     Ok(response(Value::Null))
 }
@@ -118,20 +120,32 @@ async fn worker_channel(
 ) -> Result<Response, RuntimeError> {
     let identity = device(&state, &headers).await?;
     let service = state.service::<dyn RuntimeWorkerWebviewService>()?;
-    let (generation, incoming) = service.register(&identity).await?;
+    let tasks = state.plugin_tasks::<crate::runtime::server::plugins::WorkerWebviewsPlugin>()?;
+    let capabilities = state.service::<WebviewProtocols>()?.capabilities()?;
+    let (generation, incoming) = service.register(&identity, &capabilities).await?;
     Ok(upgrade
         .max_message_size(48 * 1024 * 1024)
         .max_frame_size(48 * 1024 * 1024)
-        .on_upgrade(move |socket| {
-            worker_socket(
-                state,
-                service,
-                headers,
-                identity.id,
-                generation,
-                incoming,
-                socket,
-            )
+        .on_upgrade(move |socket| async move {
+            let cleanup = service.clone();
+            let device_id = identity.id.clone();
+            let connection = generation.clone();
+            if let Err(error) = tasks.spawn(async move {
+                worker_socket(
+                    state,
+                    service,
+                    headers,
+                    identity.id,
+                    generation,
+                    incoming,
+                    socket,
+                )
+                .await;
+                Ok(())
+            }) {
+                eprintln!("设备通道任务未启动: {error:#}");
+                cleanup.unregister(&device_id, &connection).await;
+            }
         }))
 }
 
@@ -144,19 +158,26 @@ async fn worker_socket(
     mut incoming: tokio::sync::mpsc::Receiver<Value>,
     mut socket: WebSocket,
 ) {
+    let Ok(tasks) = state.plugin_tasks::<crate::runtime::server::plugins::WorkerWebviewsPlugin>()
+    else {
+        service.unregister(&id, &generation).await;
+        return;
+    };
+    let cancel = tasks.cancellation();
     let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
     let mut last_seen = tokio::time::Instant::now();
     loop {
         tokio::select! {
+            _ = cancel.cancelled() => break,
             _ = heartbeat.tick() => {
-                let authorized = device(&state, &headers).await.is_ok_and(|identity| identity.capabilities.iter().any(|capability| matches!(capability.as_str(), "codex.web" | "dsh.web" | "tunnel.connect")));
+                let authorized = channel_authorized(&state, &headers).await;
                 if !authorized || last_seen.elapsed() > Duration::from_secs(45) { break; }
                 if service.expire(&id).await.is_err() { break; }
-                if socket.send(Message::Ping(Bytes::new())).await.is_err() { break; }
+                if !send(&mut socket, Message::Ping(Bytes::new()), &cancel).await { break; }
             }
             frame = incoming.recv() => {
                 let Some(frame) = frame else { break; };
-                if socket.send(Message::Text(frame.to_string().into())).await.is_err() { break; }
+                if !send(&mut socket, Message::Text(frame.to_string().into()), &cancel).await { break; }
             }
             frame = socket.recv() => {
                 let Some(Ok(frame)) = frame else { break; };
@@ -164,7 +185,7 @@ async fn worker_socket(
                 match frame {
                     Message::Pong(_) | Message::Ping(_) => {}
                     Message::Text(text) => {
-                        let authorized = device(&state, &headers).await.is_ok_and(|identity| identity.capabilities.iter().any(|capability| matches!(capability.as_str(), "codex.web" | "dsh.web" | "tunnel.connect")));
+                        let authorized = channel_authorized(&state, &headers).await;
                         if !authorized { break; }
                         let Ok(frame) = serde_json::from_str(&text) else { break; };
                         if service.receive(&id, &generation, frame).await.is_err() { break; }
@@ -174,8 +195,18 @@ async fn worker_socket(
             }
         }
     }
-    let _ = socket.close().await;
+    let _ = tokio::time::timeout(Duration::from_secs(2), socket.close()).await;
     service.unregister(&id, &generation).await;
+}
+
+async fn channel_authorized(state: &RuntimeState, headers: &HeaderMap) -> bool {
+    let Ok(identity) = device(state, headers).await else {
+        return false;
+    };
+    state
+        .service::<WebviewProtocols>()
+        .and_then(|protocols| protocols.enabled(&identity.capabilities))
+        .unwrap_or(false)
 }
 
 async fn browser_channel(
@@ -195,11 +226,21 @@ async fn browser_channel(
     }
     let owner = state.device_view_owner(&token).await?;
     let service = state.service::<dyn RuntimeWorkerWebviewService>()?;
+    let tasks = state.plugin_tasks::<crate::runtime::server::plugins::WorkerWebviewsPlugin>()?;
     let incoming = service.attach(&owner, &id).await?;
     Ok(upgrade
         .max_message_size(16 * 1024 * 1024)
-        .on_upgrade(move |socket| {
-            browser_socket(state, service, owner, token, id, incoming, socket)
+        .on_upgrade(move |socket| async move {
+            let cleanup = service.clone();
+            let initial_owner = owner.clone();
+            let view = id.clone();
+            if let Err(error) = tasks.spawn(async move {
+                browser_socket(state, service, owner, token, id, incoming, socket).await;
+                Ok(())
+            }) {
+                eprintln!("浏览器通道任务未启动: {error:#}");
+                let _ = cleanup.close(&initial_owner, &view).await;
+            }
         }))
 }
 
@@ -212,19 +253,26 @@ async fn browser_socket(
     mut incoming: tokio::sync::mpsc::Receiver<super::service::ViewFrame>,
     mut socket: WebSocket,
 ) {
+    let Ok(tasks) = state.plugin_tasks::<crate::runtime::server::plugins::WorkerWebviewsPlugin>()
+    else {
+        let _ = service.close(&initial_owner, &id).await;
+        return;
+    };
+    let cancel = tasks.cancellation();
     let mut heartbeat = tokio::time::interval(Duration::from_secs(10));
     let mut last_seen = tokio::time::Instant::now();
     loop {
         tokio::select! {
+            _ = cancel.cancelled() => break,
             _ = heartbeat.tick() => {
                 if last_seen.elapsed() > Duration::from_secs(45) || state.renew_device_view(&token, &id).await.is_err() { break; }
-                if socket.send(Message::Ping(Bytes::new())).await.is_err() { break; }
+                if !send(&mut socket, Message::Ping(Bytes::new()), &cancel).await { break; }
             }
             frame = incoming.recv() => {
                 let Some(frame) = frame else { break; };
                 let Ok(owner) = state.device_view_owner(&token).await else { break; };
                 if service.authorize(&owner, &id).await.is_err() { break; }
-                if socket.send(Message::Text(frame.value.to_string().into())).await.is_err() { break; }
+                if !send(&mut socket, Message::Text(frame.value.to_string().into()), &cancel).await { break; }
             }
             frame = socket.recv() => {
                 let Some(Ok(frame)) = frame else { break; };
@@ -241,8 +289,22 @@ async fn browser_socket(
             }
         }
     }
-    let _ = socket.close().await;
+    let _ = tokio::time::timeout(Duration::from_secs(2), socket.close()).await;
     let _ = service.close(&initial_owner, &id).await;
+}
+
+// 慢对端不能让插件排空永久等待；取消只中断网络发送，持久化步骤仍顺序完成。
+async fn send(
+    socket: &mut WebSocket,
+    message: Message,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> bool {
+    tokio::select! {
+        _ = cancel.cancelled() => false,
+        result = tokio::time::timeout(Duration::from_secs(10), socket.send(message)) => {
+            matches!(result, Ok(Ok(())))
+        }
+    }
 }
 
 async fn asset(
@@ -306,7 +368,12 @@ async fn asset(
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
     );
-    let evaluation = if owner.runtime == WebviewRuntime::Dsh {
+    let document = owner
+        .runtime
+        .document
+        .as_ref()
+        .ok_or_else(|| RuntimeError::forbidden("该设备通道不提供网页文档"))?;
+    let evaluation = if document.allow_eval {
         " 'unsafe-eval'"
     } else {
         ""
