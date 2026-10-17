@@ -44,7 +44,7 @@ impl Contribution {
         self.plugin.dependencies().contains(&provider.owner())
             || !self
                 .assembly
-                .required_services
+                .service_dependencies
                 .is_disjoint(&provider.assembly.services.interfaces)
             || !self
                 .assembly
@@ -62,7 +62,7 @@ impl RuntimeAssembly {
             routes: Vec::new(),
             requirements: Vec::new(),
             lifecycle: Vec::new(),
-            required_services: HashSet::new(),
+            service_dependencies: HashSet::new(),
             catalog_sensitive: false,
         }
     }
@@ -98,7 +98,7 @@ pub(super) async fn build(
         );
         contributions.push(Contribution { plugin, assembly });
     }
-    // require_service 可以指向异步资源，提供者初始化必须先于使用方的钩子。
+    // 必需或可选服务均可指向异步资源，存在的提供者必须先于使用方初始化。
     // 聚合服务的完整 Dill 注入图只决定重建范围，不把延迟聚合误作初始化环。
     let additional = contributions
         .iter()
@@ -109,7 +109,7 @@ pub(super) async fn build(
                     provider.owner() != consumer.owner()
                         && !consumer
                             .assembly
-                            .required_services
+                            .service_dependencies
                             .is_disjoint(&provider.assembly.services.interfaces)
                 })
                 .map(Contribution::owner)

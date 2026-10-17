@@ -2,7 +2,7 @@
 
 阅读顺序：`access.rs` 的身份与权限 → `mcp.rs` / `grpc.rs` 的协议适配 → `enhancements/store.rs` 的活动版本与执行。适配器使用官方 Rust MCP SDK 与 Tonic，不自行实现 JSON-RPC 握手或 Protobuf 编解码。
 
-`plugins::McpPlugin`、`plugins::GrpcPlugin` 是两个可独立选择的原生宿主插件，都依赖 `EnhancementServicePlugin`。默认组合包含它们；从自定义组合移除后，对应路由返回 404。适配器与现有 HTTP API 共用宿主监听地址，不创建第二个服务器或版本仓库。
+`plugins::McpPlugin`、`plugins::GrpcPlugin` 是两个可独立选择的原生宿主插件，都依赖 `EnhancementServicePlugin`。分别启用 `mcp`、`grpc` Cargo feature 后，默认组合才包含对应插件；从自定义组合移除后，对应路由返回 404。适配器与现有 HTTP API 共用宿主监听地址，不创建第二个服务器或版本仓库。
 
 精简协议宿主装配 `DatabasePlugin` 与数据库 Provider、`ScriptRuntimePlugin` 与所选语言执行器、`EnhancementServicePlugin`，再选择管理 HTTP、MCP 或 gRPC 路由插件。无需组件存储配置，不创建密钥、Wasm 引擎、Sidecar 或包缓存。Rhai 和 TypeScript 的默认实现分别由 `RhaiPlugin` 与 `TypeScriptPlugin` 提供；应用可通过 `ScriptExecutor` 替换语言实现，所有入口仍复用同一个增强服务。
 
@@ -43,7 +43,7 @@ schema 由公共执行链实际校验，不能依赖客户端自行执行。已�
 设置本机独立 `AIO_ENHANCEMENT_TEST_DATABASE_URL` 后执行：
 
 ```sh
-cargo test -p az-plugin-host --features server protocols::tests -- --ignored
+cargo test -p az-plugin-host --features rhai,typescript,mcp,grpc protocols::tests -- --ignored
 ```
 
 真实 MCP SDK 与生成的 gRPC 客户端通过同一个 TCP 监听地址验证：权限过滤、匿名与跨租户拒绝、身份不可伪造、Rhai → TypeScript 在线升级、同连接回滚、会话撤销、停用、消息大小、超时和移除插件后的路由消失。测试只装配上述精简组合，并检查组件、密钥、Wasm、Sidecar 和包缓存均不存在。

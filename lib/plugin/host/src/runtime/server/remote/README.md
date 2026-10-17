@@ -2,7 +2,7 @@
 
 从 `plugins/remote_capabilities.rs` 看装配与生命周期，再看 `provider.rs` 的在线发布、`bindings.rs` 的不可变租户路由及输入输出校验，最后看 `mcp.rs`、`grpc.rs` 的协议适配。`mcp_stdio.rs` 只处理本机进程及受限管道，复用 MCP 的发现、调用和取消。原生插件身份仍是 Dill 中的具体 TypeId；外部服务名、工具名和版本路径只是协议符号。
 
-启用 `az-plugin-host/remote`，在宿主组合中选择 `RemoteCapabilitiesPlugin`，并设置 `HostConfig.remote_capabilities`。默认组合在启用 feature 后包含该插件；不配置文件时没有远端能力和连接。该 feature 只依赖 `server`，不启用 Wasm 或 Sidecar。提供了配置但未启用 feature 或未装配插件时，宿主启动失败，避免静默忽略。
+按需启用 `az-plugin-host/remote-mcp`、`az-plugin-host/remote-grpc`，或用 `remote` 同时选择两者，在宿主组合中选择 `RemoteCapabilitiesPlugin`，并设置 `HostConfig.remote_capabilities`。默认组合在启用 feature 后包含该插件；不配置文件时没有远端能力和连接。出站协议不启用语言实现、入站协议、Wasm 或 Sidecar；脚本宿主须另选语言或装配外部执行器。配置包含未编译的协议时在解析阶段拒绝，不读取描述文件或尝试连接。提供了配置但未启用 feature 或未装配插件时，宿主启动失败，避免静默忽略。
 
 开发宿主与产品宿主通过 `AIO_REMOTE_CAPABILITIES` 指定文件。复制 [示例配置](examples/imports.json)，把租户、地址和凭据环境变量名改为部署配置；凭据只从环境读取，不写入配置、目录或脚本。gRPC 示例描述文件的生成方式为：
 
@@ -78,7 +78,7 @@ AIO_REMOTE_TEST_CREDENTIAL=remote-test \
 AIO_MCP_STDIO_TEST_EXECUTABLE="$PWD/target/debug/examples/mcp-stdio-fixture" \
 AIO_MCP_STDIO_TEST_TOKEN=stdio-test \
 AIO_MCP_STDIO_HOST_SECRET=must-not-inherit \
-  cargo test -p az-plugin-host --no-default-features --features remote \
+  cargo test -p az-plugin-host --no-default-features --features remote,mcp,grpc,rhai,typescript \
   --lib protocols::tests::remote -- --ignored --test-threads=1
 ```
 

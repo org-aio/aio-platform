@@ -233,9 +233,6 @@ pub fn plugins(probes: [Arc<Probe>; 2], surfaces: bool) -> Vec<DynPlugin<Runtime
         Arc::new(PostgresPlugin),
         Arc::new(KeyringPlugin),
         Arc::new(FileKeyringPlugin),
-        Arc::new(EnhancementServicePlugin),
-        Arc::new(ScriptRuntimePlugin),
-        Arc::new(RhaiPlugin),
     ];
     if surfaces {
         // 管理与页面路由只依赖公共执行契约，替代执行器不引入内置引擎。

@@ -38,7 +38,9 @@ pub(super) async fn authenticate_optional(
     session
         .permissions
         .retain(|permission| !permission.starts_with("component:"));
-    if let Some(components) = state.optional_components()? {
+    if let Some(components) =
+        state.optional_service::<crate::runtime::server::components::Components>()?
+    {
         session
             .permissions
             .extend(components.permissions(&session.tenant_id).await?);
@@ -163,7 +165,9 @@ pub(super) async fn catalog_value(
             },
         )
         .await?;
-    if let Some(components) = state.optional_components()? {
+    if let Some(components) =
+        state.optional_service::<crate::runtime::server::components::Components>()?
+    {
         components.append_catalog(session, &mut catalog).await?;
     }
     catalog

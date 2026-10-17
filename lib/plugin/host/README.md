@@ -7,6 +7,42 @@
 产品负责提供身份实现、品牌、静态贡献、数据库和发布配置。此库不依赖业务插件，
 不内置产品域名或仓库所有者。生产应用与本地开发宿主直接消费同一实现。
 
+## 执行器与协议编译选择
+
+`server` 提供宿主契约、Dill 装配、生命周期及持久化服务，不引入内置语言、
+Wasm 或 MCP/gRPC 实现。应用在 Cargo 中选取所需实现，再把具体插件交给
+`RuntimeState::initialize` 或 `RuntimeHost::initialize`；编译可用不等于已经装配。
+
+| Cargo feature | 装配插件 | 职责 |
+| --- | --- | --- |
+| `rhai` | `RhaiPlugin` | Rhai 编译与有界执行 |
+| `typescript` | `TypeScriptPlugin` | Oxc 转译与 QuickJS 有界执行 |
+| `wasm` | `WasmPlugin`、`WasmComponentPlugin` | Wasm 执行 |
+| `sidecar` | `ProcessPlugin`、`SidecarPlugin` | 受监督的独立进程 |
+| `mcp` | `McpPlugin` | 增强的 MCP Streamable HTTP 入口 |
+| `grpc` | `GrpcPlugin` | 增强的 gRPC unary 入口 |
+| `remote-mcp` | `RemoteCapabilitiesPlugin` | 导入 MCP HTTP/stdio 工具 |
+| `remote-grpc` | `RemoteCapabilitiesPlugin` | 导入描述文件声明的 unary gRPC 方法 |
+| `remote` | `RemoteCapabilitiesPlugin` | 同时编译两种出站协议 |
+
+脚本宿主还需装配 `ScriptRuntimePlugin`，需要持久版本时加入
+`EnhancementServicePlugin`。协议实现不强制选择语言；例如只编译 `mcp` 的宿主，
+可以通过公共 `ScriptExecutor` 接口装配外部执行器。
+显式选择脚本运行时却没有执行器时启动失败；不支持的语言与未编译的远端协议会被拒绝。
+
+`default_plugins()` 汇集已编译的默认实现。纯 `server`、`wasm` 或 `sidecar`
+组合不要求脚本服务；选择协议的默认组合还需要至少一种内置语言。
+完整发布应用显式启用两种语言、两种入站协议和所需执行环境。
+
+组件资源可选依赖增强服务；没有该服务时仍可安装和运行组件，增强调用明确失败。
+`RuntimeAssembly::optional_service::<I>()` 声明这种依赖，
+`RuntimeState::optional_service::<I>()` 从同一个 Dill 容器解析它。
+提供者存在时参与初始化排序和在线重建，重复绑定或构造失败不能被当作缺省值。
+
+依赖边界由 `node scripts/check-host-features.mjs` 检查。
+`executor_plugins` 集成测试分别用真实 MCP/gRPC 客户端验证外部执行器的发布与重启恢复；
+`component_executors` 在没有内置语言的 `server` 组合中验证整包执行及资源生命周期。
+
 ## 已配对设备的应用控制
 
 设备通过现有 AIO 会话配对。macOS 设备升级 worker 后，所属账号在“我的设备”启用应用控制；关闭时取消排队和执行中的应用任务。设备和任务查询均按租户及用户限制，设备令牌与任务租约不返回 Agent。

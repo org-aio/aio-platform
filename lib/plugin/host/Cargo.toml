@@ -18,11 +18,11 @@ az-plugin-bundle = { path = "../bundle", optional = true }
 az-plugin-contract = { path = "../contract", optional = true }
 az-plugin-runtime = { path = "../runtime", default-features = false, optional = true }
 az-plugin-core = { path = "../core", default-features = false, optional = true }
-az-plugin-enhancement = { path = "../enhancement", optional = true }
+az-plugin-enhancement = { path = "../enhancement", default-features = false, optional = true }
 semver = { version = "1", optional = true }
 getrandom = { version = "0.4.2", optional = true }
 axum = { version = "0.8.6", features = ["ws"], optional = true }
-rmcp = { version = "3.5.1", default-features = false, features = ["server", "transport-streamable-http-server"], optional = true }
+rmcp = { version = "3.5.1", default-features = false, optional = true }
 tonic = { version = "0.14.6", optional = true }
 prost = { version = "0.14.4", optional = true }
 prost-reflect = { version = "0.16", features = ["serde"], optional = true }
@@ -64,11 +64,17 @@ components = ["dep:az-plugin-bundle", "dep:az-plugin-contract", "dep:az-plugin-r
 default = []
 wasm = ["server", "dep:wasmtime", "az-plugin-runtime/wasm", "az-plugin-manifest/wasm-validation"]
 sidecar = ["server"]
-remote = ["server", "dep:arc-swap", "dep:prost", "dep:prost-reflect", "dep:process-wrap", "dep:nix", "dep:jsonschema", "dep:sse-stream", "tokio-util/io", "rmcp/client", "rmcp/transport-async-rw", "rmcp/transport-streamable-http-client", "tonic/tls-webpki-roots"]
+rhai = ["server", "az-plugin-enhancement/rhai"]
+typescript = ["server", "az-plugin-enhancement/typescript"]
+mcp = ["server", "dep:rmcp", "rmcp/server", "rmcp/transport-streamable-http-server"]
+grpc = ["server", "dep:tonic", "az-plugin-contract/grpc", "axum/http2"]
+remote = ["remote-mcp", "remote-grpc"]
+remote-mcp = ["server", "dep:arc-swap", "dep:jsonschema", "dep:process-wrap", "dep:nix", "dep:sse-stream", "tokio-util/io", "dep:rmcp", "rmcp/client", "rmcp/transport-async-rw", "rmcp/transport-streamable-http-client"]
+remote-grpc = ["server", "dep:arc-swap", "dep:jsonschema", "dep:prost", "dep:prost-reflect", "dep:tonic", "tonic/tls-webpki-roots"]
 ui = ["dep:dioxus", "dep:dioxus-icons", "dep:az-dioxus-admin-shell", "dep:az-ui-components"]
 web = ["ui", "dioxus/web", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
 desktop = ["ui", "dioxus/desktop", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
-server = ["dep:tempfile", "dep:tower", "dep:schemars", "dep:tokio-util", "dep:http-body", "dep:jsonwebtoken","components", "az-plugin-manifest/validation", "az-plugin-contract/grpc", "dep:rmcp", "dep:tonic", "axum/http2", "dep:az-plugin-package", "dep:axum", "dep:flate2", "dep:kuchikiki", "dep:mime_guess", "dep:reqwest", "dep:sha2", "dep:sqlx", "dep:tar", "dep:tokio", "dep:toml", "dep:tower-http", "dep:uuid"]
+server = ["dep:tempfile", "dep:tower", "dep:schemars", "dep:tokio-util", "dep:http-body", "dep:jsonwebtoken","components", "az-plugin-manifest/validation", "dep:az-plugin-package", "dep:axum", "dep:flate2", "dep:kuchikiki", "dep:mime_guess", "dep:reqwest", "dep:sha2", "dep:sqlx", "dep:tar", "dep:tokio", "dep:toml", "dep:tower-http", "dep:uuid"]
 
 [lints.rust]
 unsafe_code = "forbid"
@@ -83,10 +89,10 @@ prost-types = "0.14.4"
 tonic-prost = "0.14.6"
 tempfile = "3.23.0"
 reqwest = { version = "0.12.23", default-features = false, features = ["http2"] }
-rmcp = { version = "3.5.1", default-features = false, features = ["client", "transport-streamable-http-client-reqwest"] }
+rmcp = { version = "3.5.1", default-features = false, features = ["server", "client", "transport-streamable-http-client-reqwest"] }
 reqwest-mcp = { package = "reqwest", version = "0.13.2", default-features = false }
 
 [[example]]
 name = "mcp-stdio-fixture"
 path = "tests/stdio/fixture.rs"
-required-features = ["remote"]
+required-features = ["remote-mcp"]

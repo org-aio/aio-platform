@@ -2,15 +2,17 @@
 
 ## 编译与装配分开选择
 
-`az-plugin-host` 的 `server` feature 编译宿主契约、平台服务和脚本协议入口，不引入内置 Wasm 或 Sidecar 实现。`wasm` 增加 Wasmtime、v1 Wasm 产物验证及 `WasmPlugin` / `WasmComponentPlugin`；`sidecar` 增加监督器、进程 broker 及 `ProcessPlugin` / `SidecarPlugin`。应用要交付完整组合时启用 `server,wasm,sidecar`，随后仍通过 Dill 选择实际装配的插件。独立的 `aio-host` 和产品宿主显式选择完整组合。
+`az-plugin-host` 的 `server` feature 编译宿主契约与平台服务，不引入内置语言、Wasm、Sidecar 或 MCP/gRPC 实现。`rhai` 和 `typescript` 分别增加解释器，`mcp` 和 `grpc` 分别增加入站协议，`remote-mcp` 和 `remote-grpc` 分别导入外部工具；`remote` 同时选择两个出站实现。`wasm` 增加 Wasmtime、v1 Wasm 产物验证及 `WasmPlugin` / `WasmComponentPlugin`；`sidecar` 增加监督器、进程 broker 及 `ProcessPlugin` / `SidecarPlugin`。应用交付完整组合时显式启用这些 feature，随后仍通过 Dill 选择实际装配的插件；独立 `aio-host` 和产品宿主均如此。
 
-精简 MCP/gRPC 宿主只启用 `server`。替代整包执行器也只需 `server`：`ComponentExecutor`、中立请求类型和执行资源不会引用 Wasmtime 生成类型。关闭任意实现不会回退到内置执行器；缺失或歧义匹配在调用前被拒绝。没有内置整包执行器时，默认组合不注册组件资源和交付任务；自定义组合可显式选择外部实现。
+精简 MCP/gRPC 宿主只编译所需协议和执行器。只启用 `mcp` 或 `grpc` 也可以由应用装配外部 `ScriptExecutor`；显式选择脚本运行时却没有执行器仍然启动失败。替代整包执行器只需 `server`：`ComponentExecutor`、中立请求类型和执行资源不会引用 Wasmtime 生成类型。关闭实现不会回退到内置执行器；缺失或歧义匹配在调用前被拒绝。
+
+`default_plugins()` 按已编译能力选择组合。纯 `server`、`wasm` 或 `sidecar` 默认组合不依赖增强服务；没有内置整包执行器时不注册组件资源和交付任务。自定义组合可显式选择外部实现。协议默认组合需要至少一种内置语言，定制协议宿主可以自行提供执行器。组件安装和调用不强制依赖任何脚本运行时；未装配增强服务时，增强调用明确失败。
 
 v1 页面分发使用 `WasmExecutor` / `ProcessExecutor` 的 Dill 绑定。内置实现拥有资源初始化与停止钩子，替代实现也必须声明相应生命周期。v1 Wasm 仓库校验仍需 `wasm-validation`；关闭该 feature 明确拒绝该格式，不跳过产物验证。v2 整包的候选验证由所选 `ComponentExecutor` 完成。
 
 宿主通过 `Plugin<RuntimeAssembly>` 复用 `az-plugin-core` 的 TypeId 身份和依赖排序，通过 Dill 提供服务。`RuntimeState` 不再拥有剪贴板、个人配置、设备、设备视图、数据库、包仓库和执行资源的固定字段；HTTP、组件 broker 和 sidecar 使用同一个服务容器。
 
-先看 `RuntimeAssembly`，再看 `builtins.rs` 中的默认平台组合。插件可以注册服务、贡献 HTTP 路由，以及注册恢复、就绪和停止动作。所有恢复动作成功后才执行就绪动作；省略交付插件也会省略它的后台启动动作。`require_service::<dyn Trait>()` 检查接口的唯一绑定，并把接口提供者加入初始化依赖，允许应用提供其他实现。`Plugin::dependencies()` 只声明必须先构建的具体插件类型，不能用它强制绑定某个默认服务实现。
+先看 `RuntimeAssembly`，再看 `builtins.rs` 中的默认平台组合。插件可以注册服务、贡献 HTTP 路由，以及注册恢复、就绪和停止动作。所有恢复动作成功后才执行就绪动作；省略交付插件也会省略它的后台启动动作。`require_service::<dyn Trait>()` 检查接口的唯一绑定，并把接口提供者加入初始化依赖，允许应用提供其他实现。`optional_service::<dyn Trait>()` 允许缺省，但仍校验唯一绑定、初始化顺序和在线变更依赖。通过 `state.optional_service::<dyn Trait>()?` 解析时，构造失败不会被当作缺省。`Plugin::dependencies()` 只声明必须先构建的具体插件类型，不能用它强制绑定某个默认服务实现。
 
 宿主统一使用 `RuntimeState::initialize(config, plugins)`。应用显式选择 `default_plugins()` 或自己的 Dill 插件组合，再加入产品提供者；运行时不再接收独立身份参数。纯自定义路由可以完全省略身份、授权和计费服务。
 
@@ -159,7 +161,7 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 | `EnhancementServicePlugin` | 依赖数据库与脚本运行时，提供统一的增强版本、授权和调用服务 |
 | `WasmComponentPlugin` / `SidecarPlugin` | 向 Dill 提供 v2 整包的 `ComponentExecutor`；省略后不初始化对应引擎或监督器客户端 |
 | `ComponentExecutionPlugin` | 汇集整包执行器并拒绝重复类型；本身不创建执行资源 |
-| `ComponentResourcesPlugin` | 依赖存储、密钥、增强服务与整包执行器，配置组件存储时初始化所选实现，停止时卸载实例并关闭组件连接 |
+| `ComponentResourcesPlugin` | 依赖存储、密钥与整包执行器，可选依赖增强服务；配置组件存储时初始化所选实现，停止时卸载实例并关闭组件连接 |
 
 替换数据库连接方式时保留 `DatabasePlugin`，省略 `PostgresPlugin`，在自己的插件中使用 Dill 绑定 `dyn DatabaseProvider`；密钥同理。Provider 返回的连接池属于本次宿主，会在关闭或初始化失败时关闭，不应返回另一个宿主仍在使用的池。所有服务和 Sidecar 消费同一个容器提供的实例。
 

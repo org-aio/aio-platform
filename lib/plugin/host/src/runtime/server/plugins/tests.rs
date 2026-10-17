@@ -127,10 +127,14 @@ async fn remote_configuration_requires_its_feature_and_plugin() -> Result<()> {
         .await
         .err()
         .ok_or_else(|| anyhow::anyhow!("未装配远端能力插件仍接受配置"))?;
-    #[cfg(feature = "remote")]
+    #[cfg(any(feature = "remote-mcp", feature = "remote-grpc"))]
     assert!(error.to_string().contains("RemoteCapabilitiesPlugin"));
-    #[cfg(not(feature = "remote"))]
-    assert!(error.to_string().contains("remote feature"));
+    #[cfg(not(any(feature = "remote-mcp", feature = "remote-grpc")))]
+    assert!(
+        error
+            .to_string()
+            .contains("remote-mcp 或 remote-grpc feature")
+    );
     Ok(())
 }
 

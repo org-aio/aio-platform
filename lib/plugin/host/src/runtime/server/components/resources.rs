@@ -20,7 +20,7 @@ impl Components {
         keyring: Arc<Keyring>,
         #[cfg(feature = "sidecar")] identity: Arc<dyn crate::identity::IdentityProvider>,
         runtime_services: dill::CatalogWeakRef,
-        enhancements: Arc<super::super::enhancements::Enhancements>,
+        enhancements: Option<Arc<super::super::enhancements::Enhancements>>,
         executors: Arc<ComponentExecutors>,
     ) -> Result<Arc<Self>> {
         executors.validate()?;

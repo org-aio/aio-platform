@@ -78,7 +78,7 @@ Sidecar 通过已有 broker socket 向 `POST /enhancements/invoke` 发送：
 
 ## Rhai 与 TypeScript
 
-语言实现通过 Dill 注入的 `ScriptExecutor` 编译成 `ScriptProgram`，包验证与调用分发不再包含语言实现分支。默认实现由 `RhaiPlugin`、`TypeScriptPlugin` 选择；`ScriptRuntimePlugin` 不依赖数据库或组件存储。`EnhancementServicePlugin` 单独持有持久化与版本服务，MCP/gRPC 无需初始化整个组件执行环境。原生执行器替换仍通过受控宿主装配完成，不由候选脚本自行注册。
+语言实现通过 Dill 注入的 `ScriptExecutor` 编译成 `ScriptProgram`，包验证与调用分发不再包含语言实现分支。默认实现分别由 `rhai`/`typescript` Cargo feature 编译，再由 `RhaiPlugin`、`TypeScriptPlugin` 装配；`ScriptRuntimePlugin` 不依赖数据库或组件存储。`EnhancementServicePlugin` 单独持有持久化与版本服务，MCP/gRPC 无需初始化整个组件执行环境。入站 `mcp`、`grpc` 与出站 `remote-mcp`、`remote-grpc` 分别编译，不强制引入任何语言实现；仅组件/Sidecar 组合可完全省略增强服务。原生执行器替换仍通过受控宿主装配完成，不由候选脚本自行注册。
 
 - Rhai 使用嵌入式引擎，关闭模块和动态 eval，限制操作数、调用深度、表达式深度、变量、函数及容器大小。
 - TypeScript 使用 Oxc 的 AST 转译，然后在 QuickJS 的独立上下文执行；不安装模块加载器、Node、文件或网络 API，拒绝外部模块声明和 Promise 返回值。

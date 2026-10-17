@@ -1,5 +1,6 @@
 #![cfg(feature = "server")]
 
+#[cfg(any(feature = "mcp", feature = "grpc"))]
 #[path = "support/identity.rs"]
 mod identity_support;
 
@@ -8,20 +9,32 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use anyhow::{Context, Result, ensure};
+#[cfg(any(feature = "mcp", feature = "grpc"))]
+use anyhow::ensure;
+use anyhow::{Context, Result};
+#[cfg(feature = "grpc")]
 use az_plugin_contract::grpc::{InvokeRequest, enhancements_client::EnhancementsClient};
 use az_plugin_core::{Plugin, PluginFuture};
-use az_plugin_enhancement::{Language, Package, RhaiExecutor, ScriptContext};
+use az_plugin_enhancement::{Language, Package, ScriptContext};
+#[cfg(feature = "grpc")]
+use az_plugin_host::runtime::server::plugins::GrpcPlugin;
+#[cfg(feature = "mcp")]
+use az_plugin_host::runtime::server::plugins::McpPlugin;
 use az_plugin_host::{
     configuration::HostConfig,
-    identity::{IdentityProvider, SessionContext},
     runtime::server::{
         RuntimeState,
         plugins::{
-            DatabasePlugin, EnhancementServicePlugin, EnhancementsPlugin, GrpcPlugin,
-            PostgresPlugin, RuntimeAssembly, ScriptExecutor, ScriptProgram, ScriptRuntime,
+            RuntimeAssembly, ScriptExecutor, ScriptInvocation, ScriptProgram, ScriptRuntime,
             ScriptRuntimePlugin,
         },
+    },
+};
+#[cfg(any(feature = "mcp", feature = "grpc"))]
+use az_plugin_host::{
+    identity::{IdentityProvider, SessionContext},
+    runtime::server::plugins::{
+        DatabasePlugin, EnhancementServicePlugin, EnhancementsPlugin, PostgresPlugin,
     },
 };
 use serde_json::{Value, json};
@@ -34,7 +47,24 @@ impl ScriptExecutor for Replacement {
     }
     fn compile(&self, source: &str) -> Result<Arc<dyn ScriptProgram>> {
         self.0.fetch_add(1, Ordering::SeqCst);
-        RhaiExecutor.compile(source)
+        // 独立的有限语法测试实现，用于证明公共契约不依赖任何内置解释器。
+        let factor = source
+            .strip_prefix("fn invoke(input, context) { input * ")
+            .and_then(|source| source.strip_suffix(" }"))
+            .context("测试执行器只支持整数乘法")?
+            .parse()?;
+        Ok(Arc::new(Multiplier(factor)))
+    }
+}
+
+struct Multiplier(i64);
+
+impl ScriptProgram for Multiplier {
+    fn invoke(&self, input: &Value, invocation: &ScriptInvocation) -> Result<Value> {
+        invocation.check()?;
+        let value = input.as_i64().context("输入必须是整数")?;
+        let output = value.checked_mul(self.0).context("整数乘法溢出")?;
+        Ok(json!(output))
     }
 }
 
@@ -52,8 +82,10 @@ impl Plugin<RuntimeAssembly> for ReplacementPlugin {
     }
 }
 
+#[cfg(any(feature = "mcp", feature = "grpc"))]
 struct Identity(String);
 
+#[cfg(any(feature = "mcp", feature = "grpc"))]
 #[async_trait::async_trait]
 impl IdentityProvider for Identity {
     async fn authenticate(
@@ -86,6 +118,7 @@ impl IdentityProvider for Identity {
     }
 }
 
+#[cfg(any(feature = "mcp", feature = "grpc"))]
 #[async_trait::async_trait]
 impl az_plugin_host::authorization::AuthorizationProvider for Identity {
     async fn can_publish(&self, _: &SessionContext) -> Result<bool> {
@@ -99,16 +132,7 @@ async fn external_executor_uses_public_plugin_contract_without_database_or_compo
     let root = tempfile::tempdir()?;
     let calls = Arc::new(AtomicUsize::new(0));
     let state = RuntimeState::initialize(
-        HostConfig {
-            remote_capabilities: None,
-            database_url: "deliberately invalid: no database".into(),
-            public_origin: "http://127.0.0.1".into(),
-            cache_root: root.path().join("cache"),
-            component_storage: None,
-            default_plugins: vec![],
-            delivery: None,
-            development: None,
-        },
+        config(root.path()),
         vec![
             Arc::new(ScriptRuntimePlugin),
             Arc::new(ReplacementPlugin(calls.clone())),
@@ -139,6 +163,19 @@ async fn external_executor_uses_public_plugin_contract_without_database_or_compo
     Ok(())
 }
 
+fn config(root: &std::path::Path) -> HostConfig {
+    HostConfig {
+        remote_capabilities: None,
+        database_url: "deliberately invalid: no database".into(),
+        public_origin: "http://127.0.0.1".into(),
+        cache_root: root.join("cache"),
+        component_storage: None,
+        default_plugins: vec![],
+        delivery: None,
+        development: None,
+    }
+}
+
 fn package() -> Result<Package> {
     Ok(serde_json::from_value(json!({
         "schema_version": 1, "enhancements": [{
@@ -148,6 +185,81 @@ fn package() -> Result<Package> {
     }))?)
 }
 
+#[tokio::test]
+async fn explicitly_selected_script_runtime_rejects_zero_executors() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let result =
+        RuntimeState::initialize(config(root.path()), vec![Arc::new(ScriptRuntimePlugin)]).await;
+    let error = result.err().context("空脚本运行时被接受")?;
+    assert!(format!("{error:#}").contains("未装配任何脚本执行器"));
+    assert!(!root.path().join("cache").exists());
+    Ok(())
+}
+
+#[cfg(any(feature = "rhai", feature = "typescript"))]
+async fn language_executor(
+    plugin: az_plugin_core::DynPlugin<RuntimeAssembly>,
+    language: Language,
+) -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let state = RuntimeState::initialize(
+        config(root.path()),
+        vec![Arc::new(ScriptRuntimePlugin), plugin],
+    )
+    .await?;
+    let runtime = state.service::<ScriptRuntime>()?;
+    let mut package = package()?;
+    package.enhancements[0].language = language;
+    if language == Language::TypeScript {
+        package.enhancements[0].source =
+            "export function invoke(input: number): number { return input * 2; }".into();
+    }
+    let prepared = runtime.prepare(package.clone())?;
+    assert_eq!(
+        prepared
+            .invocation(
+                ScriptContext::default(),
+                vec!["/v1/math/double".into()],
+                Default::default(),
+                None
+            )
+            .invoke("/v1/math/double", &json!(21))?,
+        json!(42)
+    );
+    package.enhancements[0].language = match language {
+        Language::Rhai => Language::TypeScript,
+        Language::TypeScript => Language::Rhai,
+    };
+    let error = runtime
+        .prepare(package)
+        .err()
+        .context("未选择的语言被接受")?;
+    assert!(format!("{error:#}").contains("未装配支持该语言的脚本执行器"));
+    state.shutdown().await?;
+    Ok(())
+}
+
+#[cfg(feature = "rhai")]
+#[tokio::test]
+async fn rhai_can_run_without_the_typescript_plugin() -> Result<()> {
+    language_executor(
+        Arc::new(az_plugin_host::runtime::server::plugins::RhaiPlugin),
+        Language::Rhai,
+    )
+    .await
+}
+
+#[cfg(feature = "typescript")]
+#[tokio::test]
+async fn typescript_can_run_without_the_rhai_plugin() -> Result<()> {
+    language_executor(
+        Arc::new(az_plugin_host::runtime::server::plugins::TypeScriptPlugin),
+        Language::TypeScript,
+    )
+    .await
+}
+
+#[cfg(any(feature = "mcp", feature = "grpc"))]
 #[tokio::test]
 #[ignore = "需要独立本机 PostgreSQL"]
 async fn external_executor_handles_publication_protocol_calls_and_persisted_restoration()
@@ -179,7 +291,10 @@ async fn external_executor_handles_publication_protocol_calls_and_persisted_rest
             identity_support::with_identity(
                 identity.clone(),
                 vec![
+                    #[cfg(feature = "grpc")]
                     Arc::new(GrpcPlugin),
+                    #[cfg(feature = "mcp")]
+                    Arc::new(McpPlugin),
                     Arc::new(EnhancementsPlugin),
                     Arc::new(EnhancementServicePlugin),
                     Arc::new(ScriptRuntimePlugin),
@@ -216,20 +331,61 @@ async fn external_executor_handles_publication_protocol_calls_and_persisted_rest
                     .await?
                     .error_for_status()?;
             }
-            let mut client = EnhancementsClient::connect(base.clone()).await?;
-            let mut request = tonic::Request::new(InvokeRequest {
-                path: "/v1/math/double".into(),
-                input_json: serde_json::to_vec(&json!(21))?,
-            });
-            request
-                .metadata_mut()
-                .insert("authorization", "Bearer executor-test".parse()?);
-            let response = client.invoke(request).await?.into_inner();
-            assert_eq!(response.revision, revision);
-            assert_eq!(
-                serde_json::from_slice::<Value>(&response.output_json)?,
-                json!(42)
-            );
+            #[cfg(feature = "grpc")]
+            {
+                let mut client = EnhancementsClient::connect(base.clone()).await?;
+                let mut request = tonic::Request::new(InvokeRequest {
+                    path: "/v1/math/double".into(),
+                    input_json: serde_json::to_vec(&json!(21))?,
+                });
+                request
+                    .metadata_mut()
+                    .insert("authorization", "Bearer executor-test".parse()?);
+                let response = client.invoke(request).await?.into_inner();
+                assert_eq!(response.revision, revision);
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&response.output_json)?,
+                    json!(42)
+                );
+            }
+            #[cfg(feature = "mcp")]
+            {
+                use rmcp::{
+                    ServiceExt,
+                    model::CallToolRequestParams,
+                    transport::{
+                        StreamableHttpClientTransport,
+                        streamable_http_client::StreamableHttpClientTransportConfig,
+                    },
+                };
+                let config = StreamableHttpClientTransportConfig::with_uri(format!(
+                    "{base}/api/runtime/mcp"
+                ))
+                .auth_header("executor-test");
+                let transport = StreamableHttpClientTransport::with_client(
+                    reqwest_mcp::Client::builder().no_proxy().build()?,
+                    config,
+                );
+                let client = ().serve(transport).await?;
+                let output = async {
+                    let tools = client.list_all_tools().await?;
+                    assert_eq!(tools.len(), 1);
+                    assert_eq!(tools[0].name, "v1.math.double");
+                    let response = client
+                        .call_tool(CallToolRequestParams::new("v1.math.double").with_arguments(
+                            json!({"input":21}).as_object().context("参数无效")?.clone(),
+                        ))
+                        .await?;
+                    assert_ne!(response.is_error, Some(true));
+                    let content = response.structured_content.context("缺少 MCP 输出")?;
+                    assert_eq!(content["output"], 42);
+                    assert_eq!(content["revision"], revision);
+                    Ok::<_, anyhow::Error>(())
+                }
+                .await;
+                client.cancel().await?;
+                output?;
+            }
             // 首次发布与重建后的懒恢复都必须走应用提供的执行器。
             assert_eq!(calls.load(Ordering::SeqCst), generation + 1);
             assert!(!root.path().join("cache").exists());

@@ -79,7 +79,9 @@ pub(in crate::runtime::server) async fn finish_publication(
 }
 
 pub(in crate::runtime::server) async fn tick(state: &RuntimeState) -> Result<()> {
-    let Some(components) = state.optional_components()? else {
+    let Some(components) =
+        state.optional_service::<crate::runtime::server::components::Components>()?
+    else {
         return Ok(());
     };
     let pending = sqlx::query_as::<_, (i64, Vec<u8>, String)>("SELECT j.id,p.archive,p.readme FROM delivery_jobs j JOIN delivery_component_packages p ON p.job_id=j.id WHERE j.state='publishing' ORDER BY j.id LIMIT 1")

@@ -46,10 +46,10 @@ fn active_request<'a>(
 
 impl Services {
     pub(super) fn with_enhancements(
-        enhancements: Arc<super::super::enhancements::Enhancements>,
+        enhancements: Option<Arc<super::super::enhancements::Enhancements>>,
     ) -> Self {
         Self {
-            enhancements: Some(enhancements),
+            enhancements,
             ..Default::default()
         }
     }

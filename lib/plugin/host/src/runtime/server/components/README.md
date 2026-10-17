@@ -20,7 +20,7 @@ Component 前端单独变化时保留同一执行实例；本地服务由 CLI �
 
 ## 权限与菜单验证
 
-`tenant_installation_grants_members_and_menu_visibility_preserves_runtime` 在独立 `component_market_test` PostgreSQL 与真实 WIT 测试组件上验证成员自动授权、跨租户与已移除成员拒绝、旧权限索引回填、升级回退、启停卸载，以及隐藏菜单不改变运行实例和授权。设置 `AIO_COMPONENT_TEST_DATABASE_URL` 与 `AIO_TEST_HEALTHY_COMPONENT` 后运行 `cargo test -p az-plugin-host --features server,wasm,sidecar --lib components:: -- --include-ignored`。
+`tenant_installation_grants_members_and_menu_visibility_preserves_runtime` 在独立 `component_market_test` PostgreSQL 与真实 WIT 测试组件上验证成员自动授权、跨租户与已移除成员拒绝、旧权限索引回填、升级回退、启停卸载，以及隐藏菜单不改变运行实例和授权。设置 `AIO_COMPONENT_TEST_DATABASE_URL` 与 `AIO_TEST_HEALTHY_COMPONENT` 后运行 `cargo test -p az-plugin-host --features wasm,sidecar,rhai,typescript --lib components:: -- --include-ignored`。
 
 `tests/component_execution/access.rs` 用真实 HTTP 和替代执行器覆盖宿主权限隔离、旧会话快照撤权、资源及续期拒绝、身份头伪造、跨租户、提供者查询失败、升级回滚、重启回填和默认拒绝。运行 `cargo test -p az-plugin-host --no-default-features --features server --test component_executors access:: -- --ignored`。`protected_wasm_and_sidecar_require_live_interaction_through_the_broker` 使用真实 Wasm、开发态 Sidecar 和 Unix socket broker，覆盖受保护目标跨执行器替换、后台拒绝、派生上下文归属与失效、菜单和设置权限；需要 `wasm,sidecar` feature 和上述两个测试环境变量。这些用例不依赖浏览器或真实容器监督器，不能作为容器隔离或产品系统包迁移完成的证据。
 

@@ -18,7 +18,7 @@ az-ui-components = { workspace = true, optional = true }
 
 [features]
 default = ["server"]
-server = ["dep:az-plugin-core", "az-plugin-host/server", "az-plugin-host/wasm", "az-plugin-host/sidecar", "az-plugin-host/remote", "dep:axum", "dep:tokio"]
+server = ["dep:az-plugin-core", "az-plugin-host/server", "az-plugin-host/rhai", "az-plugin-host/typescript", "az-plugin-host/mcp", "az-plugin-host/grpc", "az-plugin-host/wasm", "az-plugin-host/sidecar", "az-plugin-host/remote", "dep:axum", "dep:tokio"]
 web = ["az-plugin-host/web", "dep:dioxus", "dioxus/web", "dioxus/launch", "dep:az-ui-components"]
 
 [lints]

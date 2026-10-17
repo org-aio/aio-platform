@@ -18,8 +18,10 @@ mod lifecycle_tests;
 mod live;
 #[cfg(test)]
 mod live_tests;
+#[cfg(test)]
+mod optional_tests;
 pub(super) mod process_execution;
-#[cfg(feature = "remote")]
+#[cfg(any(feature = "remote-mcp", feature = "remote-grpc"))]
 mod remote_capabilities;
 mod resource;
 mod service_bindings;
@@ -50,7 +52,7 @@ pub use live::RuntimeHost;
 pub use process_execution::{
     ProcessExecutor, ProcessInstance, ProcessResponse, StartProcessRequest,
 };
-#[cfg(feature = "remote")]
+#[cfg(any(feature = "remote-mcp", feature = "remote-grpc"))]
 pub use remote_capabilities::RemoteCapabilitiesPlugin;
 pub use resource::Resource;
 pub use service_bindings::ServiceBindings;
@@ -73,7 +75,7 @@ pub struct RuntimeAssembly {
     routes: Vec<RouteFactory>,
     requirements: Vec<fn(&Catalog, bool) -> Result<()>>,
     lifecycle: Vec<HookPlan>,
-    required_services: std::collections::HashSet<TypeId>,
+    service_dependencies: std::collections::HashSet<TypeId>,
     catalog_sensitive: bool,
 }
 
@@ -131,9 +133,23 @@ impl RuntimeAssembly {
         self.catalog_sensitive = true;
     }
 
+    /// 可选服务存在时必须唯一，并先于使用方初始化；缺省时不创建替代实现。
+    /// 在线增删提供者同样触发依赖重建，实际解析仍使用同一个 Dill 容器。
+    pub fn optional_service<I: ?Sized + Send + Sync + 'static>(&mut self) {
+        self.service_dependencies.insert(TypeId::of::<I>());
+        self.requirements.push(|catalog, resolve| {
+            let count = catalog.builders_for::<I>().count();
+            anyhow::ensure!(count <= 1, "可选服务存在重复绑定: {:?}", TypeId::of::<I>());
+            if resolve && count == 1 {
+                catalog.get_one::<I>().context("初始化可选宿主服务失败")?;
+            }
+            Ok(())
+        });
+    }
+
     /// 路由依赖接口而不是某个默认实现；所有插件注册完成后检查唯一绑定。
     pub fn require_service<I: ?Sized + Send + Sync + 'static>(&mut self) {
-        self.required_services.insert(TypeId::of::<I>());
+        self.service_dependencies.insert(TypeId::of::<I>());
         self.requirements.push(|catalog, resolve| {
             anyhow::ensure!(
                 catalog.builders_for::<I>().count() == 1,
@@ -194,9 +210,9 @@ fn validate_selection(
     plugins: &[DynPlugin<RuntimeAssembly>],
 ) -> Result<()> {
     if config.remote_capabilities.is_some() {
-        #[cfg(not(feature = "remote"))]
-        anyhow::bail!("远端能力配置需要启用 remote feature");
-        #[cfg(feature = "remote")]
+        #[cfg(not(any(feature = "remote-mcp", feature = "remote-grpc")))]
+        anyhow::bail!("远端能力配置需要启用 remote-mcp 或 remote-grpc feature");
+        #[cfg(any(feature = "remote-mcp", feature = "remote-grpc"))]
         anyhow::ensure!(plugins.iter().any(|plugin| plugin.as_ref().type_id() == TypeId::of::<RemoteCapabilitiesPlugin>()), "远端能力配置需要装配 RemoteCapabilitiesPlugin");
     }
     let _ = plugins;

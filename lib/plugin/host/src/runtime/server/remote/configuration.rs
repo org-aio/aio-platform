@@ -1,7 +1,6 @@
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+#[cfg(feature = "remote-grpc")]
+use std::path::PathBuf;
+use std::{path::Path, time::Duration};
 
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
@@ -33,15 +32,15 @@ pub(super) struct Import {
 #[derive(Deserialize)]
 #[serde(tag = "protocol", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Transport {
-    Mcp {
-        tool: String,
-        output: McpOutput,
-    },
+    #[cfg(feature = "remote-mcp")]
+    Mcp { tool: String, output: McpOutput },
+    #[cfg(feature = "remote-mcp")]
     McpStdio {
         tool: String,
         output: McpOutput,
         command: super::mcp_stdio::CommandSpec,
     },
+    #[cfg(feature = "remote-grpc")]
     Grpc {
         descriptor_set: PathBuf,
         service: String,
@@ -49,11 +48,36 @@ pub(super) enum Transport {
     },
 }
 
+#[cfg(feature = "remote-mcp")]
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum McpOutput {
     Structured,
     Envelope,
+}
+
+impl Import {
+    pub fn authorization(&self) -> Result<Option<axum::http::HeaderValue>> {
+        let grpc = match &self.transport {
+            #[cfg(feature = "remote-mcp")]
+            Transport::Mcp { .. } => false,
+            #[cfg(feature = "remote-mcp")]
+            Transport::McpStdio { .. } => {
+                ensure!(
+                    self.endpoint.is_none() && self.credential_env.is_none(),
+                    "MCP stdio 不接受 endpoint 或 Bearer 凭据，请配置 command.env"
+                );
+                return Ok(None);
+            }
+            #[cfg(feature = "remote-grpc")]
+            Transport::Grpc { .. } => true,
+        };
+        endpoint(
+            self.endpoint.as_deref().context("远端能力缺少 endpoint")?,
+            grpc,
+        )?;
+        credential(self.credential_env.as_deref())
+    }
 }
 
 /// 配置和描述文件先读为同一候选的内存内容，连接校验期间不再读取变化中的文件。
@@ -72,21 +96,25 @@ impl Loaded {
         digest.update((bytes.len() as u64).to_le_bytes());
         digest.update(&bytes);
         let mut imports = Vec::new();
+        #[cfg(feature = "remote-grpc")]
         let mut total = bytes.len();
         for import in config.imports {
-            let descriptor = if let Transport::Grpc { descriptor_set, .. } = &import.transport {
-                let descriptor = path.parent().unwrap_or(Path::new(".")).join(descriptor_set);
-                let bytes = read(&descriptor).await?;
-                total += bytes.len();
-                ensure!(
-                    total <= 8 * MAX_WIRE_BYTES,
-                    "远端能力候选文件总量超过 8 MiB"
-                );
-                digest.update((bytes.len() as u64).to_le_bytes());
-                digest.update(&bytes);
-                Some(bytes)
-            } else {
-                None
+            let descriptor = match &import.transport {
+                #[cfg(feature = "remote-mcp")]
+                Transport::Mcp { .. } | Transport::McpStdio { .. } => None,
+                #[cfg(feature = "remote-grpc")]
+                Transport::Grpc { descriptor_set, .. } => {
+                    let descriptor = path.parent().unwrap_or(Path::new(".")).join(descriptor_set);
+                    let bytes = read(&descriptor).await?;
+                    total += bytes.len();
+                    ensure!(
+                        total <= 8 * MAX_WIRE_BYTES,
+                        "远端能力候选文件总量超过 8 MiB"
+                    );
+                    digest.update((bytes.len() as u64).to_le_bytes());
+                    digest.update(&bytes);
+                    Some(bytes)
+                }
             };
             imports.push((import, descriptor));
         }

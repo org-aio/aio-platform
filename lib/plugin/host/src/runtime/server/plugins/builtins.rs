@@ -40,9 +40,11 @@ route_plugin!(FrontendPlugin, [StorePlugin, RepositoryPlugin], [], |_| {
 route_plugin!(EnhancementsPlugin, [EnhancementServicePlugin], [], |_| {
     super::super::enhancements::router()
 });
+#[cfg(feature = "mcp")]
 route_plugin!(McpPlugin, [EnhancementServicePlugin], [], |state| {
     super::super::protocols::mcp::router(state.clone())
 });
+#[cfg(feature = "grpc")]
 route_plugin!(GrpcPlugin, [EnhancementServicePlugin], [], |state| {
     super::super::protocols::grpc::router(state.clone())
 });
@@ -115,7 +117,9 @@ impl Plugin<RuntimeAssembly> for ComponentsPlugin {
             assembly.add_routes(|state| Ok(super::super::components::router(state.clone())));
             assembly.on_start::<Self>(|state, _tasks| {
                 Box::pin(async move {
-                    if let Some(components) = state.optional_components()? {
+                    if let Some(components) = state
+                        .optional_service::<crate::runtime::server::components::Components>()?
+                    {
                         components.restore().await?;
                     }
                     Ok(())
@@ -207,21 +211,12 @@ pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
         .add::<KeyringPlugin>()
         .add::<StorePlugin>()
         .add::<RepositoryPlugin>()
-        .add::<RhaiPlugin>()
-        .add::<TypeScriptPlugin>()
-        .add::<ScriptRuntimePlugin>()
-        .add::<EnhancementServicePlugin>()
-        .add::<super::EvolutionPlugin>()
         .add::<WorkerServicePlugin>()
-        .add::<super::WorkerCapabilitiesPlugin>()
         .add::<WorkerWebviewServicePlugin>()
         .add::<PersonalConfigServicePlugin>()
         .add::<ClipboardServicePlugin>()
         .add::<ManagementPlugin>()
         .add::<FrontendPlugin>()
-        .add::<EnhancementsPlugin>()
-        .add::<McpPlugin>()
-        .add::<GrpcPlugin>()
         .add::<BootstrapPlugin>()
         .add::<NavigationPlugin>()
         .add::<ToolsPlugin>()
@@ -229,11 +224,34 @@ pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
         .add::<WorkerWebviewsPlugin>()
         .add::<PersonalConfigPlugin>()
         .add::<ClipboardPlugin>();
+    #[cfg(feature = "rhai")]
+    catalog.add::<RhaiPlugin>();
+    #[cfg(feature = "typescript")]
+    catalog.add::<TypeScriptPlugin>();
+    // 协议默认组合仍需执行器；只编译协议的定制宿主应显式装配外部执行器。
+    #[cfg(any(
+        feature = "rhai",
+        feature = "typescript",
+        feature = "mcp",
+        feature = "grpc",
+        feature = "remote-mcp",
+        feature = "remote-grpc"
+    ))]
+    catalog
+        .add::<ScriptRuntimePlugin>()
+        .add::<EnhancementServicePlugin>()
+        .add::<super::EvolutionPlugin>()
+        .add::<super::WorkerCapabilitiesPlugin>()
+        .add::<EnhancementsPlugin>();
+    #[cfg(feature = "mcp")]
+    catalog.add::<McpPlugin>();
+    #[cfg(feature = "grpc")]
+    catalog.add::<GrpcPlugin>();
     #[cfg(feature = "wasm")]
     catalog.add::<WasmPlugin>().add::<WasmComponentPlugin>();
     #[cfg(feature = "sidecar")]
     catalog.add::<ProcessPlugin>().add::<SidecarPlugin>();
-    #[cfg(feature = "remote")]
+    #[cfg(any(feature = "remote-mcp", feature = "remote-grpc"))]
     catalog.add::<super::RemoteCapabilitiesPlugin>();
     #[cfg(any(feature = "wasm", feature = "sidecar"))]
     catalog

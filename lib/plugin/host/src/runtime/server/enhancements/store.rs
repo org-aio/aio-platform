@@ -1,3 +1,5 @@
+#[cfg(any(feature = "mcp", feature = "grpc"))]
+use az_plugin_enhancement::EnhancementContract;
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
@@ -6,7 +8,7 @@ use std::{
 use anyhow::{Context, Result, ensure};
 use az_plugin_contract::{EnhancementRequest, EnhancementResponse, InvocationScope};
 use az_plugin_enhancement::{
-    EnhancementContract, Package, PreparedPackage, ScriptContext, ScriptInvocation, ScriptRuntime,
+    Package, PreparedPackage, ScriptContext, ScriptInvocation, ScriptRuntime,
 };
 use sqlx::PgPool;
 use tokio::sync::Semaphore;
@@ -43,6 +45,7 @@ impl Enhancements {
     }
 
     /// 发现和调用读取同一活动指针；目录不暴露源码，也不保存独立的协议版本状态。
+    #[cfg(any(feature = "mcp", feature = "grpc"))]
     pub(in crate::runtime::server) async fn catalog(
         &self,
         tenant: &str,

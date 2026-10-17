@@ -22,7 +22,11 @@ pub(super) async fn remove(
     let mut exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM marketplace_entries WHERE git=$1) OR EXISTS(SELECT 1 FROM plugin_sources WHERE git=$1)",
     ).bind(&request.git).fetch_one(&state.store()?.pool).await?;
-    if !exists && state.optional_components()?.is_some() {
+    if !exists
+        && state
+            .optional_service::<crate::runtime::server::components::Components>()?
+            .is_some()
+    {
         exists = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM component_sources WHERE git=$1)")
             .bind(&request.git)
             .fetch_one(&state.store()?.pool)

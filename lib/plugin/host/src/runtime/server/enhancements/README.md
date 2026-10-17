@@ -23,7 +23,7 @@ Rhai 和 TypeScript 通过 `call_enhancement(path, input)` 组合包内增强；
 
 ```sh
 AIO_ENHANCEMENT_TEST_DATABASE_URL=postgresql://test@127.0.0.1:5432/kernel_test \
-  cargo test -p az-plugin-host --features server enhancements::tests -- --ignored
+  cargo test -p az-plugin-host --features rhai,typescript enhancements::tests -- --ignored
 ```
 
 ## 宿主能力与脚本自举

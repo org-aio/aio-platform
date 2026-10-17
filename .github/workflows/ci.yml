@@ -11,6 +11,9 @@ jobs:
     # 超时测试会故意占用解释器；串行执行，避免其他用例因调度等待耗尽 100ms 预算。
     env:
       RUST_TEST_THREADS: '1'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
     services:
       postgres:
         image: postgres:16-bookworm
@@ -42,17 +45,18 @@ jobs:
       - run: node --test sdk/web/bridge.test.mjs sdk/web/file-drop.test.mjs sdk/web/device-transport.test.mjs sdk/web/static-transport.test.mjs cli/src/tools/release.test.cjs
       - name: 验证精简宿主与独立执行器编译边界
         run: |
-          for executor_profile in server sidecar remote; do
-            cargo tree -p az-plugin-host --no-default-features --features "$executor_profile" -e normal,build --prefix none > /tmp/aio-executor-dependencies
-            if grep -E '^(wasmtime|cranelift)' /tmp/aio-executor-dependencies; then
-              exit 1
-            fi
-          done
-          for executor_profile in server wasm sidecar remote; do
+          node scripts/check-host-features.mjs
+          for executor_profile in server wasm sidecar rhai typescript mcp grpc remote-mcp remote-grpc remote; do
+            cargo clippy -p az-plugin-host --no-default-features --features "$executor_profile" --lib -- -D warnings
             cargo clippy -p az-plugin-host --no-default-features --features "$executor_profile" --all-targets -- -D warnings
           done
           cargo test -p az-plugin-host --no-default-features --features server
-          cargo test -p az-plugin-host --no-default-features --features remote remote::tests
+          for language_profile in rhai typescript; do
+            cargo test -p az-plugin-host --no-default-features --features "$language_profile" --test executor_plugins
+          done
+          for protocol_profile in remote-mcp remote-grpc remote; do
+            cargo test -p az-plugin-host --no-default-features --features "$protocol_profile" remote::tests
+          done
           cargo test -p az-plugin-runtime --no-default-features
           cargo test -p az-plugin-manifest --no-default-features --features validation
           cargo clippy -p az-plugin-manifest --no-default-features --features validation --all-targets -- -D warnings
@@ -62,15 +66,17 @@ jobs:
       - name: 验证增强持久化、隔离、并发激活与回滚
         run: |
           psql "$AIO_ENHANCEMENT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'REVOKE ALL ON SCHEMA public FROM PUBLIC;'
-          cargo test -p az-plugin-host --lib --features server,wasm,sidecar enhancements::tests -- --ignored --test-threads=1
-          cargo test -p az-plugin-host --lib --features server,wasm,sidecar plugins::tests -- --test-threads=1
-          cargo test -p az-plugin-host --lib --features server,wasm,sidecar plugins::infrastructure_tests -- --include-ignored --test-threads=1
-          cargo test -p az-plugin-host --lib --features server,wasm,sidecar plugins::lifecycle_tests -- --ignored --test-threads=1
-          cargo test -p az-plugin-host --features server,wasm,sidecar --test service_plugins -- --ignored
-          cargo test -p az-plugin-host --no-default-features --features server --test executor_plugins -- --ignored
+          cargo test -p az-plugin-host --lib --features server,wasm,sidecar,rhai,typescript,mcp,grpc enhancements::tests -- --ignored --test-threads=1
+          cargo test -p az-plugin-host --lib --features server,wasm,sidecar,rhai,typescript,mcp,grpc plugins::tests -- --test-threads=1
+          cargo test -p az-plugin-host --lib --features server,wasm,sidecar,rhai,typescript,mcp,grpc plugins::infrastructure_tests -- --include-ignored --test-threads=1
+          cargo test -p az-plugin-host --lib --features server,wasm,sidecar,rhai,typescript,mcp,grpc plugins::lifecycle_tests -- --ignored --test-threads=1
+          cargo test -p az-plugin-host --features server,wasm,sidecar,rhai,typescript,mcp,grpc --test service_plugins -- --ignored
+          for protocol_profile in mcp grpc; do
+            cargo test -p az-plugin-host --no-default-features --features "$protocol_profile" --test executor_plugins -- --include-ignored
+          done
           cargo build -p az-plugin-host --no-default-features --features remote --example mcp-stdio-fixture
-          cargo test -p az-plugin-host --lib --no-default-features --features remote protocols::tests -- --ignored --test-threads=1
-          cargo test -p az-plugin-host --lib --no-default-features --features sidecar sidecar_enhancements_bind_identity_grants_and_active_revision -- --ignored
+          cargo test -p az-plugin-host --lib --no-default-features --features remote,mcp,grpc,rhai,typescript protocols::tests -- --ignored --test-threads=1
+          cargo test -p az-plugin-host --lib --no-default-features --features sidecar,rhai,typescript sidecar_enhancements_bind_identity_grants_and_active_revision -- --ignored
         env:
           AIO_ENHANCEMENT_TEST_DATABASE_URL: postgresql://postgres:channel-test@127.0.0.1:5432/channel_test
           AIO_REMOTE_TEST_CREDENTIAL: remote-test
@@ -79,8 +85,8 @@ jobs:
           AIO_MCP_STDIO_HOST_SECRET: must-not-inherit
       - name: 验证 sidecar 任务、设备视图消息、资源及撤权
         run: |
-          cargo test -p az-plugin-host --lib --features server,wasm,sidecar workspace_access_cancel_and_bridge_isolation -- --ignored
-          cargo test -p az-plugin-host --lib --features server,wasm,sidecar webview_channel_roundtrip_isolation_and_revocation -- --ignored
+          cargo test -p az-plugin-host --lib --features server,wasm,sidecar,rhai,typescript,mcp,grpc workspace_access_cancel_and_bridge_isolation -- --ignored
+          cargo test -p az-plugin-host --lib --features server,wasm,sidecar,rhai,typescript,mcp,grpc webview_channel_roundtrip_isolation_and_revocation -- --ignored
         env:
           AIO_TEST_DATABASE_URL: postgresql://postgres:channel-test@127.0.0.1:5432/channel_test
       - run: cargo build --manifest-path lib/plugin/runtime/tests/fixture/Cargo.toml --locked --release --target wasm32-wasip2 --target-dir target/fixture/healthy
@@ -102,8 +108,8 @@ jobs:
           cargo test -p az-plugin-host --lib --no-default-features --features sidecar publication_preserves_running_singleton_process -- --ignored
           export AIO_PLUGIN_SUPERVISOR_SOCKET="$AIO_PROCESS_ROOT/combined-supervisor.sock"
           cargo test -p az-plugin-host --lib --no-default-features --features wasm,sidecar publication_preserves_running_singleton_process -- --ignored
-          cargo test -p az-plugin-host --lib --features server,wasm,sidecar development_switch_preserves_cli_ownership_and_refreshes_frontend -- --ignored
-          cargo test -p az-plugin-host --lib --features server,wasm,sidecar protected_wasm_and_sidecar_require_live_interaction_through_the_broker -- --ignored
+          cargo test -p az-plugin-host --lib --features server,wasm,sidecar,rhai,typescript,mcp,grpc development_switch_preserves_cli_ownership_and_refreshes_frontend -- --ignored
+          cargo test -p az-plugin-host --lib --features server,wasm,sidecar,rhai,typescript,mcp,grpc protected_wasm_and_sidecar_require_live_interaction_through_the_broker -- --ignored
         env:
           AIO_TEST_HEALTHY_COMPONENT: ${{ github.workspace }}/target/fixture/healthy/wasm32-wasip2/release/release_fixture.wasm
           AIO_PLUGIN_SUPERVISOR_SOCKET: /tmp/aio-component-executor-absent.sock

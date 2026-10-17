@@ -108,14 +108,6 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
     let child_git = format!("https://github.com/example/child-{tenant}.git");
     let first = package(&temp.path().join("parent"), &git, None, "1.0.0")?;
     let child = package(&temp.path().join("child"), &child_git, Some(&git), "1.0.0")?;
-    let enhancements = Arc::new(
-        crate::runtime::server::enhancements::Enhancements::open(
-            pool.clone(),
-            az_plugin_enhancement::default_runtime()?,
-            None,
-        )
-        .await?,
-    );
     let resource_catalog = dill::Catalog::builder()
         .add::<crate::runtime::server::plugins::PostgresComponentPlugin>()
         .add::<crate::runtime::server::plugins::FileObjectStoragePlugin>()
@@ -130,7 +122,7 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
         #[cfg(feature = "sidecar")]
         identity.clone(),
         resource_catalog.weak_ref(),
-        enhancements,
+        None,
         super::tests::default_executors()?,
     )
     .await?;
@@ -197,14 +189,6 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
         .await?;
     components.shutdown().await?;
     drop(components);
-    let enhancements = Arc::new(
-        crate::runtime::server::enhancements::Enhancements::open(
-            pool.clone(),
-            az_plugin_enhancement::default_runtime()?,
-            None,
-        )
-        .await?,
-    );
     let resource_catalog = dill::Catalog::builder()
         .add::<crate::runtime::server::plugins::PostgresComponentPlugin>()
         .add::<crate::runtime::server::plugins::FileObjectStoragePlugin>()
@@ -219,7 +203,7 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
         #[cfg(feature = "sidecar")]
         identity.clone(),
         resource_catalog.weak_ref(),
-        enhancements,
+        None,
         super::tests::default_executors()?,
     )
     .await?;

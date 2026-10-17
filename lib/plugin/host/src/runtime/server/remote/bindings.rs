@@ -13,9 +13,11 @@ use serde_json::Value;
 use super::super::plugins::{
     CapabilityProvider, CapabilityRequest, PluginTasks, RuntimeCapability,
 };
+use super::configuration::{Loaded, Transport};
+#[cfg(feature = "remote-grpc")]
+use super::grpc::{Grpc, Prepared};
+#[cfg(feature = "remote-mcp")]
 use super::{
-    configuration::{self, Loaded, Transport},
-    grpc::{Grpc, Prepared},
     mcp::{Connection, Mcp},
     mcp_http::BoundedClient,
 };
@@ -24,6 +26,7 @@ use super::{
 pub(super) struct Bindings {
     routes: BTreeMap<String, Route>,
     stopped: Arc<AtomicBool>,
+    #[cfg(feature = "remote-mcp")]
     tasks: Arc<PluginTasks>,
 }
 
@@ -35,13 +38,17 @@ struct Route {
 }
 
 enum Binding {
+    #[cfg(feature = "remote-mcp")]
     Mcp(Mcp),
+    #[cfg(feature = "remote-grpc")]
     Grpc(Grpc),
 }
 
 enum Pending {
+    #[cfg(feature = "remote-mcp")]
     Mcp(Mcp),
     // Tonic Endpoint 较大，MCP 候选无需承担它的栈空间。
+    #[cfg(feature = "remote-grpc")]
     Grpc(Box<Prepared>),
 }
 
@@ -51,6 +58,8 @@ impl Bindings {
         tasks: Arc<PluginTasks>,
         stopped: Arc<AtomicBool>,
     ) -> Result<Self> {
+        #[cfg(not(feature = "remote-mcp"))]
+        let _ = tasks;
         let mut routes = BTreeMap::<String, Route>::new();
         let mut bindings = HashSet::new();
         let mut pending = Vec::new();
@@ -61,22 +70,9 @@ impl Bindings {
                 "远端能力必须绑定明确租户"
             );
             az_plugin_contract::validate_enhancement_path(&import.capability.path)?;
-            let auth = if matches!(import.transport, Transport::McpStdio { .. }) {
-                ensure!(
-                    import.endpoint.is_none() && import.credential_env.is_none(),
-                    "MCP stdio 不接受 endpoint 或 Bearer 凭据，请配置 command.env"
-                );
-                None
-            } else {
-                configuration::endpoint(
-                    import
-                        .endpoint
-                        .as_deref()
-                        .context("远端能力缺少 endpoint")?,
-                    matches!(import.transport, Transport::Grpc { .. }),
-                )?;
-                configuration::credential(import.credential_env.as_deref())?
-            };
+            let auth = import.authorization()?;
+            #[cfg(not(feature = "remote-grpc"))]
+            let _ = descriptor;
             ensure!(
                 bindings.insert((import.capability.path.clone(), import.tenant_id.clone())),
                 "同一租户的远端能力路径重复"
@@ -100,6 +96,7 @@ impl Bindings {
                 );
             }
             let binding = match import.transport {
+                #[cfg(feature = "remote-mcp")]
                 Transport::Mcp { tool, output } => Pending::Mcp(Mcp::new(
                     Connection::Http {
                         endpoint: import.endpoint.context("远端能力缺少 endpoint")?,
@@ -109,6 +106,7 @@ impl Bindings {
                     output,
                     &import.capability,
                 )?),
+                #[cfg(feature = "remote-mcp")]
                 Transport::McpStdio {
                     tool,
                     output,
@@ -119,6 +117,7 @@ impl Bindings {
                     output,
                     &import.capability,
                 )?),
+                #[cfg(feature = "remote-grpc")]
                 Transport::Grpc {
                     service, method, ..
                 } => Pending::Grpc(Box::new(Grpc::prepare(
@@ -136,10 +135,12 @@ impl Bindings {
         }
         for (tenant, path, pending) in pending {
             let binding = match pending {
+                #[cfg(feature = "remote-mcp")]
                 Pending::Mcp(client) => {
                     client.validate(&tasks).await?;
                     Binding::Mcp(client)
                 }
+                #[cfg(feature = "remote-grpc")]
                 Pending::Grpc(client) => Binding::Grpc(client.connect().await?),
             };
             let route = routes.get_mut(&path).context("导入契约缺失")?;
@@ -148,6 +149,7 @@ impl Bindings {
         Ok(Self {
             routes,
             stopped,
+            #[cfg(feature = "remote-mcp")]
             tasks,
         })
     }
@@ -204,11 +206,13 @@ impl CapabilityProvider for Bindings {
         );
         let operation = async {
             match binding {
+                #[cfg(feature = "remote-mcp")]
                 Binding::Mcp(client) => {
                     client
                         .invoke(&request.input, &self.tasks, request.deadline())
                         .await
                 }
+                #[cfg(feature = "remote-grpc")]
                 Binding::Grpc(client) => client.invoke(&request.input, request.deadline()).await,
             }
         };

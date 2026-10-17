@@ -252,7 +252,11 @@ impl Fixture {
             crate::runtime::server::admin_test_support::with_identity(identity.clone(), plugins),
         )
         .await?;
-        assert!(state.optional_components()?.is_none());
+        assert!(
+            state
+                .optional_service::<crate::runtime::server::components::Components>()?
+                .is_none()
+        );
         assert!(state.service::<az_plugin_runtime::Keyring>().is_err());
         assert!(state.wasm().is_err());
         assert!(state.process().is_err());

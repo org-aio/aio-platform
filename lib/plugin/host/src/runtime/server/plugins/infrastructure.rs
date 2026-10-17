@@ -19,10 +19,7 @@ use az_plugin_runtime::Keyring;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 
 use super::super::{components::Components, repository::RepositoryInstaller, store::PluginStore};
-use super::{
-    ComponentExecutionPlugin, ComponentExecutors, EnhancementServicePlugin, Resource,
-    RuntimeAssembly,
-};
+use super::{ComponentExecutionPlugin, ComponentExecutors, Resource, RuntimeAssembly};
 use crate::configuration::HostConfig;
 
 /// 提供当前宿主拥有的数据库连接池；应用可替换连接建立方式，停止时统一关闭。
@@ -283,7 +280,6 @@ impl Plugin<RuntimeAssembly> for ComponentResourcesPlugin {
         vec![
             TypeId::of::<StorePlugin>(),
             TypeId::of::<KeyringPlugin>(),
-            TypeId::of::<EnhancementServicePlugin>(),
             TypeId::of::<ComponentExecutionPlugin>(),
         ]
     }
@@ -294,6 +290,7 @@ impl Plugin<RuntimeAssembly> for ComponentResourcesPlugin {
             }
             assembly.require_service::<dyn super::ComponentDatabaseProvider>();
             assembly.require_service::<dyn super::ObjectStorageProvider>();
+            assembly.optional_service::<super::super::enhancements::Enhancements>();
             assembly.observe_catalog();
             assembly.declare_resource::<Components>()?;
             assembly.on_initialize::<Self>(|state, _| {
@@ -310,7 +307,7 @@ impl Plugin<RuntimeAssembly> for ComponentResourcesPlugin {
                         #[cfg(feature = "sidecar")]
                         state.service::<dyn crate::identity::IdentityProvider>()?,
                         state.extensions.services.weak_ref(),
-                        state.service::<super::super::enhancements::Enhancements>()?,
+                        state.optional_service::<super::super::enhancements::Enhancements>()?,
                         state.service::<ComponentExecutors>()?,
                     )
                     .await?;

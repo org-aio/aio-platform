@@ -23,7 +23,7 @@ fn scope(context: &RequestContext, source: &str) -> InvocationScope {
 
 #[tokio::test]
 async fn interactive_requests_bind_source_and_delegation_expires_with_parent() -> Result<()> {
-    let services = Arc::new(Services::default());
+    let services = Arc::new(Services::with_enhancements(None));
     let request = services.enter(&session(), "first")?;
     let id = &request.context.request_id;
     assert!(services.interactive(id, "tenant", "first").is_ok());
@@ -34,6 +34,18 @@ async fn interactive_requests_bind_source_and_delegation_expires_with_parent() -
             .authorize(&scope(&request.context, "first"), "read")
             .await?
     );
+    let error = services
+        .enhance(
+            &scope(&request.context, "first"),
+            az_plugin_contract::EnhancementRequest {
+                path: "/v1/optional/missing".into(),
+                input: serde_json::Value::Null,
+            },
+        )
+        .await
+        .err()
+        .context("未装配增强服务却接受了调用")?;
+    assert!(error.to_string().contains("增强服务未绑定"));
     assert!(
         !services
             .authorize(&scope(&request.context, "second"), "read")

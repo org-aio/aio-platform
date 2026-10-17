@@ -35,7 +35,7 @@ mod publication;
 mod publication_validation;
 mod publisher_store;
 mod releases;
-#[cfg(feature = "remote")]
+#[cfg(any(feature = "remote-mcp", feature = "remote-grpc"))]
 mod remote;
 mod remote_access;
 mod repository;
@@ -120,14 +120,9 @@ impl RuntimeState {
         self.service()
     }
 
-    fn optional_components(&self) -> Result<Option<Arc<components::Components>>> {
-        if self
-            .extensions
-            .services
-            .builders_for::<components::Components>()
-            .count()
-            == 0
-        {
+    /// 解析可选服务；缺失返回 None，重复绑定和构造失败仍返回错误。
+    pub fn optional_service<I: ?Sized + Send + Sync + 'static>(&self) -> Result<Option<Arc<I>>> {
+        if self.extensions.services.builders_for::<I>().count() == 0 {
             return Ok(None);
         }
         self.service().map(Some)

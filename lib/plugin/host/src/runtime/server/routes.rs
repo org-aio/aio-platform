@@ -299,7 +299,8 @@ async fn enable(
     Path(source_id): Path<String>,
 ) -> Result<Json<RuntimeResponse<RuntimeCatalog>>, RuntimeError> {
     let session = authenticate_manager(&state, &headers).await?;
-    if let Some(components) = state.optional_components()?
+    if let Some(components) =
+        state.optional_service::<crate::runtime::server::components::Components>()?
         && components.contains_source(&source_id).await?
     {
         components
@@ -381,7 +382,9 @@ async fn disable(
     Path(source_id): Path<String>,
 ) -> Result<Json<RuntimeResponse<RuntimeCatalog>>, RuntimeError> {
     let session = authenticate_manager(&state, &headers).await?;
-    if let Some(components) = state.optional_components()? {
+    if let Some(components) =
+        state.optional_service::<crate::runtime::server::components::Components>()?
+    {
         if components.contains_source(&source_id).await? {
             components
                 .change(
@@ -436,7 +439,9 @@ async fn uninstall(
     Path(source_id): Path<String>,
 ) -> Result<Json<RuntimeResponse<RuntimeCatalog>>, RuntimeError> {
     let session = authenticate_manager(&state, &headers).await?;
-    if let Some(components) = state.optional_components()? {
+    if let Some(components) =
+        state.optional_service::<crate::runtime::server::components::Components>()?
+    {
         if components.contains_source(&source_id).await? {
             components
                 .change(
@@ -491,7 +496,8 @@ async fn rollback(
     Path(source_id): Path<String>,
 ) -> Result<Json<RuntimeResponse<RuntimeCatalog>>, RuntimeError> {
     let session = authenticate_manager(&state, &headers).await?;
-    if let Some(components) = state.optional_components()?
+    if let Some(components) =
+        state.optional_service::<crate::runtime::server::components::Components>()?
         && components.contains_source(&source_id).await?
     {
         components
@@ -596,7 +602,9 @@ async fn marketplace(
 ) -> Result<Json<RuntimeResponse<Vec<super::tools::MarketplaceItem>>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
     let catalog = catalog_value(&state, &session).await?;
-    let mut entries = if let Some(components) = state.optional_components()? {
+    let mut entries = if let Some(components) =
+        state.optional_service::<crate::runtime::server::components::Components>()?
+    {
         components.entries(&session.tenant_id).await?
     } else {
         Vec::new()

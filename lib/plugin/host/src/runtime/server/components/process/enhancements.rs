@@ -51,7 +51,12 @@ pub(super) async fn invoke(
         if context_id.is_some() {
             components.services.enhance(&scope, request).await
         } else {
-            components.enhancements.invoke(&scope, request, None).await
+            components
+                .enhancements
+                .as_ref()
+                .context("宿主未安装增强服务")?
+                .invoke(&scope, request, None)
+                .await
         }
     }
     .await;

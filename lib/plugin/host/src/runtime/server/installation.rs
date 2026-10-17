@@ -25,7 +25,8 @@ pub(super) async fn install(
         !super::marketplace_removal::is_removed(&state.store()?.pool, &request.git).await?,
         "插件已从市场删除，无法安装"
     );
-    if let Some(components) = state.optional_components()?
+    if let Some(components) =
+        state.optional_service::<crate::runtime::server::components::Components>()?
         && let Some((source, bundle)) = components
             .published(&request.git, request.rev.as_deref())
             .await?

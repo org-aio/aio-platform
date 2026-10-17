@@ -46,7 +46,8 @@ pub(super) async fn details(
     Path(revision): Path<String>,
 ) -> Result<Json<RuntimeResponse<serde_json::Value>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
-    if let Some(components) = state.optional_components()?
+    if let Some(components) =
+        state.optional_service::<crate::runtime::server::components::Components>()?
         && let Some(data) = components.details(&revision).await?
     {
         return Ok(Json(RuntimeResponse { data }));

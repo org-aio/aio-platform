@@ -97,7 +97,10 @@ pub(super) async fn download_package(
     Path(revision): Path<String>,
 ) -> Result<Response, RuntimeError> {
     authenticate(&state, &headers).await?;
-    let native: Option<Vec<u8>> = if state.optional_components()?.is_some() {
+    let native: Option<Vec<u8>> = if state
+        .optional_service::<crate::runtime::server::components::Components>()?
+        .is_some()
+    {
         sqlx::query_scalar("SELECT archive FROM component_versions WHERE digest=$1")
             .bind(&revision)
             .fetch_optional(&state.store()?.pool)

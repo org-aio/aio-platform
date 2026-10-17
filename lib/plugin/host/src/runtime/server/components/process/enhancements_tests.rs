@@ -162,7 +162,7 @@ async fn verify_sidecar(metering: bool) -> Result<()> {
         )?),
         identity.clone(),
         resource_catalog.weak_ref(),
-        enhancements,
+        Some(enhancements.clone()),
         crate::runtime::server::components::tests::default_executors()?,
     )
     .await?;
@@ -202,12 +202,10 @@ async fn verify_sidecar(metering: bool) -> Result<()> {
             }],
         }],
     };
-    let enhancement = components
-        .enhancements
+    let enhancement = enhancements
         .propose(&tenant, "test", package.clone(), async { Ok(()) })
         .await?;
-    components
-        .enhancements
+    enhancements
         .activate(
             &tenant,
             "test",
@@ -312,8 +310,8 @@ async fn verify_sidecar(metering: bool) -> Result<()> {
         composed.enhancements[0].capabilities.clear();
         composed.enhancements[0].source = "export function invoke(input, context) { context.tenant_id = 'forged'; return call_enhancement('/v1/caller/identity', input); }".into();
         composed.enhancements.push(leaf);
-        let updated = components.enhancements.propose(&tenant, "test", composed, async { Ok(()) }).await?;
-        components.enhancements.activate(&tenant, "test", crate::runtime::server::enhancements::Activation { revision: Some(updated.clone()), expected_generation: 1 }, false, async { Ok(()) }).await?.context("激活组合增强失败")?;
+        let updated = enhancements.propose(&tenant, "test", composed, async { Ok(()) }).await?;
+        enhancements.activate(&tenant, "test", crate::runtime::server::enhancements::Activation { revision: Some(updated.clone()), expected_generation: 1 }, false, async { Ok(()) }).await?.context("激活组合增强失败")?;
         // 已启动进程不会因增强增加依赖就自动取得新权限。
         assert_eq!(client.post(endpoint).header("x-aio-token", "fixture-token").json(&request).send().await?.status(), 403);
         let socket = root.path().join("composed-broker.sock");

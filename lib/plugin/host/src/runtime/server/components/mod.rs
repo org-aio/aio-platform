@@ -46,7 +46,7 @@ pub(super) use resources::load_keyring;
 
 pub(super) struct Components {
     #[cfg(feature = "sidecar")]
-    pub(super) enhancements: Arc<super::enhancements::Enhancements>,
+    pub(super) enhancements: Option<Arc<super::enhancements::Enhancements>>,
     pub pool: PgPool,
     development: RwLock<std::collections::BTreeMap<Uuid, development::Instance>>,
     backends: backends::ComponentBackends,

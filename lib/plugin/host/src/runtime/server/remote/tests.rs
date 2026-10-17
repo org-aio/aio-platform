@@ -36,3 +36,33 @@ fn schemas_only_resolve_declared_local_references() -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(not(all(feature = "remote-mcp", feature = "remote-grpc")))]
+#[test]
+fn uncompiled_transports_are_rejected_while_decoding_configuration() -> Result<()> {
+    #[cfg(not(feature = "remote-grpc"))]
+    {
+        let result = serde_json::from_value::<super::configuration::Transport>(json!({
+            "protocol": "grpc", "descriptor_set": "/must-not-read.pb", "service": "Test", "method": "Run"
+        }));
+        let error = result
+            .err()
+            .ok_or_else(|| anyhow::anyhow!("接受了未编译的 gRPC"))?;
+        assert!(error.to_string().contains("unknown variant `grpc`"));
+    }
+    #[cfg(not(feature = "remote-mcp"))]
+    for protocol in ["mcp", "mcp_stdio"] {
+        let result = serde_json::from_value::<super::configuration::Transport>(json!({
+            "protocol": protocol, "tool": "test", "output": "structured"
+        }));
+        let error = result
+            .err()
+            .ok_or_else(|| anyhow::anyhow!("接受了未编译的 MCP"))?;
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("unknown variant `{protocol}`"))
+        );
+    }
+    Ok(())
+}

@@ -3,7 +3,10 @@
 use std::{any::TypeId, sync::Arc};
 
 use az_plugin_core::{Plugin, PluginFuture};
-use az_plugin_enhancement::{RhaiExecutor, TypeScriptExecutor};
+#[cfg(feature = "rhai")]
+use az_plugin_enhancement::RhaiExecutor;
+#[cfg(feature = "typescript")]
+use az_plugin_enhancement::TypeScriptExecutor;
 pub use az_plugin_enhancement::{ScriptExecutor, ScriptInvocation, ScriptProgram, ScriptRuntime};
 use sqlx::PgPool;
 
@@ -15,10 +18,12 @@ pub use super::super::enhancements::{
 use super::{DatabasePlugin, Resource, RuntimeAssembly};
 
 /// 默认 Rhai 实现；应用可以省略该插件并注册自己的同语言执行器。
+#[cfg(feature = "rhai")]
 #[dill::component]
 #[dill::interface(dyn Plugin<RuntimeAssembly>)]
 pub struct RhaiPlugin;
 
+#[cfg(feature = "rhai")]
 impl Plugin<RuntimeAssembly> for RhaiPlugin {
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
@@ -29,10 +34,12 @@ impl Plugin<RuntimeAssembly> for RhaiPlugin {
 }
 
 /// 默认 TypeScript 实现；执行器选择与协议选择互相独立。
+#[cfg(feature = "typescript")]
 #[dill::component]
 #[dill::interface(dyn Plugin<RuntimeAssembly>)]
 pub struct TypeScriptPlugin;
 
+#[cfg(feature = "typescript")]
 impl Plugin<RuntimeAssembly> for TypeScriptPlugin {
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
