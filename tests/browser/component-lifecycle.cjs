@@ -203,6 +203,7 @@ const server = createServer(async (request, response) => {
     await page.evaluate(() => { window.__holdCatalog = false; window.dispatchEvent(new CustomEvent('aio:catalog-refreshed', { detail: { requests: window.__catalogRequests, success: true } })); });
 
     await frame.locator('#image').click();
+    await frame.locator('#document-image[src^="blob:"]').waitFor({ state: 'attached' });
     await frame.locator('#document-image').evaluate(image => image.decode());
     assert.equal(await frame.locator('#document-image').evaluate(image => image.naturalWidth), 1);
     assert.equal(imageTickets.at(-1), mount.token);
@@ -257,8 +258,10 @@ const server = createServer(async (request, response) => {
     await manage('GET');
     assert.equal(management.at(-1).token, renewedTicket);
     rejectedRenewal = undefined;
+    const previousImage = await frame.locator('#document-image').getAttribute('src');
     await frame.locator('#image').click();
     await waitFor(() => imageTickets.at(-1) === renewedTicket);
+    await frame.locator(`#document-image[src^="blob:"]:not([src="${previousImage}"])`).waitFor({ state: 'attached' });
     await frame.locator('#document-image').evaluate(image => image.decode());
 
     actionDelay = 500;

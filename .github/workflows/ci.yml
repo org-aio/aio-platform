@@ -35,7 +35,7 @@ jobs:
         with:
           toolchain: nightly-2026-05-25
           components: clippy, rustfmt
-          targets: wasm32-wasip2
+          targets: wasm32-wasip2,wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -48,6 +48,8 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/aio-browser" --no-audit --no-fund playwright@1.62.0
           "$RUNNER_TEMP/aio-browser/node_modules/.bin/playwright" install --with-deps chromium
           NODE_PATH="$RUNNER_TEMP/aio-browser/node_modules" node tests/browser/component-lifecycle.cjs
+      - name: 验证实际 Web 宿主编译目标
+        run: cargo clippy -p az-plugin-host --no-default-features --features web --target wasm32-unknown-unknown -- -D warnings
       - name: 验证精简宿主与独立执行器编译边界
         run: |
           node scripts/check-host-features.mjs

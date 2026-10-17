@@ -79,11 +79,11 @@ pub(in crate::runtime::server) async fn mount(
     id: &str,
 ) -> Result<MountResponse> {
     let _permit = state.frontend.request_slot()?;
+    // 安装先切换执行器再提交记录；挂载必须等待整个变更结束，不能混用新旧版本。
+    let components = state.components()?;
+    let _mutation = components.mutations.lock().await;
     let (source, revision, generation, page) = page(state, session, id).await?;
-    let bundle = state
-        .components()?
-        .bundle(source, &session.tenant_id)
-        .await?;
+    let bundle = components.bundle(source, &session.tenant_id).await?;
     ensure!(bundle.digest() == revision, "插件安装版本发生变化");
     let entry = page.entry;
     let assets = bundle

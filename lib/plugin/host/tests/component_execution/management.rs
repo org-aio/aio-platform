@@ -247,20 +247,39 @@ async fn management_is_version_trusted_and_frontend_can_manage_itself() -> Resul
         .await?;
     success(host.publish(&second).await?).await?;
     let token = host.mount(source).await?;
-    output(
-        tokio::time::timeout(
-            Duration::from_secs(5),
-            manage(
-                &host,
-                &token,
-                "POST",
-                "/api/runtime/plugins/install",
-                json!({"git":git,"rev":second.digest}),
-            ),
-        )
-        .await??,
-    )
-    .await?;
+    {
+        // 执行器已切到新版而安装记录尚未提交时，新的浏览器挂载必须等待。
+        probes[0].pause_activate.store(true, Ordering::SeqCst);
+        let upgrade = manage(
+            &host,
+            &token,
+            "POST",
+            "/api/runtime/plugins/install",
+            json!({"git":git,"rev":second.digest}),
+        );
+        tokio::pin!(upgrade);
+        tokio::select! {
+            _ = probes[0].activation_entered.notified() => {},
+            result = &mut upgrade => anyhow::bail!("升级未等待测试提交点: {:?}", result?.status()),
+            _ = tokio::time::sleep(Duration::from_secs(5)) => anyhow::bail!("升级未进入测试提交点"),
+        }
+        let mounting = host.post(
+            "/api/runtime/frontend/mount",
+            json!({"page_id":format!("component:{source}:home")}),
+        );
+        tokio::pin!(mounting);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), &mut mounting)
+                .await
+                .is_err()
+        );
+        probes[0].pause_activate.store(false, Ordering::SeqCst);
+        probes[0].activation_resume.notify_one();
+        output(tokio::time::timeout(Duration::from_secs(5), &mut upgrade).await??).await?;
+        let mounted =
+            success(tokio::time::timeout(Duration::from_secs(5), &mut mounting).await??).await?;
+        assert_eq!(mounted["data"]["revision"], second.digest);
+    }
     assert!(
         !manage(&host, &token, "GET", "/api/runtime/catalog", Value::Null)
             .await?

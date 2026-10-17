@@ -27,6 +27,9 @@ pub struct Probe {
     pub events: Mutex<Vec<&'static str>>,
     pub pool: Mutex<Option<Arc<PgPool>>>,
     pub fail_activate: AtomicBool,
+    pub pause_activate: AtomicBool,
+    pub activation_entered: Notify,
+    pub activation_resume: Notify,
     pub fail_validate: AtomicBool,
     pub fail_deactivate: AtomicBool,
     pub initialization: AtomicU8,
@@ -93,6 +96,10 @@ impl<const ID: u8> ComponentExecutor for Replacement<ID> {
             .lock()
             .await
             .insert((source, tenant.into()), Arc::new(bundle.verify()?));
+        if self.0.pause_activate.load(Ordering::SeqCst) {
+            self.0.activation_entered.notify_one();
+            self.0.activation_resume.notified().await;
+        }
         ensure!(
             !self.0.fail_activate.load(Ordering::SeqCst),
             "测试候选激活失败"
