@@ -608,6 +608,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "az-plugin-guest"
+version = "2026.5.10"
+dependencies = [
+ "wit-bindgen 0.51.0",
+]
+
+[[package]]
 name = "az-plugin-host"
 version = "2026.10.16"
 dependencies = [

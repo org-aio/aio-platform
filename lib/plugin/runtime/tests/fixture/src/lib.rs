@@ -1,7 +1,4 @@
-wit_bindgen::generate!({
-    path: "../../../contract/wit",
-    world: "plugin",
-});
+use az_plugin_guest::*;
 
 use aio::plugin::{
     host,
