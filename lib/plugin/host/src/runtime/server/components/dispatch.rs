@@ -96,16 +96,7 @@ impl Components {
 
     pub(super) async fn validate(&self, source: Uuid, bundle: &Bundle) -> Result<Description> {
         let verified = bundle.verify()?;
-        let grants = &verified.manifest().plugin.capabilities;
-        ensure!(
-            !grants.management && !grants.identity_provider,
-            "当前发布入口未开放宿主管理或身份提供能力"
-        );
-        ensure!(
-            semver::VersionReq::parse(&verified.manifest().plugin.runtime.host_version)?
-                .matches(&semver::Version::parse(env!("CARGO_PKG_VERSION"))?),
-            "宿主版本不满足插件约束"
-        );
+        validate_manifest(&verified)?;
         self.executors
             .select(&verified)?
             .validate(source, bundle)
@@ -195,4 +186,19 @@ impl Components {
             .handle(source, tenant, digest, request, context)
             .await
     }
+}
+
+// 发布与部署引导共用执行器之外的准入校验，缺少执行器也不能掩盖越权声明。
+pub(super) fn validate_manifest(verified: &VerifiedBundle) -> Result<()> {
+    let grants = &verified.manifest().plugin.capabilities;
+    ensure!(
+        !grants.management && !grants.identity_provider,
+        "当前发布入口未开放宿主管理或身份提供能力"
+    );
+    ensure!(
+        semver::VersionReq::parse(&verified.manifest().plugin.runtime.host_version)?
+            .matches(&semver::Version::parse(env!("CARGO_PKG_VERSION"))?),
+        "宿主版本不满足插件约束"
+    );
+    Ok(())
 }

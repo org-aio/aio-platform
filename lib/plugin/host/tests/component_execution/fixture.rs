@@ -27,6 +27,7 @@ pub struct Probe {
     pub events: Mutex<Vec<&'static str>>,
     pub pool: Mutex<Option<Arc<PgPool>>>,
     pub fail_activate: AtomicBool,
+    pub fail_validate: AtomicBool,
     pub fail_deactivate: AtomicBool,
     pub initialization: AtomicU8,
     pub panic_stop: AtomicBool,
@@ -59,6 +60,10 @@ impl<const ID: u8> ComponentExecutor for Replacement<ID> {
     }
     async fn validate(&self, _: Uuid, bundle: &Bundle) -> Result<ComponentDescription> {
         self.0.events.lock().await.push("validate");
+        ensure!(
+            !self.0.fail_validate.load(Ordering::SeqCst),
+            "测试候选验证失败"
+        );
         // 刻意与包内 process 标记不同，证明展示字段不能决定分发实现。
         ComponentDescription {
             process: false,
@@ -317,9 +322,16 @@ impl Host {
     where
         P: IdentityProvider + az_plugin_host::authorization::AuthorizationProvider,
     {
+        let selected = super::identity_support::with_identity(identity, plugins(probes, true));
+        Self::start_selected(root, database, selected).await
+    }
+    pub async fn start_selected(
+        root: &Path,
+        database: &str,
+        selected: Vec<DynPlugin<RuntimeAssembly>>,
+    ) -> Result<Self> {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let base = format!("http://{}", listener.local_addr()?);
-        let selected = super::identity_support::with_identity(identity, plugins(probes, true));
         let current = Arc::new(std::sync::Mutex::new(None));
         let observed = current.clone();
         let runtime = RuntimeHost::initialize_with_router(

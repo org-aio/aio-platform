@@ -48,6 +48,16 @@ impl Components {
         job: Option<i64>,
     ) -> Result<Uuid> {
         let _guard = self.mutations.lock().await;
+        self.publish_locked(bundle, readme, job, true).await
+    }
+
+    pub(super) async fn publish_locked(
+        &self,
+        bundle: Bundle,
+        readme: &str,
+        job: Option<i64>,
+        replace_publication: bool,
+    ) -> Result<Uuid> {
         ensure!(readme.len() <= 512 * 1024, "README 超过限制");
         let verified = bundle.verify()?;
         let metadata = verified
@@ -80,7 +90,7 @@ impl Components {
         sqlx::query("INSERT INTO component_sources(id,git,parent_git) VALUES($1,$2,$3) ON CONFLICT(git) DO NOTHING").bind(source).bind(&bundle.git).bind(&metadata.parent).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO component_versions(digest,source_id,archive,version,source_commit,description,metadata,readme,capabilities,permissions,required_permissions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(digest) DO NOTHING")
             .bind(&bundle.digest).bind(source).bind(archive).bind(&bundle.version).bind(&bundle.commit).bind(serde_json::to_value(description)?).bind(serde_json::to_value(metadata)?).bind(readme).bind(serde_json::to_value(&verified.manifest().plugin.capabilities)?).bind(&verified.manifest().plugin.permissions).bind(&verified.manifest().plugin.required_permissions).execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO component_publications(source_id,digest) VALUES($1,$2) ON CONFLICT(source_id) DO UPDATE SET digest=EXCLUDED.digest,published_at=now()").bind(source).bind(&bundle.digest).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO component_publications(source_id,digest) VALUES($1,$2) ON CONFLICT(source_id) DO UPDATE SET digest=EXCLUDED.digest,published_at=now() WHERE $3").bind(source).bind(&bundle.digest).bind(replace_publication).execute(&mut *tx).await?;
         if let Some(job) = job {
             super::super::delivery::finish_publication(&mut tx, job, &bundle).await?;
         }
@@ -95,10 +105,15 @@ impl Components {
                 .fetch_one(&self.pool)
                 .await?;
         if let Some(parent) = parent {
-            let installed:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM component_installations i JOIN component_sources s ON s.id=i.source_id WHERE i.tenant_id=$1 AND s.git=$2 AND i.enabled) OR EXISTS(SELECT 1 FROM tenant_plugin_bindings i JOIN plugin_sources s ON s.id=i.source_id WHERE i.tenant_id=$1 AND s.git=$2 AND i.enabled)").bind(tenant).bind(&parent).fetch_one(&self.pool).await?;
+            let installed = self.parent_enabled(tenant, &parent).await?;
             ensure!(installed, "请先安装并启用父插件: {parent}");
         }
         Ok(())
+    }
+
+    pub(super) async fn parent_enabled(&self, tenant: &str, parent: &str) -> Result<bool> {
+        Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM component_installations i JOIN component_sources s ON s.id=i.source_id WHERE i.tenant_id=$1 AND s.git=$2 AND i.enabled) OR EXISTS(SELECT 1 FROM tenant_plugin_bindings i JOIN plugin_sources s ON s.id=i.source_id WHERE i.tenant_id=$1 AND s.git=$2 AND i.enabled)")
+            .bind(tenant).bind(parent).fetch_one(&self.pool).await?)
     }
 
     pub async fn require_no_children(&self, tenant: &str, source: Uuid) -> Result<()> {

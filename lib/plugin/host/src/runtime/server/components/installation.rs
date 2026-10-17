@@ -179,6 +179,9 @@ impl Components {
     ) -> Result<()> {
         sqlx::query("INSERT INTO component_installations(tenant_id,source_id,digest,generation,excluded_digest) VALUES($1,$2,$3,$4,$5) ON CONFLICT(tenant_id,source_id) DO UPDATE SET digest=EXCLUDED.digest,enabled=true,generation=EXCLUDED.generation,excluded_digest=EXCLUDED.excluded_digest")
             .bind(tenant).bind(source).bind(digest).bind(Uuid::new_v4()).bind(excluded).execute(&mut **tx).await?;
+        // 与安装共用提交点，失败不能留下已初始化标记，卸载也不清除此记录。
+        sqlx::query("INSERT INTO component_initializations(tenant_id,git) SELECT $1,git FROM component_sources WHERE id=$2 ON CONFLICT DO NOTHING")
+            .bind(tenant).bind(source).execute(&mut **tx).await?;
         Ok(())
     }
 }

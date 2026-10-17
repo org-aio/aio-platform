@@ -15,6 +15,9 @@ mod access;
 #[path = "component_execution/availability.rs"]
 mod availability;
 
+#[path = "component_execution/bootstrap.rs"]
+mod bootstrap;
+
 #[path = "component_execution/legacy_availability.rs"]
 mod legacy_availability;
 

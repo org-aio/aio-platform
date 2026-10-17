@@ -46,6 +46,17 @@ ALTER TABLE component_versions ADD COLUMN IF NOT EXISTS permissions TEXT[];
 ALTER TABLE component_versions ADD COLUMN IF NOT EXISTS required_permissions TEXT[];
 
 ALTER TABLE component_installations ADD COLUMN IF NOT EXISTS excluded_digest TEXT;
+-- 首次安装意图独立于可删除的来源和安装记录，卸载后部署引导不能重新安装。
+CREATE TABLE IF NOT EXISTS component_initializations (
+    tenant_id TEXT NOT NULL,
+    git TEXT NOT NULL,
+    initialized_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY(tenant_id, git)
+);
+INSERT INTO component_initializations(tenant_id, git)
+SELECT i.tenant_id, s.git FROM component_installations i
+JOIN component_sources s ON s.id=i.source_id
+ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS component_rollouts (
     tenant_id TEXT NOT NULL,
     source_id UUID NOT NULL REFERENCES component_sources(id),

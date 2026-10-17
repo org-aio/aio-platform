@@ -1,5 +1,7 @@
 # 宿主能力插件
 
+部署方可显式加入 `ComponentBootstrapPlugin(Vec<BootstrapComponent>)`，在组件恢复后执行固定摘要整包的首次安装。配置整批验证先于资源初始化，首次安装记录与安装事务一同提交；缺执行器时暂缓，重启保留停用、卸载及回滚选择。它复用 `Components`，不增加名称注册表，详见 [整包首次引导](../../../../../../../docs/plugin/component-bootstrap.md)。
+
 ## 编译与装配分开选择
 
 `az-plugin-host` 的 `server` feature 编译宿主契约与平台服务，不引入内置语言、Wasm、Sidecar 或 MCP/gRPC 实现。`rhai` 和 `typescript` 分别增加解释器，`mcp` 和 `grpc` 分别增加入站协议，`remote-mcp` 和 `remote-grpc` 分别导入外部工具；`remote` 同时选择两个出站实现。`wasm` 增加 Wasmtime、v1 Wasm 产物验证及 `WasmPlugin` / `WasmComponentPlugin`；`sidecar` 增加监督器、进程 broker 及 `ProcessPlugin` / `SidecarPlugin`。应用交付完整组合时显式启用这些 feature，随后仍通过 Dill 选择实际装配的插件；独立 `aio-host` 和产品宿主均如此。

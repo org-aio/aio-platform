@@ -26,6 +26,8 @@ Component 前端单独变化时保留同一执行实例；本地服务由 CLI �
 
 `installation` 统一安装事务、启停卸载与回滚；`delivery` 在同一变更锁内再次检查启用状态、市场版本及排除摘要，自动更新既有安装。回滚仅排除当前市场版本，不永久固定插件；失败沿用安装路径的旧实例恢复。
 
+`bootstrap` 供可选 `ComponentBootstrapPlugin` 执行部署首次安装。先整批校验固定摘要及父子关系，再复用发布和安装；与安装同事务写入的 `component_initializations` 保留租户选择，卸载后仍存在。引导不会覆盖最新发布，也不会重装已管理的来源。参见 [整包首次引导](../../../../../../../docs/plugin/component-bootstrap.md)。
+
 ## 可替换执行器
 
 从宿主 `plugins/component_execution.rs` 进入。`WasmComponentPlugin` 与 `SidecarPlugin` 提供默认实现，`ComponentExecutionPlugin` 汇集 Dill 中的 `ComponentExecutor`，`ComponentResourcesPlugin` 在资源就绪后初始化实现，`ComponentsPlugin` 按持久化安装记录恢复实例。

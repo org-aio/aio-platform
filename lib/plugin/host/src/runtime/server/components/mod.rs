@@ -2,6 +2,7 @@ mod access;
 #[cfg(test)]
 mod access_tests;
 mod backends;
+pub(in crate::runtime::server) mod bootstrap;
 mod catalog;
 mod controller;
 mod delivery;
