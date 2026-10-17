@@ -70,7 +70,13 @@ impl<const ID: u8> ComponentExecutor for Replacement<ID> {
                 scene: None,
                 menu_path: vec![],
                 permission: None,
-                surface: "workspace".into(),
+                surface: if bundle.verify()?.manifest().plugin.settings_page.as_deref()
+                    == Some("home")
+                {
+                    "fullscreen".into()
+                } else {
+                    "workspace".into()
+                },
             }],
         }
         .with_settings(&bundle.verify()?)
@@ -286,6 +292,9 @@ pub fn package(root: &Path, git: &str, executor: u8, version: &str) -> Result<Bu
 
 pub struct Host {
     pub state: RuntimeState,
+    pub selected: Vec<DynPlugin<RuntimeAssembly>>,
+    runtime: RuntimeHost,
+    current: Arc<std::sync::Mutex<Option<RuntimeState>>>,
     pub base: String,
     pub client: reqwest::Client,
     server: tokio::task::JoinHandle<std::io::Result<()>>,
@@ -310,12 +319,24 @@ impl Host {
     {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let base = format!("http://{}", listener.local_addr()?);
-        let state = RuntimeState::initialize(
+        let selected = super::identity_support::with_identity(identity, plugins(probes, true));
+        let current = Arc::new(std::sync::Mutex::new(None));
+        let observed = current.clone();
+        let runtime = RuntimeHost::initialize_with_router(
             config(root, database, &base),
-            super::identity_support::with_identity(identity, plugins(probes, true)),
+            selected.clone(),
+            move |state, router| {
+                *observed.lock().map_err(|_| anyhow::anyhow!("代数锁损坏"))? = Some(state.clone());
+                Ok(router)
+            },
         )
         .await?;
-        let router = az_plugin_host::runtime::server::router(state.clone())?;
+        let state = current
+            .lock()
+            .map_err(|_| anyhow::anyhow!("代数锁损坏"))?
+            .clone()
+            .context("宿主未就绪")?;
+        let router = runtime.router();
         let server = tokio::spawn(async move { axum::serve(listener, router).await });
         let mut headers = axum::http::HeaderMap::new();
         headers.insert("cookie", "session=component-test".parse()?);
@@ -325,16 +346,30 @@ impl Host {
             .build()?;
         Ok(Self {
             state,
+            selected,
+            runtime,
+            current,
             base,
             server,
             client,
         })
     }
     pub async fn stop(self) -> Result<()> {
-        let result = self.state.shutdown().await;
+        let result = self.runtime.shutdown().await;
         self.server.abort();
         let _ = self.server.await;
         result
+    }
+    pub async fn reconfigure(&mut self, selected: Vec<DynPlugin<RuntimeAssembly>>) -> Result<()> {
+        self.runtime.reconfigure(selected.clone()).await?;
+        self.state = self
+            .current
+            .lock()
+            .map_err(|_| anyhow::anyhow!("代数锁损坏"))?
+            .clone()
+            .context("宿主未就绪")?;
+        self.selected = selected;
+        Ok(())
     }
     pub async fn publish(&self, bundle: &Bundle) -> Result<reqwest::Response> {
         Ok(self

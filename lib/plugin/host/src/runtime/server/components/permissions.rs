@@ -33,20 +33,27 @@ pub(super) async fn backfill(pool: &PgPool) -> Result<()> {
 
 impl Components {
     pub async fn permissions(&self, tenant: &str) -> Result<Vec<String>> {
-        let rows = sqlx::query_as::<_, (Uuid, Vec<String>)>(
-            "SELECT i.source_id,v.permissions FROM component_installations i JOIN component_versions v ON v.digest=i.digest WHERE i.tenant_id=$1 AND i.enabled ORDER BY i.source_id",
+        let rows = sqlx::query_as::<_, (Uuid, String, Vec<String>)>(
+            "SELECT i.source_id,i.digest,v.permissions FROM component_installations i JOIN component_versions v ON v.digest=i.digest WHERE i.tenant_id=$1 AND i.enabled ORDER BY i.source_id",
         )
         .bind(tenant)
         .fetch_all(&self.pool)
         .await?;
+        let active = self.active.read().await;
         let mut permissions = rows
             .into_iter()
-            .flat_map(|(source, names)| {
+            .filter(|(source, digest, _)| {
+                active
+                    .get(&(*source, tenant.into()))
+                    .is_some_and(|instance| &instance.digest == digest)
+            })
+            .flat_map(|(source, _, names)| {
                 names
                     .into_iter()
                     .map(move |name| services::permission(source, &name))
             })
             .collect::<Vec<_>>();
+        drop(active);
         if tenant == "development" {
             for (source, instance) in self.development.read().await.iter() {
                 permissions.extend(

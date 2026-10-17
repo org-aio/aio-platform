@@ -12,6 +12,12 @@ mod resources;
 #[path = "component_execution/access.rs"]
 mod access;
 
+#[path = "component_execution/availability.rs"]
+mod availability;
+
+#[path = "component_execution/legacy_availability.rs"]
+mod legacy_availability;
+
 use anyhow::{Context, Result};
 use az_plugin_host::runtime::server::{RuntimeState, plugins::*};
 use fixture::*;
@@ -23,12 +29,13 @@ use std::{
 use uuid::Uuid;
 
 #[tokio::test]
-async fn component_registry_rejects_missing_and_duplicate_types_without_resources() -> Result<()> {
+async fn component_registry_accepts_empty_and_rejects_duplicate_types_without_resources()
+-> Result<()> {
     let empty = dill::Catalog::builder()
         .add::<ComponentExecutors>()
         .build()
         .get::<dill::OneOf<ComponentExecutors>>()?;
-    assert!(empty.validate().is_err());
+    empty.validate()?;
     let duplicate = dill::Catalog::builder()
         .add_value(Replacement::<1>(Arc::default()))
         .bind::<dyn ComponentExecutor, Replacement<1>>()

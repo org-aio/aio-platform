@@ -291,6 +291,7 @@ async fn page(
         .active_page_binding(&session.tenant_id, page_id)
         .await?
         .ok_or_else(|| RuntimeError::not_found("当前租户没有该活动页面"))?;
+    state.require_execution(binding.service.runtime)?;
     if !permitted(
         binding.page.required_permission.as_deref(),
         &session.permissions,

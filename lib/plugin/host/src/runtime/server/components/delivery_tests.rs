@@ -222,6 +222,82 @@ async fn target(state: &RuntimeState, git: &str, sequence: u32) -> Result<BuildJ
     })
 }
 
+#[tokio::test]
+#[ignore = "需要独立本机 PostgreSQL 和 WIT 测试组件"]
+async fn suspended_installations_keep_queued_upgrades_without_blocking_active_tenants() -> Result<()>
+{
+    let database = std::env::var("AIO_COMPONENT_TEST_DATABASE_URL")?;
+    let url = reqwest::Url::parse(&database)?;
+    ensure!(
+        url.host_str() == Some("127.0.0.1") && url.path() == "/component_market_test",
+        "只接受本机独立测试库"
+    );
+    let root = tempfile::tempdir()?;
+    let state = RuntimeState::isolated_component_test(
+        Arc::new(super::tests::TestIdentity),
+        &database,
+        "http://127.0.0.1",
+        root.path(),
+    )
+    .await?;
+    let components = state.components()?;
+    let git = format!(
+        "https://github.com/example/suspended-rollout-{}.git",
+        Uuid::new_v4()
+    );
+    let first = super::tests::package(root.path(), &git, None, "1.0.0")?;
+    let source = components.publish(first.clone(), "First").await?;
+    let tenants = (0..9)
+        .map(|_| Uuid::new_v4().to_string())
+        .collect::<Vec<_>>();
+    for tenant in &tenants {
+        components.install(tenant, &git, None).await?;
+    }
+    // 移除运行绑定并释放资源，保留租户启用意图，模拟执行器不再恢复这些安装。
+    for tenant in &tenants[..8] {
+        let binding = components
+            .active
+            .write()
+            .await
+            .remove(&(source, tenant.clone()))
+            .context("缺少活动绑定")?;
+        binding.executor.deactivate(source, tenant).await?;
+    }
+    let second = super::tests::package(root.path(), &git, None, "2.0.0")?;
+    components.publish(second.clone(), "Second").await?;
+    sqlx::query("INSERT INTO delivery_sources(git,branch,desired_sha) VALUES($1,'main',$2)")
+        .bind(&git)
+        .bind("a".repeat(40))
+        .execute(&components.pool)
+        .await?;
+    for (position, tenant) in tenants.iter().enumerate() {
+        sqlx::query("INSERT INTO component_rollouts(tenant_id,source_id,digest,updated_at) VALUES($1,$2,$3,now()+$4*interval '1 second')")
+            .bind(tenant).bind(source).bind(&second.digest).bind(position as i32).execute(&components.pool).await?;
+    }
+    components.rollout().await?;
+    for tenant in &tenants[..8] {
+        assert_installed(&components, tenant, source, Some((&first.digest, true))).await?;
+        let state: String = sqlx::query_scalar("SELECT state FROM component_rollouts WHERE tenant_id=$1 AND source_id=$2 AND digest=$3")
+            .bind(tenant).bind(source).bind(&second.digest).fetch_one(&components.pool).await?;
+        assert_eq!(state, "queued");
+    }
+    assert_installed(
+        &components,
+        &tenants[8],
+        source,
+        Some((&second.digest, true)),
+    )
+    .await?;
+    components.restore().await?;
+    components.rollout().await?;
+    for tenant in &tenants {
+        assert_installed(&components, tenant, source, Some((&second.digest, true))).await?;
+        components.change(tenant, source, "uninstall").await?;
+    }
+    state.shutdown().await?;
+    Ok(())
+}
+
 async fn upload(
     client: &Client,
     base: &str,

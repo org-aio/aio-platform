@@ -99,10 +99,9 @@ pub(super) fn deactivate_previous_wasm(
 ) -> anyhow::Result<()> {
     if let Some(previous_revision) = previous_revision
         && current_revision != Some(previous_revision)
+        && let Some(executor) = state.optional_service::<dyn super::plugins::WasmExecutor>()?
     {
-        state
-            .wasm()?
-            .deactivate(tenant_id, source_id, previous_revision)?;
+        executor.deactivate(tenant_id, source_id, previous_revision)?;
     }
     Ok(())
 }
@@ -113,10 +112,10 @@ pub(super) fn deactivate_bound_wasm(
     source_id: &str,
     target: &BoundRuntime,
 ) -> anyhow::Result<()> {
-    if target.runtime == PluginRuntime::WasmComponent {
-        state
-            .wasm()?
-            .deactivate(tenant_id, source_id, &target.revision)?;
+    if target.runtime == PluginRuntime::WasmComponent
+        && let Some(executor) = state.optional_service::<dyn super::plugins::WasmExecutor>()?
+    {
+        executor.deactivate(tenant_id, source_id, &target.revision)?;
     }
     Ok(())
 }
@@ -168,8 +167,9 @@ pub(super) async fn stop_previous_process(
 ) -> anyhow::Result<()> {
     if let Some(previous) = previous
         && current.is_none_or(|current| current.instance_id != previous.instance_id)
+        && let Some(executor) = state.optional_service::<dyn super::plugins::ProcessExecutor>()?
     {
-        state.process()?.stop(&previous.instance_id).await?;
+        executor.stop(&previous.instance_id).await?;
     }
     Ok(())
 }
@@ -195,12 +195,14 @@ pub(super) async fn restore_process_binding(
     let Some(target) = target else {
         return Ok(());
     };
-    state.restore_package_cache(&target.revision).await?;
     if target.runtime != PluginRuntime::Process {
         return Ok(());
     }
-    let instance = state
-        .process()?
+    let Some(executor) = state.optional_service::<dyn super::plugins::ProcessExecutor>()? else {
+        return Ok(());
+    };
+    state.restore_package_cache(&target.revision).await?;
+    let instance = executor
         .start(tenant_id, source_id, &target.revision)
         .await?;
     if let Err(error) = state

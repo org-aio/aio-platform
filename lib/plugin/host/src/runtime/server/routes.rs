@@ -135,6 +135,7 @@ async fn page_action(
         .active_page_binding(&session.tenant_id, &request.page_id)
         .await?
         .ok_or_else(|| RuntimeError::not_found("当前租户没有提供该页面的活动插件"))?;
+    state.require_execution(binding.service.runtime)?;
     ensure_page_action_allowed(&binding.page, &request.action_id, &session.permissions)?;
     let event = serde_json::to_string(&PluginRequest::PageAction {
         page_id: request.page_id.clone(),

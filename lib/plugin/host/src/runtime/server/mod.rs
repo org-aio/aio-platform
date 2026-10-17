@@ -8,6 +8,7 @@ mod components;
 mod delivery;
 pub mod development;
 mod enhancements;
+mod execution_availability;
 mod frontend_access;
 mod frontend_delivery;
 mod frontend_devices;
@@ -347,22 +348,14 @@ impl RuntimeState {
     }
 
     async fn reconcile_processes(&self) -> Result<()> {
+        let Some(manager) = self.optional_service::<dyn plugins::ProcessExecutor>()? else {
+            return Ok(());
+        };
         self.store()?.stop_orphan_process_records().await?;
         let targets = self.store()?.enabled_process_targets().await?;
         for target in &targets {
             self.restore_package_cache(&target.revision).await?;
         }
-        if targets.is_empty()
-            && self
-                .extensions
-                .services
-                .builders_for::<dyn plugins::ProcessExecutor>()
-                .count()
-                == 0
-        {
-            return Ok(());
-        }
-        let manager = self.process().context("未装配可用的进程执行器")?;
         if let Err(error) = manager.health().await {
             if !targets.is_empty() {
                 return Err(error.context("已安装 process 插件，需要可用的监督器"));
@@ -420,6 +413,12 @@ impl RuntimeState {
     }
 
     async fn reconcile_wasm(&self) -> Result<()> {
+        if self
+            .optional_service::<dyn plugins::WasmExecutor>()?
+            .is_none()
+        {
+            return Ok(());
+        }
         for target in self.store()?.enabled_wasm_targets().await? {
             let activation = self
                 .activate_wasm(

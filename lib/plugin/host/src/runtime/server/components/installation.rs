@@ -70,7 +70,15 @@ impl Components {
         let Some(bundle) = self.enabled_bundle(tenant, source).await? else {
             return Ok(None);
         };
-        let executor = self.executor(&bundle)?;
+        let active = self.active.read().await;
+        let Some(active) = active.get(&(source, tenant.into())) else {
+            return Ok(None);
+        };
+        ensure!(
+            active.digest == bundle.digest,
+            "插件活动版本与安装记录不匹配"
+        );
+        let executor = active.executor.clone();
         Ok(Some(PreviousExecution { executor, bundle }))
     }
 
@@ -128,14 +136,14 @@ impl Components {
         }
         ensure!(action == "disable" || action == "uninstall", "未知管理操作");
         self.require_no_children(tenant, source).await?;
-        let bundle = self
-            .installed_bundle(tenant, source)
+        self.installed_bundle(tenant, source)
             .await?
             .context("当前租户未安装插件")?;
-        let executor = self.executor(&bundle)?;
         let previous = self.previous_execution(tenant, source).await?;
         let result = async {
-            executor.deactivate(source, tenant).await?;
+            if let Some(previous) = &previous {
+                previous.executor.deactivate(source, tenant).await?;
+            }
             let sql = if action == "uninstall" {
                 "DELETE FROM component_installations WHERE source_id=$1 AND tenant_id=$2"
             } else {
@@ -145,8 +153,11 @@ impl Components {
             Ok::<_, anyhow::Error>(())
         }.await;
         if let Err(error) = result {
+            let Some(previous) = previous.as_ref() else {
+                return Err(error);
+            };
             return match self
-                .recover_execution(source, tenant, &executor, previous.as_ref())
+                .recover_execution(source, tenant, &previous.executor, Some(previous))
                 .await
             {
                 Ok(()) => Err(error),

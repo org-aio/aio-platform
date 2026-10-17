@@ -115,7 +115,7 @@ pub struct ComponentExecutors {
 }
 
 impl ComponentExecutors {
-    /// 宿主装配时检查非空及具体类型唯一性，不创建执行资源。
+    /// 空集合保留组件管理面；宿主装配时只检查具体类型唯一性，不创建执行资源。
     pub fn validate(&self) -> Result<()> {
         let mut identities = HashSet::new();
         for implementation in &self.implementations {
@@ -124,21 +124,27 @@ impl ComponentExecutors {
                 "整包执行器类型被重复注册"
             );
         }
-        ensure!(!identities.is_empty(), "未装配任何整包执行器");
         Ok(())
     }
 
     pub(super) fn select(&self, bundle: &VerifiedBundle) -> Result<Arc<dyn ComponentExecutor>> {
+        self.matching(bundle)?.context("未装配支持该整包的执行器")
+    }
+
+    pub(super) fn matching(
+        &self,
+        bundle: &VerifiedBundle,
+    ) -> Result<Option<Arc<dyn ComponentExecutor>>> {
         let mut matches = self
             .implementations
             .iter()
             .filter(|executor| executor.supports(bundle));
-        let executor = matches.next().context("未装配支持该整包的执行器")?;
+        let executor = matches.next();
         ensure!(
             matches.next().is_none(),
             "同一整包存在多个执行器，必须明确选择实现"
         );
-        Ok(executor.clone())
+        Ok(executor.cloned())
     }
 
     pub(super) async fn initialize(&self, context: ExecutionContext) -> Result<()> {

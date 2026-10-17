@@ -22,6 +22,7 @@ pub(super) async fn dispatch(
     call: ServiceCall<'_>,
 ) -> Result<ProcessResponse, RuntimeError> {
     ensure_route_allowed(&binding.routes, call.path.trim_start_matches('/'))?;
+    state.require_execution(binding.runtime)?;
     match binding.runtime {
         PluginRuntime::WasmComponent => {
             let request = serde_json::to_string(&PluginRequest::ServiceRequest {

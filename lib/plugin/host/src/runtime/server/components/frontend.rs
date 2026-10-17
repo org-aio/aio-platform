@@ -39,6 +39,9 @@ async fn page(
         .description(&session.tenant_id, source)
         .await?;
     let components = state.components()?;
+    components
+        .active_executor(source, &session.tenant_id, &digest)
+        .await?;
     let required = components
         .required_permissions(&session.tenant_id, source, &digest)
         .await?;

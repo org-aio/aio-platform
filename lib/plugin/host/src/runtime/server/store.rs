@@ -210,11 +210,12 @@ impl PluginStore {
             .collect()
     }
 
-    pub async fn catalog(
+    pub(super) async fn catalog(
         &self,
         tenant_id: &str,
         tenant_label: &str,
         user: UserView,
+        availability: &super::execution_availability::ExecutionAvailability,
     ) -> Result<RuntimeCatalog> {
         let rows = sqlx::query(
             "SELECT sources.id, sources.git, revisions.id AS revision_id, revisions.revision, revisions.runtime, revisions.manifest, revisions.pages, bindings.enabled, bindings.updated_at::TEXT AS activation_generation FROM tenant_plugin_bindings bindings JOIN plugin_sources sources ON sources.id = bindings.source_id JOIN plugin_revisions revisions ON revisions.id = bindings.revision_id WHERE bindings.tenant_id = $1 ORDER BY sources.git",
@@ -229,10 +230,12 @@ impl PluginStore {
         for row in rows {
             let source_id: String = row.try_get("id")?;
             let enabled: bool = row.try_get("enabled")?;
+            let runtime = parse_runtime(row.try_get("runtime")?)?;
+            let state = availability.state(runtime, enabled);
             let manifest = serde_json::from_value::<PluginManifest>(row.try_get("manifest")?)
                 .context("解析已安装插件清单失败")?;
             let value: Value = row.try_get("pages")?;
-            if enabled {
+            if state == PluginState::Active {
                 let revision_id: String = row.try_get("revision_id")?;
                 let mut plugin_pages = serde_json::from_value::<Vec<PageDefinition>>(value)?;
                 self.overlay_page_states(tenant_id, &revision_id, &mut plugin_pages)
@@ -250,12 +253,8 @@ impl PluginStore {
                 source_id,
                 git: row.try_get("git")?,
                 revision: row.try_get("revision")?,
-                runtime: parse_runtime(row.try_get("runtime")?)?,
-                state: if enabled {
-                    PluginState::Active
-                } else {
-                    PluginState::Disabled
-                },
+                runtime,
+                state,
                 capabilities: manifest.capabilities,
             });
         }

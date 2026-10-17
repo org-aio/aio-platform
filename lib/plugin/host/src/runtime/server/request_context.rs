@@ -163,6 +163,7 @@ pub(super) async fn catalog_value(
                 handle: format!("@{}", session.account),
                 initials,
             },
+            &state.execution_availability()?,
         )
         .await?;
     if let Some(components) =

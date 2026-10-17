@@ -84,6 +84,7 @@ pub struct InstalledPluginView {
 #[serde(rename_all = "snake_case")]
 pub enum PluginState {
     Active,
+    Suspended,
     Disabled,
     Failed,
 }
