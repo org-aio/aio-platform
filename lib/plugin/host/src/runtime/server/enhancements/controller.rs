@@ -1,7 +1,5 @@
-use super::{
-    model::{Activation, Head, Revision},
-    store::Enhancements,
-};
+use super::super::enhancement_catalog::{Activation, Head, Revision};
+use super::store::Enhancements;
 use crate::runtime::server::{
     RuntimeState, http_error::RuntimeError, request_context::authenticate_manager,
 };

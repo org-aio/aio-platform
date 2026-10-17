@@ -270,15 +270,19 @@ async fn exercise(fixture: &Fixture) -> Result<()> {
     );
 
     // 使用全新增强服务恢复数据库版本，宿主能力仍绑定到同一个真实服务容器。
-    let restored = Enhancements::open(
-        fixture.state.service::<sqlx::PgPool>()?.as_ref().clone(),
+    let restored = Enhancements::new(
+        std::sync::Arc::new(
+            crate::runtime::server::enhancement_catalog::PostgresEnhancementCatalog::open(
+                fixture.state.service::<sqlx::PgPool>()?.as_ref().clone(),
+            )
+            .await?,
+        ),
         az_plugin_enhancement::default_runtime()?,
         Some(CapabilityEnvironment {
             services: Arc::downgrade(&fixture.state.extensions),
             identity: fixture.identity.clone(),
         }),
-    )
-    .await?;
+    );
     let mut scope = InvocationScope {
         source_id: "test-plugin".into(),
         revision: "installed-package".into(),

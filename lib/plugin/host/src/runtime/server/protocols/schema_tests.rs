@@ -185,12 +185,16 @@ async fn exercise(fixture: &Fixture) -> Result<()> {
         serde_json::from_slice::<Value>(&restored.input_schema_json)?,
         input
     );
-    let fresh = Enhancements::open(
-        sqlx::PgPool::connect(&std::env::var("AIO_ENHANCEMENT_TEST_DATABASE_URL")?).await?,
+    let fresh = Enhancements::new(
+        std::sync::Arc::new(
+            crate::runtime::server::enhancement_catalog::PostgresEnhancementCatalog::open(
+                sqlx::PgPool::connect(&std::env::var("AIO_ENHANCEMENT_TEST_DATABASE_URL")?).await?,
+            )
+            .await?,
+        ),
         az_plugin_enhancement::default_runtime()?,
         None,
-    )
-    .await?;
+    );
     let (revision, contracts) = fresh
         .catalog(&fixture.identity.tenant, |_| true, |_| true)
         .await?;

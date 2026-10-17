@@ -64,7 +64,16 @@ async fn aborted_callers_cancel_workers_and_restore_execution_capacity() -> Resu
         .bind::<dyn ScriptExecutor, Executor>()
         .build()
         .get_one::<ScriptRuntime>()?;
-    let service = Arc::new(Enhancements::open(pool.clone(), runtime, None).await?);
+    let service = Arc::new(Enhancements::new(
+        std::sync::Arc::new(
+            crate::runtime::server::enhancement_catalog::PostgresEnhancementCatalog::open(
+                pool.clone(),
+            )
+            .await?,
+        ),
+        runtime,
+        None,
+    ));
     let tenant = uuid::Uuid::new_v4().to_string();
     let revision = service
         .propose(&tenant, "test", package(Language::Rhai, "fixture"), async {

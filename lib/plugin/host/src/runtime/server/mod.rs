@@ -8,6 +8,7 @@ mod component_catalog;
 mod components;
 pub mod delivery;
 pub mod development;
+pub mod enhancement_catalog;
 mod enhancements;
 mod execution_availability;
 mod frontend_access;

@@ -1,8 +1,8 @@
 # 宿主脚本增强
 
-`controller.rs` 是管理员 API，`store.rs` 统一负责候选验证、租户版本、激活和执行。`EnhancementServicePlugin` 初始化服务并注入同一个 `ScriptRuntime`；WIT、process broker、HTTP、MCP 和 gRPC 都使用它。PostgreSQL 是活动版本的权威源；内存只缓存已验证的不可变代码。每次调用读取一次活动版本，随后完整使用该版本。切换前已接收的调用可以完成，响应返回实际执行的 revision。
+`controller.rs` 是管理员 API，`store.rs` 统一负责候选验证、租户版本、激活和执行。`EnhancementServicePlugin` 初始化服务并注入同一个 `ScriptRuntime`；WIT、process broker、HTTP、MCP 和 gRPC 都使用它。默认 `PostgresEnhancementCatalogPlugin` 提供 PostgreSQL 持久化；[存储契约](../enhancement_catalog/README.md) 可独立替换，内存只缓存已验证的不可变代码。每次调用读取一次活动版本，随后完整使用该版本。切换前已接收的调用可以完成，响应返回实际执行的 revision。
 
-只有当前租户的 `plugin:manage` 会话能够保存、查看和激活版本，请求不能指定其他租户。普通插件只获得清单声明的版本路径调用权。可选 `EvolutionPlugin` 将版本服务提供为独立的 runtime 能力；携带真实管理会话、逐项 runtime 授权且身份提供者支持提交前实时权限查询时，Rhai/TypeScript 策略才能保存、激活或回滚候选。以下 API 由 `EnhancementsPlugin` 提供，需要数据库与脚本执行器，不需要配置 Component 存储：
+只有当前租户的 `plugin:manage` 会话能够保存、查看和激活版本，请求不能指定其他租户。普通插件只获得清单声明的版本路径调用权。可选 `EvolutionPlugin` 将版本服务提供为独立的 runtime 能力；携带真实管理会话、逐项 runtime 授权且身份提供者支持提交前实时权限查询时，Rhai/TypeScript 策略才能保存、激活或回滚候选。以下 API 由 `EnhancementsPlugin` 提供，需要存储提供者与脚本执行器，不需要配置 Component 存储：
 
 | API | 行为 |
 | --- | --- |
@@ -13,7 +13,7 @@
 | `PUT /api/runtime/enhancements/active` | `{ "revision": "摘要", "expected_generation": 0 }` 激活；revision 为 null 时停用 |
 | `POST /api/runtime/enhancements/rollback` | 同样的请求结构，仅允许回到本租户曾激活的版本 |
 
-普通升级必须保留已有路径、输入输出 schema 和样例，并用候选实现重新执行旧样例。回滚是显式恢复历史版本，可能使新版本新增的能力暂不可用。每个租户已激活路径的 schema 会永久保留约束，停用或回滚不能让同名路径被重新赋予不兼容契约；检查复用不可变版本和激活历史，不另设协议契约仓库。其他租户可使用各自的契约。版本指针和审计事件在同一事务提交；代数冲突返回 HTTP 409，不能用重试覆盖别人的发布。重新创建宿主后从数据库恢复，执行前仍需重新编译和验证。
+普通升级必须保留已有路径、输入输出 schema 和样例，并用候选实现重新执行旧样例。回滚是显式恢复历史版本，可能使新版本新增的能力暂不可用。每个租户已激活路径的 schema 会永久保留约束，停用或回滚不能让同名路径被重新赋予不兼容契约；检查复用不可变版本和激活历史，不另设协议契约仓库。其他租户可使用各自的契约。版本指针和审计事件在同一事务提交；代数冲突返回 HTTP 409，不能用重试覆盖别人的发布。重新创建宿主后从所选持久提供者恢复，执行前仍需重新编译和验证。
 
 增强包是完整编译单元。运行时移除包所需的任一语言后，MCP/gRPC 增强目录保留当前 revision 并返回空契约，原生能力目录和调用仍可用；暂停不修改活动指针或代数。重新装配所需语言后，按持久摘要重新编译并验证全部样例。此状态只适用于明确缺少执行器，摘要损坏、数据库失败、重复执行器及执行器齐备后的编译错误仍返回错误；不做部分包编译或捕获所有错误后忽略。
 

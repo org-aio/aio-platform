@@ -71,7 +71,14 @@ fn database() -> Result<String> {
 #[ignore = "需要独立本机 PostgreSQL"]
 async fn candidate_authorization_failure_leaves_no_durable_revision() -> Result<()> {
     let pool = PgPool::connect(&database()?).await?;
-    let runtime = Enhancements::open(pool, az_plugin_enhancement::default_runtime()?, None).await?;
+    let runtime = Enhancements::new(
+        std::sync::Arc::new(
+            crate::runtime::server::enhancement_catalog::PostgresEnhancementCatalog::open(pool)
+                .await?,
+        ),
+        az_plugin_enhancement::default_runtime()?,
+        None,
+    );
     let tenant = uuid::Uuid::new_v4().to_string();
     let result = runtime
         .propose(
@@ -91,12 +98,16 @@ async fn candidate_authorization_failure_leaves_no_durable_revision() -> Result<
 #[ignore = "需要独立本机 PostgreSQL"]
 async fn enhancements_survive_restart_reject_stale_publish_and_rollback() -> Result<()> {
     let pool = PgPool::connect(&database()?).await?;
-    let runtime = Enhancements::open(
-        pool.clone(),
+    let runtime = Enhancements::new(
+        std::sync::Arc::new(
+            crate::runtime::server::enhancement_catalog::PostgresEnhancementCatalog::open(
+                pool.clone(),
+            )
+            .await?,
+        ),
         az_plugin_enhancement::default_runtime()?,
         None,
-    )
-    .await?;
+    );
     let tenant = uuid::Uuid::new_v4().to_string();
     let actor = "test-publisher";
     let first = runtime
@@ -240,8 +251,14 @@ async fn enhancements_survive_restart_reject_stale_publish_and_rollback() -> Res
         usize::from(left?.is_some()) + usize::from(right?.is_some()),
         1
     );
-    let restored =
-        Enhancements::open(pool, az_plugin_enhancement::default_runtime()?, None).await?;
+    let restored = Enhancements::new(
+        std::sync::Arc::new(
+            crate::runtime::server::enhancement_catalog::PostgresEnhancementCatalog::open(pool)
+                .await?,
+        ),
+        az_plugin_enhancement::default_runtime()?,
+        None,
+    );
     let response = restored.invoke(&scope(&tenant), request(), None).await?;
     assert_eq!(response.revision, second);
     assert_eq!(response.output, json!(14));

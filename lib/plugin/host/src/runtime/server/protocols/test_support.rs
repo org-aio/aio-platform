@@ -229,6 +229,7 @@ impl Fixture {
             Arc::new(McpPlugin),
             Arc::new(GrpcPlugin),
             Arc::new(EnhancementsPlugin),
+            Arc::new(PostgresEnhancementCatalogPlugin),
             Arc::new(EnhancementServicePlugin),
             Arc::new(CapabilityServicePlugin),
             Arc::new(CapabilitiesPlugin),

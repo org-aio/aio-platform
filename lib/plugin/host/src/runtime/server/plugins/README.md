@@ -169,7 +169,8 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 | `CapabilityServicePlugin` | 汇集能力提供者，持有调用生命周期；原生异步执行不需要脚本或数据库 |
 | `CapabilitiesPlugin` | 依赖能力服务与身份提供者，仅提供管理员 HTTP 能力目录 |
 | `ScriptRuntimePlugin` | 汇集所选脚本执行器，统一候选与样例验证，不连接数据库或创建文件 |
-| `EnhancementServicePlugin` | 依赖数据库、脚本运行时与能力服务，提供统一的增强版本、授权和调用服务 |
+| `PostgresEnhancementCatalogPlugin` | 默认 PostgreSQL 增强存储，拥有表初始化与事务写入 |
+| `EnhancementServicePlugin` | 依赖唯一的 EnhancementCatalog、脚本运行时与能力服务，提供统一的增强版本、授权和调用服务 |
 | `WasmComponentPlugin` / `SidecarPlugin` | 向 Dill 提供 v2 整包的 `ComponentExecutor`；省略后不初始化对应引擎或监督器客户端 |
 | `ComponentExecutionPlugin` | 汇集整包执行器并拒绝重复类型；本身不创建执行资源 |
 | `ComponentResourcesPlugin` | 依赖目录契约、密钥与整包执行器，可选依赖增强服务；配置组件存储时初始化所选实现，停止时卸载实例并关闭组件连接 |
@@ -184,7 +185,7 @@ assembly.on_stop::<Self>(|state, _tasks| Box::pin(async move {
 
 `EnhancementServicePlugin` 将此运行时用于候选编译、样例重放与持久版本恢复，编译产物用于在线调用。自定义原生执行器属于可信宿主代码，必须自行保持状态隔离、资源上限与取消约定；脚本无法替换执行器或扩大权限。增强服务统一保留输入输出配额、并发额度、租户授权和原子版本激活。
 
-只有 `ScriptRuntimePlugin` 和语言插件的宿主可以使用无效数据库配置启动并执行纯计算。增加 `EnhancementServicePlugin` 后才需要数据库；MCP/gRPC 仅把该服务作为可选依赖；协议插件只强制要求独立能力服务与身份提供者，不通过组件资源初始化执行引擎。Wasm 与 Sidecar 的 v2 整包执行统一使用 `ComponentExecutor`，同样不要求选择默认实现。
+只有 `ScriptRuntimePlugin` 和语言插件的宿主可以使用无效数据库配置启动并执行纯计算。增加 `EnhancementServicePlugin` 后需要明确绑定持久存储提供者；默认 PostgreSQL 实现可由其他 `EnhancementCatalog` 替换；MCP/gRPC 仅把该服务作为可选依赖；协议插件只强制要求独立能力服务与身份提供者，不通过组件资源初始化执行引擎。Wasm 与 Sidecar 的 v2 整包执行统一使用 `ComponentExecutor`，同样不要求选择默认实现。
 
 ## 整包执行器
 

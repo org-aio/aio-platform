@@ -26,7 +26,8 @@ Wasm 或 MCP/gRPC 实现。应用在 Cargo 中选取所需实现，再把具体�
 | `remote` | `RemoteCapabilitiesPlugin` | 同时编译两种出站协议 |
 
 脚本宿主还需装配 `ScriptRuntimePlugin`，需要持久版本时加入
-`EnhancementServicePlugin`。协议实现不强制选择语言；例如只编译 `mcp` 的宿主，
+`EnhancementServicePlugin` 与 `EnhancementCatalog` 提供者；正式默认选择
+`PostgresEnhancementCatalogPlugin`，替代存储无需数据库插件。协议实现不强制选择语言；例如只编译 `mcp` 的宿主，
 可以通过公共 `ScriptExecutor` 接口装配外部执行器。
 显式选择脚本运行时却没有执行器时启动失败；不支持的语言与未编译的远端协议会被拒绝。
 

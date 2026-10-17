@@ -297,6 +297,9 @@ async fn external_executor_handles_publication_protocol_calls_and_persisted_rest
                     #[cfg(feature = "mcp")]
                     Arc::new(McpPlugin),
                     Arc::new(EnhancementsPlugin),
+                    Arc::new(
+                        az_plugin_host::runtime::server::plugins::PostgresEnhancementCatalogPlugin,
+                    ),
                     Arc::new(EnhancementServicePlugin),
                     Arc::new(CapabilityServicePlugin),
                     Arc::new(ScriptRuntimePlugin),

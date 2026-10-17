@@ -8,11 +8,11 @@ use az_plugin_enhancement::RhaiExecutor;
 #[cfg(feature = "typescript")]
 use az_plugin_enhancement::TypeScriptExecutor;
 pub use az_plugin_enhancement::{ScriptExecutor, ScriptInvocation, ScriptProgram, ScriptRuntime};
-use sqlx::PgPool;
 
+use super::super::enhancement_catalog::EnhancementCatalog;
 use super::super::enhancements::CapabilityEnvironment;
 use super::super::enhancements::Enhancements;
-use super::{CapabilityServicePlugin, DatabasePlugin, Resource, RuntimeAssembly};
+use super::{CapabilityServicePlugin, Resource, RuntimeAssembly};
 
 /// 默认 Rhai 实现；应用可以省略该插件并注册自己的同语言执行器。
 #[cfg(feature = "rhai")]
@@ -72,7 +72,6 @@ pub struct EnhancementServicePlugin;
 impl Plugin<RuntimeAssembly> for EnhancementServicePlugin {
     fn dependencies(&self) -> Vec<TypeId> {
         vec![
-            TypeId::of::<DatabasePlugin>(),
             TypeId::of::<ScriptRuntimePlugin>(),
             TypeId::of::<CapabilityServicePlugin>(),
         ]
@@ -81,19 +80,19 @@ impl Plugin<RuntimeAssembly> for EnhancementServicePlugin {
     fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
         Box::pin(async move {
             assembly.require_service::<dyn crate::identity::IdentityProvider>();
+            assembly.require_service::<dyn EnhancementCatalog>();
             assembly.observe_catalog();
             assembly.declare_resource::<Enhancements>()?;
             assembly.on_initialize::<Self>(|state, _| {
                 Box::pin(async move {
-                    let enhancements = Enhancements::open(
-                        state.service::<PgPool>()?.as_ref().clone(),
+                    let enhancements = Enhancements::new(
+                        state.service::<dyn EnhancementCatalog>()?,
                         state.service::<ScriptRuntime>()?,
                         Some(CapabilityEnvironment {
                             services: Arc::downgrade(&state.extensions),
                             identity: state.service::<dyn crate::identity::IdentityProvider>()?,
                         }),
-                    )
-                    .await?;
+                    );
                     state
                         .service::<Resource<Enhancements>>()?
                         .provide(Arc::new(enhancements))

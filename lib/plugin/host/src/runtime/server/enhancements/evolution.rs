@@ -8,10 +8,8 @@ use serde_json::Value;
 use super::super::capabilities::{
     CapabilityEffect, CapabilityProvider, CapabilityRequest, RuntimeCapability,
 };
-use super::{
-    Enhancements,
-    model::{Activation, Event, Head, Observation},
-};
+use super::super::enhancement_catalog::{Activation, Event, Head, Observation};
+use super::Enhancements;
 use crate::identity::IdentityProvider;
 
 /// 将已有版本服务接到能力层；生成与演进策略由普通脚本或外部插件实现。

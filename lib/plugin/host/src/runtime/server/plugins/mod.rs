@@ -14,6 +14,7 @@ mod component_execution;
 mod component_management;
 mod component_resources;
 mod composition;
+mod enhancement_catalog;
 mod enhancement_execution;
 mod evolution;
 #[cfg(test)]
@@ -62,6 +63,7 @@ pub use component_execution::*;
 pub(in crate::runtime::server) use component_management::ManagementAccess;
 pub use component_management::{ComponentManagementPlugin, TrustedManagementComponent};
 pub use component_resources::*;
+pub use enhancement_catalog::PostgresEnhancementCatalogPlugin;
 pub use enhancement_execution::*;
 pub use evolution::EvolutionPlugin;
 pub use infrastructure::*;

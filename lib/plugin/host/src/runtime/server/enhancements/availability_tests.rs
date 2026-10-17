@@ -9,12 +9,16 @@ use super::*;
 async fn language_availability_preserves_revision_without_hiding_invalid_storage() -> Result<()> {
     let pool = PgPool::connect(&database()?).await?;
     let tenant = uuid::Uuid::new_v4().to_string();
-    let runtime = Enhancements::open(
-        pool.clone(),
+    let runtime = Enhancements::new(
+        std::sync::Arc::new(
+            crate::runtime::server::enhancement_catalog::PostgresEnhancementCatalog::open(
+                pool.clone(),
+            )
+            .await?,
+        ),
         az_plugin_enhancement::default_runtime()?,
         None,
-    )
-    .await?;
+    );
     let mut mixed = package(Language::Rhai, "fn invoke(input, context) { input * 2 }");
     let mut other = package(
         Language::TypeScript,
@@ -52,12 +56,16 @@ async fn language_availability_preserves_revision_without_hiding_invalid_storage
                 services.add::<TypeScriptExecutor>();
             }
         }
-        let partial = Enhancements::open(
-            pool.clone(),
+        let partial = Enhancements::new(
+            std::sync::Arc::new(
+                crate::runtime::server::enhancement_catalog::PostgresEnhancementCatalog::open(
+                    pool.clone(),
+                )
+                .await?,
+            ),
             services.build().get_one::<ScriptRuntime>()?,
             None,
-        )
-        .await?;
+        );
         let (active, contracts) = partial.catalog(&tenant, |_| true, |_| true).await?;
         assert_eq!(active.as_deref(), Some(revision.as_str()));
         assert!(contracts.is_empty());
@@ -90,12 +98,16 @@ async fn language_availability_preserves_revision_without_hiding_invalid_storage
             .bind(&tenant).bind(&revision).bind(serde_json::to_value(&mixed)?).execute(&pool).await?;
     }
 
-    let restored = Enhancements::open(
-        pool.clone(),
+    let restored = Enhancements::new(
+        std::sync::Arc::new(
+            crate::runtime::server::enhancement_catalog::PostgresEnhancementCatalog::open(
+                pool.clone(),
+            )
+            .await?,
+        ),
         az_plugin_enhancement::default_runtime()?,
         None,
-    )
-    .await?;
+    );
     let (active, contracts) = restored.catalog(&tenant, |_| true, |_| true).await?;
     assert_eq!(active.as_deref(), Some(revision.as_str()));
     assert_eq!(contracts.len(), 2);

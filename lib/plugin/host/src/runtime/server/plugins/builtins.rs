@@ -233,6 +233,7 @@ pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
     #[cfg(any(feature = "rhai", feature = "typescript"))]
     catalog
         .add::<ScriptRuntimePlugin>()
+        .add::<super::PostgresEnhancementCatalogPlugin>()
         .add::<EnhancementServicePlugin>()
         .add::<super::EvolutionPlugin>()
         .add::<EnhancementsPlugin>();

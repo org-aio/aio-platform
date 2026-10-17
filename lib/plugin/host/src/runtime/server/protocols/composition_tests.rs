@@ -95,12 +95,16 @@ async fn exercise(fixture: &Fixture) -> Result<()> {
     );
 
     // 新服务从 PostgreSQL 恢复相同依赖声明与版本，不能依赖先前编译缓存。
-    let restored = Enhancements::open(
-        fixture.state.service::<sqlx::PgPool>()?.as_ref().clone(),
+    let restored = Enhancements::new(
+        std::sync::Arc::new(
+            crate::runtime::server::enhancement_catalog::PostgresEnhancementCatalog::open(
+                fixture.state.service::<sqlx::PgPool>()?.as_ref().clone(),
+            )
+            .await?,
+        ),
         az_plugin_enhancement::default_runtime()?,
         None,
-    )
-    .await?;
+    );
     let scope = InvocationScope {
         source_id: "restored-plugin".into(),
         revision: "plugin-version".into(),

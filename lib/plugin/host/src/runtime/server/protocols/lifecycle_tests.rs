@@ -107,6 +107,7 @@ async fn clients_survive_native_executor_database_restart_and_protocol_unload() 
             Arc::new(McpPlugin),
             Arc::new(GrpcPlugin),
             Arc::new(EnhancementsPlugin),
+            Arc::new(PostgresEnhancementCatalogPlugin),
             Arc::new(EnhancementServicePlugin),
             Arc::new(CapabilityServicePlugin),
             Arc::new(Native),
@@ -152,6 +153,7 @@ async fn clients_survive_native_executor_database_restart_and_protocol_unload() 
         let removed = [
             std::any::TypeId::of::<EnhancementsPlugin>(),
             std::any::TypeId::of::<EnhancementServicePlugin>(),
+            std::any::TypeId::of::<PostgresEnhancementCatalogPlugin>(),
             std::any::TypeId::of::<ScriptRuntimePlugin>(),
             std::any::TypeId::of::<RhaiPlugin>(),
             std::any::TypeId::of::<TypeScriptPlugin>(),

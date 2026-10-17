@@ -4,7 +4,7 @@
 
 `plugins::McpPlugin`、`plugins::GrpcPlugin` 是两个可独立选择的原生宿主插件，都依赖 `CapabilityServicePlugin` 和身份提供者，按可选服务依赖观察 `Enhancements`。增强服务增删或重建时，协议路由随同更新。分别启用 `mcp`、`grpc` Cargo feature 后，默认组合才包含对应插件；从自定义组合移除后，对应路由返回 404。适配器与现有 HTTP API 共用宿主监听地址，不创建第二个服务器或版本仓库。
 
-原生协议宿主只需装配 `CapabilityServicePlugin`、能力提供者、身份提供者，再选择 `McpPlugin` 或 `GrpcPlugin`，可以使用无效数据库配置启动。要暴露脚本增强时，再装配 `DatabasePlugin` 与数据库 Provider、`ScriptRuntimePlugin` 与所选语言执行器、`EnhancementServicePlugin`；管理 HTTP 插件单独选择。无需组件存储配置，不创建密钥、Wasm 引擎、Sidecar 或包缓存。Rhai 和 TypeScript 的默认实现分别由 `RhaiPlugin` 与 `TypeScriptPlugin` 提供；应用可通过 `ScriptExecutor` 替换语言实现，所有入口仍复用同一个增强服务。
+原生协议宿主只需装配 `CapabilityServicePlugin`、能力提供者、身份提供者，再选择 `McpPlugin` 或 `GrpcPlugin`，可以使用无效数据库配置启动。要暴露脚本增强时，再装配 `EnhancementCatalog` 提供者、`ScriptRuntimePlugin` 与所选语言执行器、`EnhancementServicePlugin`；默认持久化由 `PostgresEnhancementCatalogPlugin`、`DatabasePlugin` 与数据库 Provider 提供；管理 HTTP 插件单独选择。无需组件存储配置，不创建密钥、Wasm 引擎、Sidecar 或包缓存。Rhai 和 TypeScript 的默认实现分别由 `RhaiPlugin` 与 `TypeScriptPlugin` 提供；应用可通过 `ScriptExecutor` 替换语言实现，所有入口仍复用同一个增强服务。
 
 ## 认证与授权
 

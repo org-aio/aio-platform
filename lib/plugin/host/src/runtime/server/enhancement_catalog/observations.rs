@@ -1,7 +1,7 @@
 use anyhow::Result;
 use sqlx::PgPool;
 
-use super::model::Observation;
+use super::super::enhancement_catalog::Observation;
 
 pub(super) async fn started(
     pool: &PgPool,

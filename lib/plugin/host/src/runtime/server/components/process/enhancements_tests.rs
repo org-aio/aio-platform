@@ -129,19 +129,21 @@ async fn verify_sidecar(metering: bool) -> Result<()> {
         ),
     )
     .await?;
-    let enhancements = Arc::new(
-        crate::runtime::server::enhancements::Enhancements::open(
-            pool.clone(),
-            az_plugin_enhancement::default_runtime()?,
-            Some(
-                crate::runtime::server::enhancements::CapabilityEnvironment {
-                    services: Arc::downgrade(&capability_state.extensions),
-                    identity: identity.clone(),
-                },
-            ),
-        )
-        .await?,
-    );
+    let enhancements = Arc::new(crate::runtime::server::enhancements::Enhancements::new(
+        std::sync::Arc::new(
+            crate::runtime::server::enhancement_catalog::PostgresEnhancementCatalog::open(
+                pool.clone(),
+            )
+            .await?,
+        ),
+        az_plugin_enhancement::default_runtime()?,
+        Some(
+            crate::runtime::server::enhancements::CapabilityEnvironment {
+                services: Arc::downgrade(&capability_state.extensions),
+                identity: identity.clone(),
+            },
+        ),
+    ));
     let meter = Arc::new(metering::Meter::default());
     let mut resource_services = dill::Catalog::builder();
     resource_services
