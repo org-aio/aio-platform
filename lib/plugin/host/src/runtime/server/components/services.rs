@@ -1,12 +1,12 @@
 use crate::identity::SessionContext;
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use async_trait::async_trait;
 use az_plugin_contract::transport::{Request, Response};
 use az_plugin_contract::{InvocationScope, RequestContext};
 use az_plugin_runtime::HostServices;
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock, Weak},
 };
 
 pub(super) fn permission(source: impl std::fmt::Display, name: &str) -> String {
@@ -14,8 +14,9 @@ pub(super) fn permission(source: impl std::fmt::Display, name: &str) -> String {
 }
 
 #[derive(Default)]
-pub(super) struct Services {
+pub(in crate::runtime::server) struct Services {
     enhancements: Option<Arc<super::super::enhancements::Enhancements>>,
+    components: OnceLock<Weak<super::Components>>,
     requests: Mutex<HashMap<String, RequestAuthorization>>,
 }
 
@@ -24,6 +25,8 @@ struct RequestAuthorization {
     source: String,
     permissions: Vec<String>,
     parent: Option<String>,
+    session: Option<SessionContext>,
+    executing: bool,
 }
 
 pub(super) struct Authorization {
@@ -45,6 +48,14 @@ fn active_request<'a>(
 }
 
 impl Services {
+    pub(super) fn bind_components(&self, components: Weak<super::Components>) -> Result<()> {
+        ensure!(
+            self.components.set(components).is_ok(),
+            "组件服务不能重复绑定"
+        );
+        Ok(())
+    }
+
     pub(super) fn with_enhancements(
         enhancements: Option<Arc<super::super::enhancements::Enhancements>>,
     ) -> Self {
@@ -89,7 +100,7 @@ impl Services {
         caller: &str,
         target: &str,
     ) -> Result<Authorization> {
-        let permissions = {
+        let (permissions, session) = {
             let requests = self
                 .requests
                 .lock()
@@ -99,7 +110,7 @@ impl Services {
                 request.source == caller && request.context == *context,
                 "交互请求归属不匹配"
             );
-            request.permissions.clone()
+            (request.permissions.clone(), request.session.clone())
         };
         let mut delegated = context.clone();
         delegated.request_id = uuid::Uuid::new_v4().to_string();
@@ -108,6 +119,8 @@ impl Services {
             target,
             permissions,
             Some(context.request_id.clone()),
+            session,
+            true,
         )
     }
 
@@ -126,10 +139,10 @@ impl Services {
             session_id: Some(format!("service:{caller}")),
             request_id: uuid::Uuid::new_v4().to_string(),
         };
-        self.register(context, target, permissions, None)
+        self.register(context, target, permissions, None, None, true)
     }
 
-    pub fn enter(
+    pub(super) fn enter(
         self: &Arc<Self>,
         session: &SessionContext,
         source: &str,
@@ -140,7 +153,56 @@ impl Services {
             session_id: Some(session.session_id.clone()),
             request_id: uuid::Uuid::new_v4().to_string(),
         };
-        self.register(context, source, session.permissions.clone(), None)
+        self.register(
+            context,
+            source,
+            session.permissions.clone(),
+            None,
+            Some(session.clone()),
+            true,
+        )
+    }
+
+    // 前端直接调用管理契约时没有占用插件执行器，可以安全管理该插件自身。
+    pub(super) fn enter_frontend_management(
+        self: &Arc<Self>,
+        session: &SessionContext,
+        source: &str,
+    ) -> Result<Authorization> {
+        let authorization = self.enter(session, source)?;
+        self.requests
+            .lock()
+            .map_err(|_| anyhow::anyhow!("请求权限锁损坏"))?
+            .get_mut(&authorization.context.request_id)
+            .context("交互请求未登记")?
+            .executing = false;
+        Ok(authorization)
+    }
+
+    pub(in crate::runtime::server) fn management_session(
+        &self,
+        scope: &InvocationScope,
+    ) -> Result<(SessionContext, bool)> {
+        let requests = self
+            .requests
+            .lock()
+            .map_err(|_| anyhow::anyhow!("请求权限锁损坏"))?;
+        let request = active_request(&requests, &scope.context.request_id)?;
+        ensure!(
+            request.source == scope.source_id && request.context == scope.context,
+            "管理请求归属不匹配"
+        );
+        // 普通组件不能借跨插件调用把用户身份转交给受信任代理以提升自身能力。
+        ensure!(request.parent.is_none(), "管理能力不能通过跨插件调用转授");
+        let session = request
+            .session
+            .clone()
+            .context("管理调用必须来自真实交互会话")?;
+        ensure!(
+            !session.session_id.starts_with("service:"),
+            "后台调用不能管理宿主"
+        );
+        Ok((session, request.executing))
     }
 
     fn register(
@@ -149,6 +211,8 @@ impl Services {
         source: &str,
         permissions: Vec<String>,
         parent: Option<String>,
+        session: Option<SessionContext>,
+        executing: bool,
     ) -> Result<Authorization> {
         let mut requests = self
             .requests
@@ -162,6 +226,8 @@ impl Services {
             source: source.into(),
             permissions,
             parent,
+            session,
+            executing,
         };
         requests.insert(context.request_id.clone(), request);
         Ok(Authorization {
@@ -198,8 +264,14 @@ impl HostServices for Services {
                 .any(|p| p == &required || p == "*"))
     }
 
-    async fn manage(&self, _: &InvocationScope, _: Request) -> Result<Response> {
-        bail!("当前执行器未授予管理接口")
+    async fn manage(&self, scope: &InvocationScope, request: Request) -> Result<Response> {
+        let (session, executing) = self.management_session(scope)?;
+        let components = self
+            .components
+            .get()
+            .and_then(Weak::upgrade)
+            .context("组件宿主已关闭")?;
+        components.manage(scope, request, session, executing).await
     }
 
     async fn enhance(

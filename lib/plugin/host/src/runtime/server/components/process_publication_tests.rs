@@ -24,14 +24,14 @@ impl Drop for Running {
 }
 
 #[derive(Default)]
-struct Supervisor {
+pub(super) struct Supervisor {
     running: Mutex<HashMap<String, Running>>,
     starts: Mutex<Vec<process::Start>>,
     rejected: Mutex<Option<String>>,
 }
 
 // 模拟同一租户只能运行一个后台实例，并通过真实 Unix socket 返回健康状态和描述。
-async fn start(
+pub(super) async fn start(
     State(state): State<Arc<Supervisor>>,
     Json(request): Json<process::Start>,
 ) -> Result<StatusCode, StatusCode> {
@@ -77,7 +77,7 @@ async fn start(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn stop(
+pub(super) async fn stop(
     State(state): State<Arc<Supervisor>>,
     Json(request): Json<process::Stop>,
 ) -> StatusCode {

@@ -149,6 +149,7 @@ impl Components {
             if tenants.is_empty() {
                 continue;
             }
+            self.validate_authority(&component.bundle.verify()?)?;
             if !available {
                 eprintln!("首次引导暂缓，缺少执行器: {}", component.bundle.git);
                 continue;

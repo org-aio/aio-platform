@@ -343,11 +343,7 @@ impl management::Host for InvocationState {
                 "匿名请求不能调用插件管理"
             );
             ensure!(request.body.len() <= 32 * 1024 * 1024, "管理请求超过配额");
-            let services = self.resources.services.as_ref().context("管理服务未绑定")?;
-            ensure!(
-                services.authorize(&self.scope, "plugin:manage").await?,
-                "当前用户无插件管理权限"
-            );
+            // 组件 authorize 只处理组件权限；管理服务必须实时核验宿主身份和管理授权。
             self.resources
                 .services
                 .as_ref()

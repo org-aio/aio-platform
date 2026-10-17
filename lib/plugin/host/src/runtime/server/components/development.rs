@@ -22,6 +22,7 @@ impl Components {
         artifact: &DevArtifact,
         bundle: Arc<VerifiedBundle>,
     ) -> Result<az_plugin_development::DevLaunch> {
+        self.validate_authority(&bundle)?;
         self.executors
             .select(&bundle)?
             .prepare_development(artifact, bundle)
@@ -34,6 +35,7 @@ impl Components {
         bundle: Arc<VerifiedBundle>,
         repository: &str,
     ) -> Result<()> {
+        self.validate_authority(&bundle)?;
         let source = Uuid::new_v5(&Uuid::NAMESPACE_URL, artifact.source.as_bytes());
         let executor = self.executors.select(&bundle)?;
         let description = executor

@@ -62,7 +62,9 @@ impl Guest for Fixture {
                 },
             };
         }
-        if request.path == "/management" {
+        if let Some(path) = request.path.strip_prefix("/management") {
+            let mut request = request.clone();
+            request.path = if path.is_empty() { "/api/runtime/catalog".into() } else { path.into() };
             return aio::plugin::management::invoke(&request).unwrap_or_else(|error| Response {
                 status: 403,
                 headers: vec![],

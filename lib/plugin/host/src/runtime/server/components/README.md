@@ -28,6 +28,8 @@ Component 前端单独变化时保留同一执行实例；本地服务由 CLI �
 
 `bootstrap` 供可选 `ComponentBootstrapPlugin` 执行部署首次安装。先整批校验固定摘要及父子关系，再复用发布和安装；与安装同事务写入的 `component_initializations` 保留租户选择，卸载后仍存在。引导不会覆盖最新发布，也不会重装已管理的来源。参见 [整包首次引导](../../../../../../../docs/plugin/component-bootstrap.md)。
 
+`management` 为部署方按完整包摘要信任的系统插件提供公共宿主管理能力。Wasm、Sidecar broker 和前端共用真实交互登记与实时权限检查；不允许跨插件转授。前端直接调用管理入口，可以管理自身生命周期；执行器中的同步生命周期变更被拒绝。撤信任保留安装记录并暂停执行，恢复后沿用原摘要和代数。参见 [系统整包管理](../../../../../../../docs/plugin/component-management.md)。
+
 ## 可替换执行器
 
 从宿主 `plugins/component_execution.rs` 进入。`WasmComponentPlugin` 与 `SidecarPlugin` 提供默认实现，`ComponentExecutionPlugin` 汇集 Dill 中的 `ComponentExecutor`，`ComponentResourcesPlugin` 在资源就绪后初始化实现，`ComponentsPlugin` 按持久化安装记录恢复实例。

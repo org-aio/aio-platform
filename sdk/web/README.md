@@ -4,6 +4,8 @@
 
 `guest.js` 为隔离 iframe 提供二进制请求与 JSON 辅助接口。`host.mjs` 绑定单个窗口，不读取插件 DOM，不向插件暴露 Cookie 或管理票据。
 
+`aioPlugin.manage(request)` 供部署方按整包摘要信任的管理插件调用宿主管理契约。参数和返回值与 `request` 相同，路径为已开放的 `/api/runtime/...`；它经过独立的挂载管理入口，每次检查真实会话、活动版本与 `plugin:manage`。前端可升级、回滚、停用或卸载自身，成功写操作通知宿主刷新目录。`mountBridge` 未提供 `manage` 回调时默认拒绝，设备视图和开发预览也不开放。完整范围与部署声明见 [系统整包管理](../../docs/plugin/component-management.md)。
+
 `request` 和 `json` 接收 `/graph?spaceId=...` 形式的服务地址，统一用 URL 解析器分离 v2 的 `path` 与 `query` 字段。也可显式传递 `request.query`，但不能同时在两个位置提供查询参数。地址必须属于当前插件，拒绝外部地址和片段。
 
 `wasm.js` 由宿主在插件入口之前注入，统一先下载、后编译 Wasm。通过读取响应副本解除隔离页面中流式编译对公网下载的反压，原响应及编译参数仍交给浏览器原生 API 校验；不放宽 iframe、CSP 或请求权限。加载期间会暂存模块字节，不持久缓存带票据的资源。运行 `node --test sdk/web/*.test.mjs` 验证桥接和加载行为。

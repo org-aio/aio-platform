@@ -18,6 +18,9 @@ mod frontend;
 #[cfg(all(test, feature = "wasm", feature = "sidecar"))]
 mod host_access_tests;
 mod installation;
+mod management;
+#[cfg(all(test, feature = "wasm", feature = "sidecar"))]
+mod management_tests;
 mod model;
 mod permissions;
 #[cfg(feature = "sidecar")]
@@ -25,7 +28,7 @@ pub(in crate::runtime::server) mod process;
 #[cfg(all(test, feature = "sidecar"))]
 mod process_publication_tests;
 mod resources;
-mod services;
+pub(in crate::runtime::server) mod services;
 mod shutdown;
 mod store;
 #[cfg(test)]

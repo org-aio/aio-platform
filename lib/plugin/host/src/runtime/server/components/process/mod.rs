@@ -2,6 +2,7 @@ mod broker;
 mod configuration;
 mod development;
 mod instance;
+mod management;
 mod model;
 pub(in crate::runtime::server) mod supervision;
 mod workers;

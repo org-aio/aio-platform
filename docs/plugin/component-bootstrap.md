@@ -12,7 +12,7 @@ runtime_plugins.push(Arc::new(ComponentBootstrapPlugin(vec![BootstrapComponent {
 }])));
 ```
 
-`digest` 是打包器输出的规范整包 SHA256，不是压缩文件 SHA256。`tenants` 必须明确列举，不默认面向所有租户；配置属于部署方信任边界，不能交给普通插件或脚本自行写入。高权限 `management`、`identity_provider` 声明仍被现有发布准入拒绝。
+`digest` 是打包器输出的规范整包 SHA256，不是压缩文件 SHA256。`tenants` 必须明确列举，不默认面向所有租户；配置属于部署方信任边界，不能交给普通插件或脚本自行写入。高权限 `management` 包还必须由独立的 [ComponentManagementPlugin](component-management.md) 按来源和整包摘要信任，并声明 `required_permissions = ["plugin:manage"]`。`identity_provider` 仍被发布准入拒绝。
 
 ## 执行与恢复
 
@@ -21,6 +21,8 @@ runtime_plugins.push(Arc::new(ComponentBootstrapPlugin(vec![BootstrapComponent {
 3. 每项成功安装与 `component_initializations(tenant_id, git)` 在同一事务提交。记录使用 Git 业务身份，不保存原生 `TypeId`，也不依附于可删除的来源 UUID。
 4. 只给从未安装的声明租户执行首次安装。手动安装同样记入历史；升级、回滚、停用、卸载以及来源删除后，引导均不重置租户选择。移除引导配置不会卸载已有实例。
 5. 缺少执行器或父包尚未启用时暂缓，宿主继续启动。重新装配执行器会重建依赖并重试未完成项；父包启用后可重启宿主或重新装配引导插件。v2 父包还必须已经恢复为活动实例。歧义执行器、损坏包、真实验证/激活/提交失败仍返回错误。
+
+尚未完成首次安装的管理包必须获得部署信任；已经完成的安装不重新授权。撤销信任后，持久安装暂停执行，引导记录仍保留，不会通过重启恢复旧授权。
 
 这不是跨包事务：前面的安装提交后，后面的安装失败不会回滚已提交版本或外部数据库迁移。下次成功启动从未完成项继续；单项提交失败不会写入首次安装记录，沿用执行器补偿。产品的运行时组合恢复记录可能要求先执行显式 `runtime retry`，不能绕过其启动恢复约束。
 

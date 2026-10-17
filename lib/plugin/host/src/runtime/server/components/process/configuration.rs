@@ -36,10 +36,8 @@ impl Processes {
             .as_ref()
             .context("不是 process 包")?;
         ensure!(
-            !manifest.capabilities.storage
-                && !manifest.capabilities.management
-                && !manifest.capabilities.identity_provider,
-            "process 未开放存储、管理及身份提供能力"
+            !manifest.capabilities.storage && !manifest.capabilities.identity_provider,
+            "process 未开放对象存储及身份提供能力"
         );
         let approved = std::env::var("AIO_PROCESS_ENDPOINTS").unwrap_or_default();
         ensure!(
@@ -223,6 +221,7 @@ impl Processes {
             services: configuration.services.clone(),
             enhancements: manifest.capabilities.enhancements.clone(),
             runtime_capabilities: manifest.capabilities.runtime.clone(),
+            management: manifest.capabilities.management,
             client: reqwest::Client::builder()
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())

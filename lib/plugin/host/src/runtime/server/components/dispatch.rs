@@ -20,6 +20,12 @@ impl Components {
             let bundle = Bundle::decode(&archive)?;
             let verified = bundle.verify()?;
             ensure!(verified.digest() == digest, "安装记录与整包摘要不匹配");
+            validate_manifest(&verified)?;
+            if verified.manifest().plugin.capabilities.management
+                && !self.trusted_management(&verified)?
+            {
+                continue;
+            }
             // 只允许缺少实现时暂停；数据损坏、重复匹配和恢复错误仍阻止启动。
             let Some(executor) = self.executors.matching(&verified)? else {
                 continue;
@@ -35,7 +41,9 @@ impl Components {
     }
 
     pub(super) fn executor(&self, bundle: &Bundle) -> Result<Arc<dyn ComponentExecutor>> {
-        self.executors.select(&bundle.verify()?)
+        let verified = bundle.verify()?;
+        self.validate_authority(&verified)?;
+        self.executors.select(&verified)
     }
 
     pub(super) async fn bind_execution(
@@ -96,7 +104,7 @@ impl Components {
 
     pub(super) async fn validate(&self, source: Uuid, bundle: &Bundle) -> Result<Description> {
         let verified = bundle.verify()?;
-        validate_manifest(&verified)?;
+        self.validate_authority(&verified)?;
         self.executors
             .select(&verified)?
             .validate(source, bundle)
@@ -191,9 +199,16 @@ impl Components {
 // 发布与部署引导共用执行器之外的准入校验，缺少执行器也不能掩盖越权声明。
 pub(super) fn validate_manifest(verified: &VerifiedBundle) -> Result<()> {
     let grants = &verified.manifest().plugin.capabilities;
+    ensure!(!grants.identity_provider, "当前发布入口未开放身份提供能力");
     ensure!(
-        !grants.management && !grants.identity_provider,
-        "当前发布入口未开放宿主管理或身份提供能力"
+        !grants.management
+            || verified
+                .manifest()
+                .plugin
+                .required_permissions
+                .iter()
+                .any(|p| p == "plugin:manage"),
+        "管理整包必须要求宿主 plugin:manage 权限"
     );
     ensure!(
         semver::VersionReq::parse(&verified.manifest().plugin.runtime.host_version)?
@@ -201,4 +216,29 @@ pub(super) fn validate_manifest(verified: &VerifiedBundle) -> Result<()> {
         "宿主版本不满足插件约束"
     );
     Ok(())
+}
+
+impl Components {
+    pub(super) fn trusted_management(&self, bundle: &VerifiedBundle) -> Result<bool> {
+        let services = self.runtime_services.upgrade();
+        if services
+            .builders_for::<super::super::plugins::ManagementAccess>()
+            .count()
+            == 0
+        {
+            return Ok(false);
+        }
+        Ok(services
+            .get_one::<super::super::plugins::ManagementAccess>()?
+            .trusts(bundle))
+    }
+
+    pub(super) fn validate_authority(&self, bundle: &VerifiedBundle) -> Result<()> {
+        validate_manifest(bundle)?;
+        ensure!(
+            !bundle.manifest().plugin.capabilities.management || self.trusted_management(bundle)?,
+            "宿主未信任此管理整包版本"
+        );
+        Ok(())
+    }
 }

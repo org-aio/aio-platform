@@ -610,6 +610,7 @@ async fn verify_bridge(state: &RuntimeState, worker: &str) -> Result<()> {
     let mut gateway = Gateway {
         enhancements: vec![],
         runtime_capabilities: vec![],
+        management: false,
         components: Arc::downgrade(&components),
         start: super::super::model::Start {
             source,

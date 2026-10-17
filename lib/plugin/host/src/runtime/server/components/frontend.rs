@@ -490,6 +490,39 @@ pub(super) async fn request(
     }))
 }
 
+// 管理前端直接进入宿主契约，不占用插件执行器，停用或升级自身不会等待自己的请求排空。
+pub(super) async fn manage(
+    State(state): State<RuntimeState>,
+    headers: HeaderMap,
+    Path(token): Path<String>,
+    Json(request): Json<model::Request>,
+) -> Result<Json<RuntimeResponse<model::Response>>, RuntimeError> {
+    use az_plugin_runtime::HostServices;
+    let session = authenticate(&state, &headers).await?;
+    let _permit = state.frontend.request_slot()?;
+    let grant = validate(&state, &session, &token).await?;
+    let components = state.components()?;
+    let bundle = components
+        .bundle(Uuid::parse_str(&grant.source_id)?, &session.tenant_id)
+        .await?;
+    let authorization = components
+        .services
+        .enter_frontend_management(&session, &grant.source_id)?;
+    let scope = az_plugin_contract::InvocationScope {
+        source_id: grant.source_id,
+        revision: grant.revision,
+        context: authorization.context.clone(),
+        grants: bundle.manifest().plugin.capabilities.clone(),
+    };
+    let response = components
+        .services
+        .manage(&scope, request.try_into()?)
+        .await?;
+    Ok(Json(RuntimeResponse {
+        data: response.into(),
+    }))
+}
+
 pub(super) async fn renew(
     State(state): State<RuntimeState>,
     headers: HeaderMap,

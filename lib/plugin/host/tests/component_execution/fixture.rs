@@ -134,6 +134,24 @@ impl<const ID: u8> ComponentExecutor for Replacement<ID> {
             "版本或租户错误"
         );
         self.0.events.lock().await.push("handle");
+        if request.path.starts_with("/api/runtime/") {
+            let execution = self
+                .0
+                .context
+                .lock()
+                .await
+                .clone()
+                .context("缺少执行上下文")?;
+            let resources = execution.resources(source, tenant, &bundle).await?;
+            let services = resources.services.context("缺少宿主服务")?;
+            let scope = az_plugin_contract::InvocationScope {
+                source_id: source.to_string(),
+                revision: digest.into(),
+                context,
+                grants: bundle.manifest().plugin.capabilities.clone(),
+            };
+            return services.manage(&scope, request).await;
+        }
         Ok(ComponentResponse {
             status: 200,
             headers: vec![],

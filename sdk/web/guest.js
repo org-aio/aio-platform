@@ -71,7 +71,7 @@
     if (message.error) call.reject(new Error(message.error));
     else call.resolve({ ...message.response, body: new Uint8Array(message.response.body) });
   });
-  const sendRequest = (input) => new Promise((resolve, reject) => {
+  const sendRequest = (input, kind = "request") => new Promise((resolve, reject) => {
     if (pending.size >= 16) return reject(new Error("Too many pending requests"));
     if (!input || typeof input.path !== "string" || !input.path.startsWith("/") || input.path.startsWith("//")) return reject(new Error("Invalid service path"));
     const url = new URL(input.path, "https://aio.invalid");
@@ -82,13 +82,17 @@
     const id = createId();
     const timer = development ? null : setTimeout(() => { pending.delete(id); reject(new Error("Service request timed out")); }, 35000);
     pending.set(id, { resolve, reject, timer });
-    window.parent.postMessage({ protocol: "aio:plugin@2", kind: "request", id,
+    window.parent.postMessage({ protocol: "aio:plugin@2", kind, id,
       request: { method: input.method ?? "GET", path: url.pathname, query: input.query ?? (url.search.slice(1) || null),
         headers: input.headers ?? [], body } }, "*");
   });
   const request = input => window.aioLifecycle
     ? window.aioLifecycle.whenActive().then(() => sendRequest(input))
     : sendRequest(input);
+  // 管理请求走独立宿主入口，权限和版本由宿主核验，不经插件自身的执行器。
+  const manage = input => window.aioLifecycle
+    ? window.aioLifecycle.whenActive().then(() => sendRequest(input, "manage"))
+    : sendRequest(input, "manage");
   const json = async (method, path, value) => {
     const response = await request({ method, path,
       headers: value === undefined ? [] : [{ name: "content-type", value: "application/json" }],
@@ -130,5 +134,5 @@
   const fileDrag = () => {
     if (fileDrop) { window.parent.postMessage({ protocol: "aio:plugin@2", kind: "file-drag", id: fileDrop.id }, "*"); }
   };
-  Object.defineProperty(window, "aioPlugin", { value: Object.freeze({ request, json, copy, download, navigate, onNavigationChange, deviceView, onFileDrop, fileDrag }), writable: false, configurable: false });
+  Object.defineProperty(window, "aioPlugin", { value: Object.freeze({ request, manage, json, copy, download, navigate, onNavigationChange, deviceView, onFileDrop, fileDrag }), writable: false, configurable: false });
 })();

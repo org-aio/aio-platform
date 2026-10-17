@@ -195,6 +195,7 @@ fn entire_release_roundtrips_deterministically() -> Result<()> {
     assert_eq!(encoded, original.encode()?);
     let verified = Bundle::decode(&encoded)?.verify()?;
     assert_eq!(verified.digest(), original.digest);
+    assert_eq!(verified.git(), Some(original.git.as_str()));
     assert_eq!(
         verified.frontend("index.html"),
         Some(b"<html>example</html>".as_slice())
@@ -434,6 +435,7 @@ fn local_native_artifacts_do_not_weaken_published_package_validation() -> anyhow
     );
     std::fs::write(root.path().join("aio-plugin.toml"), manifest)?;
     let local = crate::VerifiedBundle::from_development_directory(root.path(), "b".repeat(64))?;
+    assert_eq!(local.git(), None);
     assert_eq!(local.component(), b"native debug executable");
     assert!(
         Bundle::from_directory(

@@ -500,7 +500,7 @@ async fn bootstrap_rejects_bad_batches_before_initializing_resources() -> Result
         ),
         (
             vec![valid, declaration(root.path(), &privileged, &["tenant"])?],
-            "宿主管理",
+            "plugin:manage",
         ),
     ];
     for (declarations, expected) in cases {

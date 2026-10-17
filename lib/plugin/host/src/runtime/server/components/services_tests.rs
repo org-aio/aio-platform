@@ -57,6 +57,11 @@ async fn interactive_requests_bind_source_and_delegation_expires_with_parent() -
             .is_err()
     );
     let delegated = services.delegate(&request.context, "first", "second")?;
+    assert!(
+        services
+            .management_session(&scope(&delegated.context, "second"))
+            .is_err()
+    );
     assert_ne!(delegated.context.request_id, request.context.request_id);
     assert_eq!(delegated.context.user_id, request.context.user_id);
     assert!(
@@ -114,6 +119,11 @@ async fn background_authority_is_bound_to_target_without_becoming_interactive() 
         vec![permission("second", "read")],
     )?;
     assert_eq!(request.context.session_id.as_deref(), Some("service:first"));
+    assert!(
+        services
+            .management_session(&scope(&request.context, "second"))
+            .is_err()
+    );
     assert!(
         services
             .authorize(&scope(&request.context, "second"), "read")

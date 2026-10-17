@@ -48,6 +48,10 @@ pub(in crate::runtime::server) fn router(state: RuntimeState) -> Router<RuntimeS
             post(super::frontend::request).layer(DefaultBodyLimit::max(32 * 1024 * 1024)),
         )
         .route(
+            "/api/runtime/components/{token}/manage",
+            post(super::frontend::manage).layer(DefaultBodyLimit::max(32 * 1024 * 1024)),
+        )
+        .route(
             "/api/runtime/components/{token}/renew",
             post(super::frontend::renew),
         )

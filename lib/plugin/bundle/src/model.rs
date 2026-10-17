@@ -23,6 +23,7 @@ pub struct Bundle {
 
 #[derive(Debug)]
 pub struct VerifiedBundle {
+    pub(crate) git: Option<String>,
     pub(crate) manifest: BundleManifest,
     pub(crate) files: BTreeMap<String, Vec<u8>>,
     pub(crate) digest: String,
@@ -36,6 +37,11 @@ pub struct FrontendAsset {
 }
 
 impl VerifiedBundle {
+    /// 正式整包摘要覆盖的来源；开发目录没有经整包校验的来源，不能取得部署信任。
+    pub fn git(&self) -> Option<&str> {
+        self.git.as_deref()
+    }
+
     pub fn frontend_assets(&self) -> &BTreeMap<String, FrontendAsset> {
         &self.frontend_assets
     }

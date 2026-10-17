@@ -54,6 +54,7 @@ pub(super) struct Gateway {
     pub services: Vec<String>,
     pub enhancements: Vec<String>,
     pub runtime_capabilities: Vec<String>,
+    pub management: bool,
     pub client: reqwest::Client,
     pub quota: Arc<tokio::sync::Semaphore>,
 }

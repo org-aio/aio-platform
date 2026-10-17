@@ -22,6 +22,7 @@ pub mod http_error;
 mod installation;
 mod lifecycle;
 mod management;
+mod management_dispatch;
 mod marketplace_removal;
 mod marketplace_store;
 mod navigation;
@@ -54,6 +55,7 @@ mod tools;
 pub(crate) mod transport;
 #[cfg(feature = "wasm")]
 mod wasm;
+mod weak_state;
 
 use std::{
     collections::HashMap,

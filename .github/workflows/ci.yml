@@ -43,6 +43,11 @@ jobs:
       - run: cargo fmt --all --check
       - run: node scripts/check-boundaries.mjs
       - run: node --test sdk/web/bridge.test.mjs sdk/web/file-drop.test.mjs sdk/web/device-transport.test.mjs sdk/web/static-transport.test.mjs cli/src/tools/release.test.cjs
+      - name: 验证浏览器组件票据与管理桥接
+        run: |
+          npm install --prefix "$RUNNER_TEMP/aio-browser" --no-audit --no-fund playwright@1.62.0
+          "$RUNNER_TEMP/aio-browser/node_modules/.bin/playwright" install --with-deps chromium
+          NODE_PATH="$RUNNER_TEMP/aio-browser/node_modules" node tests/browser/component-lifecycle.cjs
       - name: 验证精简宿主与独立执行器编译边界
         run: |
           node scripts/check-host-features.mjs
@@ -114,6 +119,7 @@ jobs:
           cargo test -p az-plugin-host --lib --no-default-features --features wasm,sidecar publication_preserves_running_singleton_process -- --ignored
           cargo test -p az-plugin-host --lib --features server,wasm,sidecar,rhai,typescript,mcp,grpc development_switch_preserves_cli_ownership_and_refreshes_frontend -- --ignored
           cargo test -p az-plugin-host --lib --features server,wasm,sidecar,rhai,typescript,mcp,grpc protected_wasm_and_sidecar_require_live_interaction_through_the_broker -- --ignored
+          AIO_PLUGIN_SUPERVISOR_SOCKET="$AIO_PROCESS_ROOT/management-supervisor.sock" cargo test -p az-plugin-host --lib --no-default-features --features wasm,sidecar wasm_and_sidecar_management_share_trust_context_and_revocation -- --ignored
         env:
           AIO_TEST_HEALTHY_COMPONENT: ${{ github.workspace }}/target/fixture/healthy/wasm32-wasip2/release/release_fixture.wasm
           AIO_PLUGIN_SUPERVISOR_SOCKET: /tmp/aio-component-executor-absent.sock

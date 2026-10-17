@@ -12,6 +12,38 @@ function guestContext(window) {
   });
 }
 
+test('管理调用使用独立入口并遵守来源、卸载及默认拒绝边界', async () => {
+  let listener, reply, received, sent, calls = 0;
+  globalThis.window = { addEventListener: (_, fn) => { listener = fn; }, removeEventListener: () => {} };
+  const child = { postMessage: message => { reply = message; } };
+  const parent = { postMessage: message => { sent = message; } };
+  const guest = { parent, addEventListener: (_, fn) => { received = fn; } };
+  vm.runInContext(readFileSync(new URL('./guest.js', import.meta.url), 'utf8'), guestContext(guest));
+  const waiting = guest.aioPlugin.manage({ path: '/api/runtime/catalog?view=installed' });
+  assert.equal(sent.kind, 'manage');
+  assert.equal(sent.request.query, 'view=installed');
+  const event = { source: child, origin: 'null', data: sent };
+  try {
+    let unmount = mountBridge({ contentWindow: child }, () => assert.fail('管理调用进入业务执行器'));
+    await listener(event);
+    assert.match(reply.error, /Management access unavailable/);
+    unmount();
+    unmount = mountBridge({ contentWindow: child }, () => assert.fail('管理调用进入业务执行器'), {
+      manage: async input => { calls++; assert.equal(input.path, '/api/runtime/catalog'); return { status: 200, headers: [], body: [] }; },
+    });
+    await listener({ ...event, source: {} });
+    await listener({ ...event, origin: 'https://outside.test' });
+    assert.equal(calls, 0);
+    await listener(event);
+    assert.equal(calls, 1);
+    received({ source: parent, data: reply });
+    assert.equal((await waiting).status, 200);
+    unmount();
+    await listener(event);
+    assert.equal(calls, 1);
+  } finally { delete globalThis.window; }
+});
+
 test('clipboard requires a host grant and an active gesture', async () => {
   let listener, reply, copied;
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'navigator');

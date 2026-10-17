@@ -7,3 +7,5 @@
 宿主负责实时会话、权限和版本校验；SDK 再验证入口令牌、租户绑定、非空用户及上下文。它不根据任意请求头授予角色，也不提供未认证的独立运行模式。Unix socket 和进程隔离仍由现有监督器管理。
 
 验证：`cargo test -p az-plugin-process`。
+
+部署方信任的管理整包可向宿主 broker Unix socket 的 `POST /management/invoke` 调用公共管理契约，使用进程令牌和当前交互的 `x-aio-context`。授权固定为该进程版本的快照，实时核验成员和权限，不允许后台或跨插件转授；执行器内不能同步变更插件生命周期。SDK 目前没有专用管理客户端，协议、额度及前端自管理入口见 [系统整包管理](../../../docs/plugin/component-management.md)。

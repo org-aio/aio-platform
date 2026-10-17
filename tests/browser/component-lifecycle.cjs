@@ -1,23 +1,25 @@
 const assert = require('node:assert/strict');
 const { createServer } = require('node:http');
 const { readFile } = require('node:fs/promises');
-const { randomUUID } = require('node:crypto');
 const { chromium } = require('playwright');
 
 const lifecycle = readFile('sdk/web/lifecycle.js', 'utf8');
+const guest = readFile('sdk/web/guest.js', 'utf8');
 const bridge = readFile('sdk/web/host.mjs', 'utf8');
 const component = Promise.all([
   readFile('lib/plugin/host/src/runtime/frontend_lifecycle.js', 'utf8'),
   readFile('lib/plugin/host/src/runtime/frontend_cache.js', 'utf8'),
   readFile('lib/plugin/host/src/runtime/frontend_assets.js', 'utf8'),
+  readFile('lib/plugin/host/src/runtime/frontend_navigation.js', 'utf8'),
   readFile('lib/plugin/host/src/runtime/frontend_component.js', 'utf8'),
 ]).then(parts => parts.join('\n'));
 
 let origin;
 let sequence = 0;
 const grants = new Map();
-const counts = { mount: 0, delete: 0, request: 0, renew: 0 };
+const counts = { mount: 0, delete: 0, request: 0, manage: 0, renew: 0 };
 const requests = [];
+const management = [];
 let deleteDelay = 0;
 let rejectedRenewal;
 
@@ -68,25 +70,26 @@ const server = createServer(async (request, response) => {
       response.writeHead(204);
       return response.end();
     }
-    const requestRoute = path.match(/^\/api\/runtime\/components\/([^/]+)\/(request|renew)$/);
+    const requestRoute = path.match(/^\/api\/runtime\/components\/([^/]+)\/(request|manage|renew)$/);
     if (requestRoute) {
       const [, token, action] = requestRoute;
+      if (action === 'renew') counts.renew++;
       if (token === rejectedRenewal) return send(response, 403, { error: 'Mount expired' });
       if (!grants.has(token)) return send(response, 403, { error: 'Mount revoked' });
       if (action === 'renew') {
-        counts.renew++;
         response.writeHead(204);
         return response.end();
       }
-      counts.request++;
-      requests.push(token);
+      counts[action]++;
+      if (action === 'manage') management.push({ token, request: JSON.parse((await body(request)).toString()) });
+      else requests.push(token);
       return send(response, 200, { data: { status: 200, headers: [], body: Array.from(Buffer.from('{}')) } });
     }
     const asset = path.match(/^\/api\/runtime\/components\/assets\/([^/]+)\/index\.html$/);
     if (asset) {
       if (!grants.has(asset[1])) return send(response, 401, { error: 'Mount missing' });
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      return response.end(`<!doctype html><html><body><script data-token="${asset[1]}">${await lifecycle}</script><script>window.marker = 'initial'; addEventListener('message', event => { if (event.source !== parent || event.data?.channel !== 'test-request') return; parent.postMessage({ protocol: 'aio:plugin@2', kind: 'request', id: event.data.id, request: { method: 'GET', path: '/tasks', query: null, body: new Uint8Array() } }, '*'); });</script></body></html>`);
+      return response.end(`<!doctype html><html><body><script data-token="${asset[1]}">${await lifecycle}</script><script>${await guest}</script><script>window.marker = 'initial';</script></body></html>`);
     }
     send(response, 404, { error: 'Not found' });
   } catch (error) {
@@ -97,7 +100,7 @@ const server = createServer(async (request, response) => {
 (async () => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const browser = await chromium.launch({ executablePath: process.env.AIO_BROWSER_EXECUTABLE, headless: true });
   const context = await browser.newContext();
   const page = await context.newPage();
   const errors = [];
@@ -108,6 +111,8 @@ const server = createServer(async (request, response) => {
     await page.evaluate(config => {
       document.body.innerHTML = `<div id="page" data-aio-page-active="true" data-aio-workspace-active="true" data-aio-workspace-context="${config.context}"><div class="application-frontend-shell"><div id="frontend-loading" class="application-frontend-loading"></div><iframe id="frame" sandbox="allow-scripts allow-forms"></iframe></div></div>`;
       window.__hostMessages = [];
+      window.__catalogChanges = 0;
+      window.addEventListener('aio:catalog-invalidated', () => window.__catalogChanges++);
       let receive = 0;
       window.dioxus = {
         recv: () => receive++ === 0 ? Promise.resolve({ ...config, id: 'frame', development: false }) : new Promise(resolve => { window.__finish = resolve; }),
@@ -123,12 +128,26 @@ const server = createServer(async (request, response) => {
     await page.waitForFunction(() => document.querySelector('#frontend-loading') === null);
     assert.equal(grants.size, 1);
     const initialSource = await page.locator('#frame').getAttribute('src');
+    const manage = method => frame.locator('body').evaluate(async (_, method) => {
+      const path = method === 'GET' ? '/api/runtime/catalog' : '/api/runtime/plugins/install';
+      const response = await window.aioPlugin.manage({ method, path, body: new Uint8Array(), headers: [] });
+      return { status: response.status, typedBody: response.body instanceof Uint8Array };
+    }, method);
+    assert.deepEqual(await manage('GET'), { status: 200, typedBody: true });
+    assert.equal(management[0].token, mount.token);
+    assert.equal(counts.request, 0);
+    assert.equal(await page.evaluate(() => window.__catalogChanges), 0);
+    await manage('POST');
+    await page.waitForFunction(() => window.__catalogChanges === 1);
 
     deleteDelay = 250;
     await page.evaluate(() => document.querySelector('#page').dataset.aioWorkspaceActive = 'false');
     await waitFor(() => counts.delete === 1);
     assert.equal(await page.locator('#frame').getAttribute('src'), initialSource);
     assert.equal(await frame.locator('body').evaluate(() => window.marker), 'initial');
+    const beforeSuspended = counts.manage;
+    await assert.rejects(manage('GET'), /暂停/);
+    assert.equal(counts.manage, beforeSuspended);
 
     await page.evaluate(() => document.querySelector('#page').dataset.aioWorkspaceActive = 'true');
     await page.waitForTimeout(100);
@@ -138,8 +157,10 @@ const server = createServer(async (request, response) => {
     await waitFor(() => counts.mount === 2 && grants.size === 1);
     const restoredTicket = [...grants.keys()][0];
     assert.notEqual(restoredTicket, mount.token);
-    await page.evaluate(() => document.querySelector('#frame').contentWindow.postMessage({ channel: 'test-request', id: 'request-after-restore' }, '*'));
+    await frame.locator('body').evaluate(() => window.aioPlugin.request({ method: 'GET', path: '/tasks' }));
     await waitFor(() => requests.includes(restoredTicket));
+    await manage('GET');
+    assert.equal(management.at(-1).token, restoredTicket);
 
     rejectedRenewal = restoredTicket;
     counts.renew = 0;
@@ -150,8 +171,10 @@ const server = createServer(async (request, response) => {
     assert.notEqual(renewedTicket, restoredTicket);
     assert.equal(await page.locator('#frame').getAttribute('src'), initialSource);
     assert.equal(await frame.locator('body').evaluate(() => window.marker), 'initial');
-    await page.evaluate(() => document.querySelector('#frame').contentWindow.postMessage({ channel: 'test-request', id: 'request-after-renewal-expiry' }, '*'));
+    await frame.locator('body').evaluate(() => window.aioPlugin.request({ method: 'GET', path: '/tasks' }));
     await waitFor(() => requests.includes(renewedTicket));
+    await manage('GET');
+    assert.equal(management.at(-1).token, renewedTicket);
     rejectedRenewal = undefined;
 
     for (let index = 0; index < 20; index++) {
@@ -170,7 +193,7 @@ const server = createServer(async (request, response) => {
     await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
     await waitFor(() => grants.size === 1);
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({ retainedFrame: true, releasedOnSuspend: true, restoredWithNewGrant: true, expiredLeaseRecoveredInPlace: true, repeatedCycles: 20, bfcache: true, maxGrants: 1 }));
+    console.log(JSON.stringify({ retainedFrame: true, releasedOnSuspend: true, restoredWithNewGrant: true, expiredLeaseRecoveredInPlace: true, repeatedCycles: 20, bfcache: true, maxGrants: 1, management: { isolated: true, suspended: true, renewed: true, catalogInvalidated: true } }));
   } finally {
     await context.close();
     await browser.close();

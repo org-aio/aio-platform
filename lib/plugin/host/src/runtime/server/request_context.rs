@@ -25,7 +25,19 @@ pub(super) async fn authenticate_optional(
     headers: &HeaderMap,
 ) -> Result<Option<SessionContext>, RuntimeError> {
     let identity = state.service::<dyn crate::identity::IdentityProvider>()?;
-    let Some(mut session) = identity.authenticate(headers).await? else {
+    let delegated = super::management_dispatch::session()?;
+    let authenticated = if let Some(session) = delegated {
+        if !identity
+            .session_active(&session.session_id, &session.tenant_id, &session.user_id)
+            .await?
+        {
+            return Ok(None);
+        }
+        Some(session)
+    } else {
+        identity.authenticate(headers).await?
+    };
+    let Some(mut session) = authenticated else {
         return Ok(None);
     };
     if !identity
@@ -55,6 +67,19 @@ pub(super) async fn authenticate_manager(
     headers: &HeaderMap,
 ) -> Result<SessionContext, RuntimeError> {
     let session = authenticate(state, headers).await?;
+    if super::management_dispatch::session()?.is_some()
+        && !state
+            .service::<dyn crate::authorization::AuthorizationProvider>()?
+            .session_has_permissions(
+                &session.session_id,
+                &session.tenant_id,
+                &session.user_id,
+                &[MANAGE_PERMISSION.into()],
+            )
+            .await?
+    {
+        return Err(RuntimeError::forbidden("当前角色没有插件管理权限"));
+    }
     if !session
         .permissions
         .iter()

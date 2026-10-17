@@ -71,7 +71,9 @@ impl Bundle {
             remaining -= bytes.len();
             files.insert(path.clone(), bytes);
         }
-        verify_artifacts(manifest, files, self.digest.clone(), false)
+        let mut verified = verify_artifacts(manifest, files, self.digest.clone(), false)?;
+        verified.git = Some(self.git.clone());
+        Ok(verified)
     }
 
     pub(crate) fn content_digest(&self) -> String {
@@ -176,6 +178,7 @@ pub(crate) fn verify_artifacts(
         "包缺少已声明的数据库迁移"
     );
     Ok(VerifiedBundle {
+        git: None,
         manifest,
         files,
         digest,

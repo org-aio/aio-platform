@@ -46,6 +46,9 @@ impl Components {
             active: Default::default(),
             mutations: Default::default(),
         });
+        components
+            .services
+            .bind_components(Arc::downgrade(&components))?;
         let context = ExecutionContext {
             root: storage.root.clone(),
             components: Arc::downgrade(&components),
@@ -77,11 +80,8 @@ impl Components {
             !source.is_nil() && !tenant.is_empty() && tenant.len() <= 128,
             "组件资源归属无效"
         );
+        self.validate_authority(verified)?;
         let grants = &verified.manifest().plugin.capabilities;
-        ensure!(
-            !grants.management && !grants.identity_provider,
-            "当前发布入口未开放宿主管理或身份提供能力"
-        );
         let migrations = verified
             .migrations()
             .map(|(name, sql)| (name.to_owned(), sql.to_owned()))

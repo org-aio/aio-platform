@@ -294,6 +294,7 @@ impl Plugin<RuntimeAssembly> for ComponentResourcesPlugin {
             #[cfg(feature = "sidecar")]
             assembly.require_service::<dyn crate::identity::IdentityProvider>();
             assembly.optional_service::<super::super::enhancements::Enhancements>();
+            assembly.optional_service::<super::ManagementAccess>();
             assembly.observe_catalog();
             assembly.declare_resource::<Components>()?;
             assembly.on_initialize::<Self>(|state, _| {
