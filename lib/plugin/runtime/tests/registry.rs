@@ -1,4 +1,4 @@
-#![cfg(feature = "wasm")]
+#![cfg(all(feature = "wasm", feature = "postgres"))]
 
 use az_plugin_contract::transport::{Request, Response};
 use std::{
@@ -58,7 +58,7 @@ async fn cancelled_persistent_request_recovers_for_follow_up_without_replay() ->
         "index.html",
     )?;
     let slot = PersistentComponentSlot::open(
-        provisioner.release_pool(),
+        provisioner.releases(),
         source,
         tenant.clone(),
         "2026.9.12".parse()?,
@@ -144,7 +144,7 @@ async fn activation_drains_requests_served_by_another_slot() -> Result<()> {
     )?;
     let publisher = Arc::new(
         PersistentComponentSlot::open(
-            provisioner.release_pool(),
+            provisioner.releases(),
             source,
             tenant.clone(),
             "2026.9.12".parse()?,
@@ -161,7 +161,7 @@ async fn activation_drains_requests_served_by_another_slot() -> Result<()> {
     };
     let serving = Arc::new(
         PersistentComponentSlot::open(
-            provisioner.release_pool(),
+            provisioner.releases(),
             source,
             tenant.clone(),
             "2026.9.12".parse()?,
@@ -246,7 +246,7 @@ async fn durable_activation_restores_and_fences_other_hosts() -> Result<()> {
     let source = uuid::Uuid::new_v4();
     let tenant = format!("registry-{source}");
     let slot = PersistentComponentSlot::open(
-        provisioner.release_pool(),
+        provisioner.releases(),
         source,
         tenant.clone(),
         "2026.9.12".parse()?,
@@ -276,7 +276,7 @@ async fn durable_activation_restores_and_fences_other_hosts() -> Result<()> {
     );
 
     let other = PersistentComponentSlot::open(
-        provisioner.release_pool(),
+        provisioner.releases(),
         source,
         tenant.clone(),
         "2026.9.12".parse()?,
@@ -331,7 +331,7 @@ async fn durable_activation_restores_and_fences_other_hosts() -> Result<()> {
             .is_err()
     );
     let isolated = PersistentComponentSlot::open(
-        provisioner.release_pool(),
+        provisioner.releases(),
         source,
         "another-tenant".into(),
         "2026.9.12".parse()?,

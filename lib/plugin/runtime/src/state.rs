@@ -1,19 +1,17 @@
 use std::{
     collections::HashMap,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result, ensure};
 use az_plugin_contract::InvocationScope;
-use sqlx::{Postgres, Transaction};
 use wasmtime::{StoreLimits, StoreLimitsBuilder};
 
 use crate::{
-    InvocationResources,
+    InvocationResources, ScopedTransaction,
     bindings::aio::plugin::{
         cryptography, database, host, management, metadata, storage, transport,
     },
-    database_query,
 };
 
 pub(crate) struct InvocationState {
@@ -22,7 +20,7 @@ pub(crate) struct InvocationState {
     pub limits: StoreLimits,
     pub executing: bool,
     pub log_events: u32,
-    transactions: HashMap<u32, Transaction<'static, Postgres>>,
+    transactions: HashMap<u32, ScopedTransaction>,
     next_transaction: u32,
     wasi: wasmtime_wasi::WasiCtx,
     table: wasmtime::component::ResourceTable,
@@ -221,12 +219,10 @@ impl database::Host for InvocationState {
                 .transactions
                 .get_mut(&transaction)
                 .context("事务句柄无效或已经结束")?;
-            tokio::time::timeout(
-                Duration::from_secs(4),
-                database_query::query(tx, &statement, parameters),
-            )
-            .await
-            .context("数据库请求超时")?
+            let rows = tx
+                .query(&statement, parameters.into_iter().map(Into::into).collect())
+                .await?;
+            Ok(rows.into())
         }
         .await;
         if result.is_err() {
@@ -247,12 +243,8 @@ impl database::Host for InvocationState {
                 .transactions
                 .get_mut(&transaction)
                 .context("事务句柄无效或已经结束")?;
-            tokio::time::timeout(
-                Duration::from_secs(4),
-                database_query::execute(tx, &statement, parameters),
-            )
-            .await
-            .context("数据库请求超时")?
+            tx.execute(&statement, parameters.into_iter().map(Into::into).collect())
+                .await
         }
         .await;
         if result.is_err() {

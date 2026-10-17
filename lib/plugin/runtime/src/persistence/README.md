@@ -5,4 +5,4 @@
 结构迁移使用 SQL AST 统一校验：允许建表、建索引、新增列、添加约束及不带 CASCADE 的约束删除。跨 schema、外部位置、任意函数、删列、所有者变更及权限控制不开放；业务数据角色仍不能执行 DDL。
 # 隔离进程连接
 
-`ScopedDatabase::connection_options` 只从通过统一隔离校验的句柄返回数据角色连接，由宿主通过私有 Unix socket 交付给隔离进程；管理数据库凭据不进入插件。
+`ScopedDatabase::process_connection` 从同一个后端导出 `ProcessDatabaseConnection`。默认 PostgreSQL 后端仍先校验角色隔离，再生成专属 URL、TCP/Unix 上游与 `/database` 下的协议 socket；宿主不再解析 PostgreSQL 连接选项，也不会另向 Provider 索取凭据。管理数据库凭据不进入插件。

@@ -75,7 +75,7 @@ remote-grpc = ["server", "dep:arc-swap", "dep:prost", "dep:prost-reflect", "dep:
 ui = ["dep:dioxus", "dep:dioxus-icons", "dep:az-dioxus-admin-shell", "dep:az-ui-components", "dep:tracing"]
 web = ["ui", "dioxus/web", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
 desktop = ["ui", "dioxus/desktop", "dioxus/launch", "dep:gloo-net", "dep:web-sys"]
-server = ["dep:tempfile", "dep:tower", "dep:schemars", "dep:tokio-util", "dep:http-body", "dep:jsonwebtoken","components", "az-plugin-manifest/validation", "dep:az-plugin-package", "dep:axum", "dep:flate2", "dep:kuchikiki", "dep:mime_guess", "dep:reqwest", "dep:sha2", "dep:sqlx", "dep:tar", "dep:tokio", "dep:toml", "dep:tower-http", "dep:uuid", "dep:urlencoding"]
+server = ["dep:tempfile", "dep:tower", "dep:schemars", "dep:tokio-util", "dep:http-body", "dep:jsonwebtoken","components", "az-plugin-runtime/postgres", "az-plugin-manifest/validation", "dep:az-plugin-package", "dep:axum", "dep:flate2", "dep:kuchikiki", "dep:mime_guess", "dep:reqwest", "dep:sha2", "dep:sqlx", "dep:tar", "dep:tokio", "dep:toml", "dep:tower-http", "dep:uuid", "dep:urlencoding"]
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -24,7 +24,7 @@ impl Encode<'_, Postgres> for InferredNull {
 mod tests {
     use anyhow::Result;
 
-    use crate::{DatabaseProvisioner, bindings::aio::plugin::database::Value, database_query};
+    use crate::{DatabaseProvisioner, DatabaseValue as Value};
 
     #[tokio::test]
     #[ignore = "requires a disposable PostgreSQL database"]
@@ -45,15 +45,15 @@ mod tests {
             .await?;
         let mut transaction = database.begin().await?;
         assert_eq!(
-            database_query::execute(
-                &mut transaction,
-                "INSERT INTO records VALUES ($1, $2, $3, $4, $5, $6)",
-                vec![Value::Null; 6],
-            )
-            .await?,
+            transaction
+                .execute(
+                    "INSERT INTO records VALUES ($1, $2, $3, $4, $5, $6)",
+                    vec![Value::Null; 6],
+                )
+                .await?,
             1
         );
-        let rows = database_query::query(&mut transaction, "SELECT * FROM records", vec![]).await?;
+        let rows = transaction.query("SELECT * FROM records", vec![]).await?;
         assert_eq!(rows.values.len(), 1);
         assert_eq!(rows.values[0].len(), 6);
         assert!(
@@ -61,12 +61,12 @@ mod tests {
                 .iter()
                 .all(|value| matches!(value, Value::Null))
         );
-        let typed = database_query::query(
-            &mut transaction,
-            "SELECT $1::bigint, $2::boolean, $3::bytea",
-            vec![Value::Null; 3],
-        )
-        .await?;
+        let typed = transaction
+            .query(
+                "SELECT $1::bigint, $2::boolean, $3::bytea",
+                vec![Value::Null; 3],
+            )
+            .await?;
         assert!(
             typed.values[0]
                 .iter()

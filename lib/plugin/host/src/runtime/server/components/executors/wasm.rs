@@ -47,7 +47,7 @@ impl WasmComponentExecutor {
         let components = state.context.components()?;
         let slot = Arc::new(
             PersistentComponentSlot::open(
-                components.backends.database.release_pool(),
+                components.backends.database.releases(),
                 source,
                 tenant.into(),
                 semver::Version::parse(env!("CARGO_PKG_VERSION"))?,

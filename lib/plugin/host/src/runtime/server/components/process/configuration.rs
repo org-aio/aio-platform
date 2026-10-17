@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, ensure};
 use az_plugin_bundle::VerifiedBundle;
 use az_plugin_contract::{InvocationScope, RequestContext, process::Configuration};
+use az_plugin_runtime::DatabaseEndpoint;
 use base64::{Engine, engine::general_purpose::STANDARD};
-use sqlx::ConnectOptions;
 use std::{os::unix::fs::PermissionsExt, sync::Arc};
 use tokio::{
     net::{TcpStream, UnixListener, UnixStream},
@@ -117,65 +117,43 @@ impl Processes {
                 .resources_verified(start.source, &start.tenant, verified)
                 .await?;
             let database = resources.database.context("未授予 process 数据库")?;
-            let connection = database.connection_options();
+            let connection = database.process_connection()?;
             drop(database);
             if local {
-                Some(connection.to_url_lossy().to_string())
+                Some(connection.direct_url)
             } else {
-                let socket = directory.join("database/.s.PGSQL.5432");
+                let socket = directory.join("database").join(&connection.socket_name);
                 if tokio::fs::try_exists(&socket).await? {
                     tokio::fs::remove_file(&socket).await?;
                 }
                 let listener = UnixListener::bind(&socket)?;
                 tokio::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o666)).await?;
-                let host = connection.get_host().to_owned();
-                let port = connection.get_port();
-                let upstream_socket = connection
-                    .get_socket()
-                    .map(|path| path.join(format!(".s.PGSQL.{port}")));
-                eprintln!(
-                    "process 数据库代理上游 host={host} port={port} socket={upstream_socket:?}"
-                );
+                let upstream = Arc::new(connection.upstream);
                 jobs.spawn(async move {
-                let mut clients = JoinSet::new();
-                loop {
-                    tokio::select! {
-                        _ = clients.join_next(), if !clients.is_empty() => {},
-                        accepted = listener.accept(), if clients.len() < 6 => {
-                            let Ok((mut local, _)) = accepted else { break };
-                            let host = host.clone();
-                            let socket = upstream_socket.clone();
-                            clients.spawn(async move {
-                                if let Some(socket) = socket {
-                                    match UnixStream::connect(&socket).await {
-                                        Ok(mut remote) => {
-                                            let _ = tokio::io::copy_bidirectional(&mut local, &mut remote).await;
-                                            return;
-                                        }
-                                        Err(error) => {
-                                            eprintln!("process 数据库 Unix socket 转发失败 {}: {error}", socket.display());
-                                        }
-                                    }
+                    let mut clients = JoinSet::new();
+                    loop {
+                        tokio::select! {
+                            result = clients.join_next(), if !clients.is_empty() => {
+                                match result {
+                                    Some(Ok(Err(error))) => eprintln!("Sidecar 数据库代理失败: {error:#}"),
+                                    Some(Err(error)) => eprintln!("Sidecar 数据库代理任务失败: {error}"),
+                                    _ => {}
                                 }
-                                match TcpStream::connect((host.as_str(), port)).await {
-                                    Ok(mut remote) => {
-                                        let _ = tokio::io::copy_bidirectional(&mut local, &mut remote).await;
-                                    }
+                            },
+                            accepted = listener.accept(), if clients.len() < 6 => {
+                                let (local, _) = match accepted {
+                                    Ok(client) => client,
                                     Err(error) => {
-                                        eprintln!("process 数据库 TCP 转发失败 {host}:{port}: {error}");
+                                        eprintln!("Sidecar 数据库代理停止接收连接: {error}");
+                                        break;
                                     }
-                                }
-                            });
+                                };
+                                clients.spawn(forward_database(local, upstream.clone()));
+                            }
                         }
                     }
-                }
-            });
-                let mut url = connection.to_url_lossy();
-                url.set_host(Some("localhost"))?;
-                url.set_port(Some(5432))
-                    .map_err(|_| anyhow::anyhow!("数据库端口无效"))?;
-                url.query_pairs_mut().append_pair("host", "/database");
-                Some(url.to_string())
+                });
+                Some(connection.isolated_url)
             }
         } else {
             None
@@ -242,5 +220,29 @@ async fn replace_file(path: &std::path::Path, bytes: &[u8], mode: u32) -> Result
     tokio::fs::write(&temporary, bytes).await?;
     tokio::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(mode)).await?;
     tokio::fs::rename(temporary, path).await?;
+    Ok(())
+}
+
+// 协议和凭据由数据库后端声明；宿主只负责有界的私有连接转发。
+pub(super) async fn forward_database(
+    mut local: UnixStream,
+    upstream: Arc<DatabaseEndpoint>,
+) -> Result<()> {
+    let timeout = std::time::Duration::from_secs(3);
+    match upstream.as_ref() {
+        DatabaseEndpoint::Tcp { host, port } => {
+            let mut remote =
+                tokio::time::timeout(timeout, TcpStream::connect((host.as_str(), *port)))
+                    .await
+                    .context("数据库 TCP 连接超时")??;
+            tokio::io::copy_bidirectional(&mut local, &mut remote).await?;
+        }
+        DatabaseEndpoint::Unix(path) => {
+            let mut remote = tokio::time::timeout(timeout, UnixStream::connect(path))
+                .await
+                .context("数据库 Unix 连接超时")??;
+            tokio::io::copy_bidirectional(&mut local, &mut remote).await?;
+        }
+    }
     Ok(())
 }

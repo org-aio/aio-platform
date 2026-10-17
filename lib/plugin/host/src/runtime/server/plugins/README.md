@@ -208,7 +208,7 @@ assembly.services
     .bind::<dyn ObjectStorageProvider, MyObjectStorageProvider>();
 ```
 
-两者的 `open(&ComponentStorage)` 分别返回 `Arc<dyn ComponentDatabase>` 和 `Arc<dyn ObjectStorage>`。Provider 只负责异步创建，返回后的关闭由组件生命周期负责，不要重复登记关闭钩子。实现契约位于 `az-plugin-runtime`；原生实现身份仍使用 TypeId，来源/租户属于独立业务身份。读取顺序是本目录 `component_resources.rs` → `components/resources.rs` → runtime 的 `component_database.rs` / `storage.rs`。
+两者的 `open(&ComponentStorage)` 分别返回 `Arc<dyn ComponentDatabase>` 和 `Arc<dyn ObjectStorage>`。Provider 只负责异步创建，返回后的关闭由组件生命周期负责，不要重复登记关闭钩子。实现契约位于 `az-plugin-runtime`；原生实现身份仍使用 TypeId，来源/租户属于独立业务身份。读取顺序是本目录 `component_resources.rs` → `components/resources.rs` → runtime 的 `component_database.rs` / `database_backend.rs` / `component_releases.rs` / `storage.rs`。执行运行时的 PostgreSQL 适配器由独立 `postgres` feature 选择，宿主 `server` 目前显式启用它作为默认基础设施。
 
 `WorkerCapabilitiesPlugin` 将已装配的设备服务提供给 Rhai/TypeScript，不依赖某个默认 `WorkerService` 实现。其他原生插件将自己的实现绑定到 `CapabilityProvider` 即可贡献版本化路径、schema 和受控异步调用；目录在异步资源初始化完成后校验，开发宿主同样执行。详见 [宿主能力与脚本自举](../enhancements/README.md#宿主能力与脚本自举)。
 

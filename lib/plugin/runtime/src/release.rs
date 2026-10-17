@@ -104,6 +104,9 @@ impl ComponentSlot {
             !requested.database || resources.database.is_some(),
             "数据库能力未绑定已迁移的专属数据库"
         );
+        if let Some(database) = &resources.database {
+            database.validate_migrations(&migrations)?;
+        }
         ensure!(
             !requested.cryptography || resources.keyring.is_some(),
             "加密能力未绑定宿主密钥"

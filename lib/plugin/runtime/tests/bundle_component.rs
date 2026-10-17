@@ -1,4 +1,4 @@
-#![cfg(feature = "wasm")]
+#![cfg(all(feature = "wasm", feature = "postgres"))]
 
 use az_plugin_contract::transport::Request;
 use std::{path::PathBuf, sync::Arc};

@@ -106,7 +106,7 @@ impl DatabaseProvisioner {
             sqlx::query(&sql).execute(&mut *tx).await?;
         }
         tx.commit().await?;
-        ScopedDatabase::connect_options(
+        crate::PostgresDatabase::connect(
             self.connection.clone().username(&role).password(&password),
             &role,
             &schema,

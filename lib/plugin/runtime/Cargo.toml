@@ -14,21 +14,23 @@ semver.workspace = true
 uuid.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-sqlx = { workspace = true, features = ["uuid"] }
+sqlx = { workspace = true, features = ["uuid"], optional = true }
 tokio = { workspace = true, features = ["fs", "io-util", "rt-multi-thread"] }
 wasmtime = { workspace = true, features = ["async", "component-model-async", "cache"], optional = true }
 wasmtime-wasi = { version = "48.0.1", default-features = false, features = ["p2"], optional = true }
 getrandom = "0.4.2"
 tracing.workspace = true
-sqlparser = { version = "0.61.0", features = ["visitor"] }
+sqlparser = { version = "0.61.0", features = ["visitor"], optional = true }
 futures-util = "0.3.32"
 aes-gcm = "0.10.3"
 
 [features]
 default = []
+postgres = ["dep:sqlx", "dep:sqlparser"]
 wasm = ["dep:wasmtime", "dep:wasmtime-wasi"]
 
 [dev-dependencies]
+sqlx = { version = "0.8.6", default-features = false, features = ["sqlite", "runtime-tokio-rustls"] }
 az-plugin-enhancement = { path = "../enhancement" }
 tempfile = "3.23.0"
 axum.workspace = true
@@ -42,4 +44,4 @@ workspace = true
 [[example]]
 name = "preview"
 path = "examples/preview/main.rs"
-required-features = ["wasm"]
+required-features = ["wasm", "postgres"]

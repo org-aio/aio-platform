@@ -93,11 +93,11 @@ impl Guest for Fixture {
                 body: std::env::vars().count().to_string().into_bytes(),
             };
         }
-        if request.path == "/wait" {
+        if request.path == "/wait" || request.path == "/wait-invalid" {
             let _ = host::authorize("wait");
         }
         Response {
-            status: 200,
+            status: if request.path == "/wait-invalid" { 0 } else { 200 },
             headers: vec![],
             body: request.body,
         }

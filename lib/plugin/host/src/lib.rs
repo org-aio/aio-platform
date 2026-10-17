@@ -10,6 +10,7 @@ pub mod metering;
 #[cfg(feature = "server")]
 pub mod recovery;
 pub mod runtime;
+#[cfg(any(feature = "server", feature = "web", feature = "desktop"))]
 mod startup;
 
 #[cfg(any(feature = "web", feature = "desktop"))]

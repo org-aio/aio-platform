@@ -1,3 +1,5 @@
+#[cfg(feature = "sidecar")]
+use std::str::FromStr;
 use std::{
     any::TypeId,
     collections::HashMap,
@@ -51,8 +53,8 @@ impl ComponentDatabase for PreparedDatabase {
             .cloned()
             .context("未预先分配租户数据库")
     }
-    fn release_pool(&self) -> PgPool {
-        self.pool.clone()
+    fn releases(&self) -> Arc<dyn az_plugin_runtime::ComponentReleases> {
+        Arc::new(az_plugin_runtime::PostgresReleases::new(self.pool.clone()))
     }
     async fn shutdown(&self) -> Result<()> {
         self.stops.fetch_add(1, Ordering::SeqCst);
@@ -317,8 +319,8 @@ async fn replacement_resources_share_scope_with_external_executors() -> Result<(
         .context("没有数据库句柄")?
         .begin()
         .await?;
-    sqlx::query("INSERT INTO records VALUES (1,'retained')")
-        .execute(&mut *transaction)
+    transaction
+        .execute("INSERT INTO records VALUES (1,'retained')", vec![])
         .await?;
     transaction.commit().await?;
     let mut transaction = resources2
@@ -328,10 +330,13 @@ async fn replacement_resources_share_scope_with_external_executors() -> Result<(
         .begin()
         .await?;
     assert_eq!(
-        sqlx::query_scalar::<_, String>("SELECT value FROM records WHERE id=1")
-            .fetch_one(&mut *transaction)
-            .await?,
-        "retained"
+        transaction
+            .query("SELECT value FROM records WHERE id=1", vec![])
+            .await?
+            .values,
+        vec![vec![az_plugin_runtime::DatabaseValue::Text(
+            "retained".into()
+        )]]
     );
     transaction.commit().await?;
     let calls = providers.database.calls.load(Ordering::SeqCst);
@@ -447,8 +452,11 @@ async fn sidecar_receives_the_same_checked_database_as_external_executor() -> Re
     let resources = context.resources(source, "development", &bundle).await?;
     let database = resources.database.as_ref().context("缺少替代数据库")?;
     let mut transaction = database.begin().await?;
-    sqlx::query("INSERT INTO records VALUES(1,'shared-with-sidecar')")
-        .execute(&mut *transaction)
+    transaction
+        .execute(
+            "INSERT INTO records VALUES(1,'shared-with-sidecar')",
+            vec![],
+        )
         .await?;
     transaction.commit().await?;
     let sidecar = SidecarExecutor::default();
@@ -480,7 +488,11 @@ async fn sidecar_receives_the_same_checked_database_as_external_executor() -> Re
     let role: String = sqlx::query_scalar("SELECT current_user")
         .fetch_one(&connection)
         .await?;
-    assert_eq!(role, database.connection_options().get_username());
+    assert_eq!(
+        role,
+        sqlx::postgres::PgConnectOptions::from_str(&database.process_connection()?.direct_url)?
+            .get_username()
+    );
     assert_eq!(
         sqlx::query_scalar::<_, String>("SELECT value FROM records WHERE id=1")
             .fetch_one(&connection)
@@ -510,7 +522,7 @@ async fn sidecar_receives_the_same_checked_database_as_external_executor() -> Re
 #[cfg(feature = "wasm")]
 #[tokio::test]
 #[ignore = "需要独立本机 PostgreSQL 和真实 WIT Component"]
-async fn wasm_uses_replacement_storage_database_and_persistent_release_pool() -> Result<()> {
+async fn wasm_uses_replacement_storage_database_and_persistent_releases() -> Result<()> {
     let url = fixture::database().await?;
     let root = tempfile::tempdir()?;
     let source = Uuid::new_v4();
@@ -562,8 +574,11 @@ async fn wasm_uses_replacement_storage_database_and_persistent_release_pool() ->
         .await?;
     let database = resources.database.as_ref().context("缺少数据库句柄")?;
     let mut transaction = database.begin().await?;
-    sqlx::query("INSERT INTO records VALUES (1,'database-from-replacement')")
-        .execute(&mut *transaction)
+    transaction
+        .execute(
+            "INSERT INTO records VALUES (1,'database-from-replacement')",
+            vec![],
+        )
         .await?;
     transaction.commit().await?;
     let wasm = WasmComponentExecutor::default();

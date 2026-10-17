@@ -1,12 +1,8 @@
-use crate::{
-    bindings::aio::plugin::database::{Rows, Value},
-    database_policy::validate,
-};
+use crate::database_values::{MAX_RESULT_BYTES, MAX_ROWS};
+use crate::{DatabaseRows as Rows, DatabaseValue as Value, database_policy::validate};
 use anyhow::{Context, Result, bail, ensure};
 use futures_util::TryStreamExt;
 use sqlx::{Column, Postgres, Row, Transaction, TypeInfo, ValueRef, postgres::PgArguments};
-const MAX_ROWS: usize = 1_000;
-const MAX_RESULT_BYTES: usize = 4 * 1024 * 1024;
 fn bind<'a>(
     statement: &'a str,
     parameters: Vec<Value>,
@@ -82,7 +78,7 @@ pub(crate) async fn query(
                             .0
                             .to_string(),
                     ),
-                    kind => bail!("SQL 返回类型 {kind} 需要显式转换为受支持的 WIT 类型"),
+                    kind => bail!("SQL 返回类型 {kind} 需要显式转换为受支持的数据库值类型"),
                 }
             };
             bytes += match &value {

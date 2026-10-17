@@ -67,4 +67,6 @@ Provider 的 `open` 返回本次宿主拥有的后端。资源准备、执行器
 
 `resources.rs` 按包授权创建 `InvocationResources`，校验来源和租户后交给 Wasm 或外部执行器。Sidecar 数据库配置也通过此入口；Sidecar 当前仍未开放对象存储能力。对象读写的租户命名空间、键校验和大小限制由运行时句柄执行，后端只消费已校验地址。
 
-`tests/component_execution/resources.rs` 移除默认 Provider，使用预先分配的 PostgreSQL 连接和测试对象后端，验证两个外部执行器共享资源、Wasm 的真实 WIT 读写与撤权、Sidecar 数据角色和表权限、持久槽恢复、错误归属拒绝及失败补偿。PostgreSQL 仍是数据和发布记录协议；这不代表任意数据库引擎已可切换。
+`tests/component_execution/resources.rs` 移除默认 Provider，使用预先分配的 PostgreSQL 连接和测试对象后端，验证两个外部执行器共享资源、Wasm 的真实 WIT 读写与撤权、Sidecar 数据角色和表权限、持久槽恢复、错误归属拒绝及失败补偿。执行运行时另外以真实 SQLite 替代 `DatabaseBackend` 与 `ComponentReleases`，覆盖 WIT 读写、并发发布、失败回滚和持久恢复，见 runtime 的 `tests/database_backends.rs`。正式产品仍默认使用 PostgreSQL；平台安装目录尚未抽离，SQL 方言与迁移也不会自动转换。
+
+数据库后端返回中立事务与值模型，发布槽通过 `ComponentDatabase::releases()` 获取持久存储。Sidecar 只消费同一绑定导出的 `ProcessDatabaseConnection`，按声明的 TCP/Unix 上游建立私有代理，不再解析 PostgreSQL 驱动选项。不支持网络直连的后端明确拒绝 Sidecar；不允许回退到平台数据库。

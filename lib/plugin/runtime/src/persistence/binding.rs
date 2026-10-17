@@ -11,8 +11,8 @@ use crate::{
 
 #[async_trait::async_trait]
 impl ComponentDatabase for DatabaseProvisioner {
-    fn release_pool(&self) -> sqlx::PgPool {
-        self.pool.clone()
+    fn releases(&self) -> std::sync::Arc<dyn crate::ComponentReleases> {
+        std::sync::Arc::new(crate::PostgresReleases::new(self.pool.clone()))
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -167,7 +167,7 @@ impl ComponentDatabase for DatabaseProvisioner {
         sqlx::query("INSERT INTO aio_plugin_host.database_bindings(source_id,tenant_id,schema_name,role_name,ciphertext,migrations) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(source_id,tenant_id) DO UPDATE SET ciphertext=EXCLUDED.ciphertext,migrations=EXCLUDED.migrations")
             .bind(source).bind(tenant).bind(&schema).bind(&role).bind(keyring.seal(&scope,"database-role",password.as_bytes())?).bind(serde_json::to_value(history)?).execute(&mut *tx).await?;
         tx.commit().await?;
-        ScopedDatabase::connect_options(
+        crate::PostgresDatabase::connect(
             self.connection.clone().username(&role).password(&password),
             &role,
             &schema,

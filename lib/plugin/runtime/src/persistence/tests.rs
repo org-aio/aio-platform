@@ -1,4 +1,4 @@
-use crate::{ComponentDatabase, DatabaseProvisioner, Keyring};
+use crate::{ComponentDatabase, DatabaseProvisioner, DatabaseValue, Keyring};
 use anyhow::Result;
 use std::collections::BTreeMap;
 
@@ -17,8 +17,7 @@ async fn binding_survives_restart_and_rejects_rewritten_history() -> Result<()> 
         .install(&source, "test", &migrations, &keyring)
         .await?;
     let mut tx = database.begin().await?;
-    sqlx::query("INSERT INTO records VALUES(1,'retained')")
-        .execute(&mut *tx)
+    tx.execute("INSERT INTO records VALUES(1,'retained')", vec![])
         .await?;
     tx.commit().await?;
     drop(database);
@@ -30,10 +29,10 @@ async fn binding_survives_restart_and_rejects_rewritten_history() -> Result<()> 
         .await?;
     let mut tx = database.begin().await?;
     assert_eq!(
-        sqlx::query_scalar::<_, String>("SELECT value FROM records WHERE id=1")
-            .fetch_one(&mut *tx)
-            .await?,
-        "retained"
+        tx.query("SELECT value FROM records WHERE id=1", vec![])
+            .await?
+            .values,
+        vec![vec![DatabaseValue::Text("retained".into())]]
     );
     tx.commit().await?;
     let mut upgraded = migrations.clone();
@@ -56,12 +55,13 @@ async fn binding_survives_restart_and_rejects_rewritten_history() -> Result<()> 
         .await?;
     let mut tx = upgraded_database.begin().await?;
     assert_eq!(
-        sqlx::query_scalar::<_, String>(
-            "UPDATE records SET state='recorded' WHERE id=1 RETURNING value"
+        tx.query(
+            "UPDATE records SET state='recorded' WHERE id=1 RETURNING value",
+            vec![]
         )
-        .fetch_one(&mut *tx)
-        .await?,
-        "retained"
+        .await?
+        .values,
+        vec![vec![DatabaseValue::Text("retained".into())]]
     );
     tx.commit().await?;
     let mut invalid = upgraded.clone();
@@ -101,10 +101,10 @@ async fn binding_survives_restart_and_rejects_rewritten_history() -> Result<()> 
         .await?;
     let mut tx = other.begin().await?;
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM records")
-            .fetch_one(&mut *tx)
-            .await?,
-        0
+        tx.query("SELECT count(*) FROM records", vec![])
+            .await?
+            .values,
+        vec![vec![DatabaseValue::Integer(0)]]
     );
     tx.commit().await?;
     Ok(())
@@ -127,24 +127,23 @@ async fn databases_isolate_roles_and_reopen_persisted_bindings() -> Result<()> {
         .install(&source, tenant, &migrations, &keyring)
         .await?;
     let mut tx = database.begin().await?;
-    sqlx::query("INSERT INTO records VALUES (1,'first-database')")
-        .execute(&mut *tx)
+    tx.execute("INSERT INTO records VALUES (1,'first-database')", vec![])
         .await?;
     tx.commit().await?;
-    let first_role = database.connection_options().get_username().to_owned();
+    let first_role = url_role(&database.process_connection()?.direct_url)?;
     drop(database);
     let other = second
         .install(&source, tenant, &migrations, &keyring)
         .await?;
     let mut tx = other.begin().await?;
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM records")
-            .fetch_one(&mut *tx)
-            .await?,
-        0
+        tx.query("SELECT count(*) FROM records", vec![])
+            .await?
+            .values,
+        vec![vec![DatabaseValue::Integer(0)]]
     );
     tx.commit().await?;
-    let second_role = other.connection_options().get_username().to_owned();
+    let second_role = url_role(&other.process_connection()?.direct_url)?;
     assert_ne!(first_role, second_role);
     // 持久记录拥有角色身份；算法调整或恢复备份不会要求在线服务更换数据库账号。
     let existing_role = format!("r_{}", crate::provision::namespace(&source, tenant));
@@ -165,12 +164,22 @@ async fn databases_isolate_roles_and_reopen_persisted_bindings() -> Result<()> {
         .await?;
     let mut tx = reopened.begin().await?;
     assert_eq!(
-        sqlx::query_scalar::<_, String>("SELECT value FROM records WHERE id=1")
-            .fetch_one(&mut *tx)
-            .await?,
-        "first-database"
+        tx.query("SELECT value FROM records WHERE id=1", vec![])
+            .await?
+            .values,
+        vec![vec![DatabaseValue::Text("first-database".into())]]
     );
     tx.commit().await?;
-    assert_eq!(reopened.connection_options().get_username(), existing_role);
+    assert_eq!(
+        url_role(&reopened.process_connection()?.direct_url)?,
+        existing_role
+    );
     Ok(())
+}
+
+fn url_role(url: &str) -> anyhow::Result<String> {
+    use std::str::FromStr;
+    Ok(sqlx::postgres::PgConnectOptions::from_str(url)?
+        .get_username()
+        .into())
 }

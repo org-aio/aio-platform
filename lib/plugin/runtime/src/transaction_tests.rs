@@ -1,14 +1,9 @@
-use anyhow::{Context, Result};
+#[cfg(feature = "postgres")]
+use anyhow::Context;
+use anyhow::Result;
 use az_plugin_contract::{CapabilityGrants, InvocationScope, RequestContext};
 
-use crate::{
-    DatabaseProvisioner, InvocationResources,
-    bindings::aio::plugin::{
-        database::{Host as _, Value},
-        management,
-    },
-    state::InvocationState,
-};
+use crate::{bindings::aio::plugin::management, state::InvocationState};
 
 fn context() -> RequestContext {
     RequestContext {
@@ -51,9 +46,14 @@ async fn anonymous_management_is_rejected_even_when_capability_is_granted() -> R
     Ok(())
 }
 
+#[cfg(feature = "postgres")]
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL database"]
 async fn unfinished_and_failed_transactions_are_rolled_back() -> Result<()> {
+    use crate::{
+        DatabaseProvisioner, InvocationResources,
+        bindings::aio::plugin::database::{Host as _, Value},
+    };
     let source = format!(
         "tx-test-{}",
         std::time::SystemTime::now()
@@ -118,8 +118,8 @@ async fn unfinished_and_failed_transactions_are_rolled_back() -> Result<()> {
     );
     assert!(state.finish(id, true).await?.is_err());
     let mut locking = database.begin().await?;
-    sqlx::query("INSERT INTO records VALUES(1, 'locked')")
-        .execute(&mut *locking)
+    locking
+        .execute("INSERT INTO records VALUES(1, 'locked')", vec![])
         .await?;
     let blocked = state.begin().await?.map_err(anyhow::Error::msg)?;
     let start = std::time::Instant::now();

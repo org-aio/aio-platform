@@ -57,8 +57,8 @@ async fn cancelled_calls_release_connections_without_dropping_the_instance_handl
         .compile(&std::fs::read(std::env::var("AIO_TEST_COMPONENT")?)?)
         .await?;
     let mut blocker = database.begin().await?;
-    sqlx::query("INSERT INTO counter VALUES(1, 0)")
-        .execute(&mut *blocker)
+    blocker
+        .execute("INSERT INTO counter VALUES(1, 0)", vec![])
         .await?;
     let mut cancelled = Vec::new();
     for _ in 0..5 {

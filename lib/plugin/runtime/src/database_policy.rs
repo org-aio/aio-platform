@@ -1,11 +1,8 @@
-#[cfg(any(test, feature = "wasm"))]
 use anyhow::{Context, ensure};
 use anyhow::{Result, bail};
 use sqlparser::ast::{Expr, TableFactor, Visit, Visitor, visit_expressions, visit_relations};
-#[cfg(any(test, feature = "wasm"))]
 use sqlparser::{ast::Statement, dialect::PostgreSqlDialect, parser::Parser};
 use std::ops::ControlFlow;
-#[cfg(any(test, feature = "wasm"))]
 pub(crate) fn validate(statement: &str) -> Result<()> {
     ensure!(statement.len() <= 64 * 1024, "SQL 语句超过配额");
     let statements =

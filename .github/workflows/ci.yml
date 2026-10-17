@@ -53,7 +53,7 @@ jobs:
       - name: 验证精简宿主与独立执行器编译边界
         run: |
           node scripts/check-host-features.mjs
-          for executor_profile in server wasm sidecar rhai typescript mcp grpc remote-mcp remote-grpc remote; do
+          for executor_profile in components server wasm sidecar rhai typescript mcp grpc remote-mcp remote-grpc remote; do
             cargo clippy -p az-plugin-host --no-default-features --features "$executor_profile" --lib -- -D warnings
             cargo clippy -p az-plugin-host --no-default-features --features "$executor_profile" --all-targets -- -D warnings
           done
@@ -69,6 +69,9 @@ jobs:
           done
           AIO_REMOTE_TEST_CREDENTIAL=remote-test cargo test -p az-plugin-host --no-default-features --features remote --test capability_plugins -- --include-ignored
           cargo test -p az-plugin-runtime --no-default-features
+          cargo clippy -p az-plugin-runtime --no-default-features --all-targets -- -D warnings
+          cargo clippy -p az-plugin-runtime --no-default-features --features wasm --all-targets -- -D warnings
+          cargo clippy -p az-plugin-runtime --no-default-features --features postgres --all-targets -- -D warnings
           cargo test -p az-plugin-manifest --no-default-features --features validation
           cargo clippy -p az-plugin-manifest --no-default-features --features validation --all-targets -- -D warnings
       - run: cargo test --workspace
@@ -109,8 +112,12 @@ jobs:
           psql "$AIO_WASM_COMPONENT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'REVOKE ALL ON SCHEMA public FROM PUBLIC;'
           cargo test -p az-plugin-host --no-default-features --features server --test component_executors -- --include-ignored --test-threads=1
           cargo test -p az-plugin-host --no-default-features --features wasm,sidecar --test component_executors resources:: -- --include-ignored --test-threads=1
-          AIO_TEST_DATABASE_URL="$AIO_COMPONENT_TEST_DATABASE_URL" AIO_TEST_SECOND_DATABASE_URL="$AIO_WASM_COMPONENT_TEST_DATABASE_URL" cargo test -p az-plugin-runtime --no-default-features --lib persistence:: -- --ignored --test-threads=1
-          AIO_TEST_DATABASE_URL="$AIO_COMPONENT_TEST_DATABASE_URL" cargo test -p az-plugin-runtime --no-default-features --lib database::tests -- --ignored --test-threads=1
+          cargo test -p az-plugin-runtime --no-default-features --features wasm --test database_backends -- --include-ignored
+          AIO_TEST_DATABASE_URL="$AIO_COMPONENT_TEST_DATABASE_URL" cargo test -p az-plugin-runtime --no-default-features --features wasm,postgres --lib transaction_tests:: -- --include-ignored
+          AIO_TEST_DATABASE_URL="$AIO_COMPONENT_TEST_DATABASE_URL" cargo test -p az-plugin-runtime --no-default-features --features postgres --lib database_parameters:: -- --ignored
+          AIO_TEST_DATABASE_URL="$AIO_COMPONENT_TEST_DATABASE_URL" cargo test -p az-plugin-host --no-default-features --features sidecar --lib sidecar_database_tunnel_preserves_checked_role_through_both_transports -- --ignored
+          AIO_TEST_DATABASE_URL="$AIO_COMPONENT_TEST_DATABASE_URL" AIO_TEST_SECOND_DATABASE_URL="$AIO_WASM_COMPONENT_TEST_DATABASE_URL" cargo test -p az-plugin-runtime --no-default-features --features postgres --lib persistence:: -- --ignored --test-threads=1
+          AIO_TEST_DATABASE_URL="$AIO_COMPONENT_TEST_DATABASE_URL" cargo test -p az-plugin-runtime --no-default-features --features postgres --lib postgres_database::tests -- --ignored --test-threads=1
           AIO_COMPONENT_TEST_DATABASE_URL="$AIO_WASM_COMPONENT_TEST_DATABASE_URL" cargo test -p az-plugin-host --lib --no-default-features --features wasm published_components_install_optionally_and_restore -- --ignored
           cargo test -p az-plugin-host --lib --no-default-features --features wasm tenant_installation_grants_members_and_menu_visibility_preserves_runtime -- --ignored
           export AIO_PROCESS_ROOT="$(mktemp -d)"
@@ -133,6 +140,11 @@ jobs:
       - run: cargo test -p az-plugin-runtime --features wasm --test enhancements -- --ignored
         env:
           AIO_TEST_ENHANCEMENT_COMPONENT: ${{ github.workspace }}/target/fixture/enhancements/wasm32-wasip2/release/release_fixture.wasm
+      - run: cargo test -p az-plugin-runtime --features wasm,postgres --test registry -- --ignored
+        env:
+          AIO_TEST_DATABASE_URL: postgresql://postgres:channel-test@127.0.0.1:5432/component_market_test
+          AIO_TEST_HEALTHY_COMPONENT: ${{ github.workspace }}/target/fixture/healthy/wasm32-wasip2/release/release_fixture.wasm
+          AIO_TEST_UNHEALTHY_COMPONENT: ${{ github.workspace }}/target/fixture/unhealthy/wasm32-wasip2/release/release_fixture.wasm
       - run: cargo test -p az-plugin-runtime --features wasm --test release -- --ignored
         env:
           AIO_TEST_HEALTHY_COMPONENT: ${{ github.workspace }}/target/fixture/healthy/wasm32-wasip2/release/release_fixture.wasm

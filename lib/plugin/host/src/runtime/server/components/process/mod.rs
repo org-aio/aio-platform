@@ -1,5 +1,7 @@
 mod broker;
 mod configuration;
+#[cfg(test)]
+mod database_tests;
 mod development;
 mod instance;
 mod management;

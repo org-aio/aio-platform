@@ -4,16 +4,16 @@ use std::sync::Arc;
 use anyhow::{Context, Result, ensure};
 use az_plugin_bundle::Bundle;
 use az_plugin_contract::{CapabilityGrants, RequestContext};
-use sqlx::PgPool;
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
-use crate::{ComponentEngine, ComponentSlot, InvocationResources, ReleaseSnapshot};
-
-use super::{StoredRelease, storage};
+use crate::{
+    ComponentEngine, ComponentReleases, ComponentSlot, InvocationResources, ReleaseSnapshot,
+    StoredRelease,
+};
 
 pub struct PersistentComponentSlot {
-    pool: PgPool,
+    releases: Arc<dyn ComponentReleases>,
     source: Uuid,
     tenant: String,
     host_version: semver::Version,
@@ -22,9 +22,9 @@ pub struct PersistentComponentSlot {
 }
 
 impl PersistentComponentSlot {
-    /// 绑定发布记录连接池；不要求使用某个具体数据库 provisioner。
+    /// 绑定发布记录契约；执行器不依赖具体数据库或锁实现。
     pub async fn open(
-        pool: PgPool,
+        releases: Arc<dyn ComponentReleases>,
         source: Uuid,
         tenant: String,
         host_version: semver::Version,
@@ -33,9 +33,9 @@ impl PersistentComponentSlot {
             !source.is_nil() && !tenant.is_empty() && tenant.len() <= 128,
             "安装归属无效"
         );
-        storage::initialize(&pool).await?;
+        releases.initialize().await?;
         Ok(Self {
-            pool,
+            releases,
             source,
             tenant,
             host_version,
@@ -44,7 +44,7 @@ impl PersistentComponentSlot {
         })
     }
     pub async fn stored(&self) -> Result<Option<StoredRelease>> {
-        storage::stored(&self.pool, self.source, &self.tenant).await
+        self.releases.stored(self.source, &self.tenant).await
     }
 
     pub async fn activate(
@@ -55,13 +55,19 @@ impl PersistentComponentSlot {
         resources: InvocationResources,
     ) -> Result<()> {
         let _update = self.updates.lock().await;
-        let expected = storage::generation(&self.pool, self.source, &self.tenant).await?;
+        let expected = self.releases.generation(self.source, &self.tenant).await?;
         if let Some(previous) = self.stored().await? {
-            storage::validate_upgrade(&previous.bundle, &bundle)?;
+            let old = previous.bundle.verify()?;
+            let next = bundle.verify()?;
+            ensure!(
+                next.migrations()
+                    .collect::<Vec<_>>()
+                    .starts_with(&old.migrations().collect::<Vec<_>>()),
+                "升级不能改写或删除已应用的迁移"
+            );
         }
-        let archive = bundle.encode()?;
         let candidate = self
-            .prepare(engine, bundle.clone(), grants.clone(), resources)
+            .prepare(engine, bundle.clone(), grants, resources)
             .await?;
         let actual_grants = candidate
             .snapshot()
@@ -73,16 +79,9 @@ impl PersistentComponentSlot {
             .capabilities
             .clone();
         let mut state = self.state.write().await;
-        storage::activate(
-            &self.pool,
-            self.source,
-            &self.tenant,
-            expected,
-            &bundle.digest,
-            &archive,
-            &actual_grants,
-        )
-        .await?;
+        self.releases
+            .activate(self.source, &self.tenant, expected, &bundle, &actual_grants)
+            .await?;
         // 提交后的本地指针交换不包含等待点；提交结果不确定时 handle 会校验数据库版本。
         let previous = state.replace(candidate);
         drop(state);
@@ -106,15 +105,15 @@ impl PersistentComponentSlot {
             .prepare(engine, stored.bundle.clone(), grants, resources)
             .await?;
         let mut state = self.state.write().await;
-        let mut transaction = self.pool.begin().await?;
-        let (revision, generation) =
-            storage::locked_revision(&mut transaction, self.source, &self.tenant, false).await?;
+        let lease = self.releases.lease(self.source, &self.tenant).await?;
+        let version = lease.version();
         ensure!(
-            revision.as_deref() == Some(&stored.bundle.digest) && generation == stored.generation,
+            version.revision.as_deref() == Some(&stored.bundle.digest)
+                && version.generation == stored.generation,
             "恢复期间活动版本已变更"
         );
+        lease.finish().await?;
         let previous = state.replace(candidate);
-        transaction.commit().await?;
         drop(state);
         if let Some(previous) = previous {
             previous.deactivate().await;
@@ -128,14 +127,13 @@ impl PersistentComponentSlot {
             return Ok(None);
         };
         let snapshot = active.snapshot().await.context("活动实例不可用")?;
-        let mut transaction = self.pool.begin().await?;
-        let (revision, _) =
-            storage::locked_revision(&mut transaction, self.source, &self.tenant, false).await?;
+        let lease = self.releases.lease(self.source, &self.tenant).await?;
+        let revision = &lease.version().revision;
         ensure!(
             revision.as_deref() == Some(snapshot.bundle.digest()),
             "活动版本已改变，需要恢复执行槽"
         );
-        transaction.commit().await?;
+        lease.finish().await?;
         Ok(Some(snapshot))
     }
 
@@ -151,9 +149,8 @@ impl PersistentComponentSlot {
         );
         let state = self.state.read().await;
         let active = state.as_ref().context("插件未激活")?.clone();
-        let mut transaction = self.pool.begin().await?;
-        let (revision, _) =
-            storage::locked_revision(&mut transaction, self.source, &self.tenant, false).await?;
+        let lease = self.releases.lease(self.source, &self.tenant).await?;
+        let revision = &lease.version().revision;
         ensure!(
             revision.as_deref() == Some(digest),
             "页面版本已撤销，请重新挂载"
@@ -161,19 +158,24 @@ impl PersistentComponentSlot {
         let response = match active.handle(digest, request, context).await {
             Ok(response) => response,
             Err(error) => {
+                // 先释放跨宿主读租约，避免与持有更新锁的并发激活互相等待。
+                let released = lease.finish().await;
                 drop(state);
-                self.invalidate().await;
+                self.invalidate(&active).await;
+                if let Err(release_error) = released {
+                    return Err(error.context(format!("释放发布读租约失败: {release_error:#}")));
+                }
                 return Err(error);
             }
         };
-        transaction.commit().await?;
+        lease.finish().await?;
         Ok(response)
     }
 
     pub async fn deactivate(&self) -> Result<()> {
         let _update = self.updates.lock().await;
         let mut state = self.state.write().await;
-        storage::deactivate(&self.pool, self.source, &self.tenant).await?;
+        self.releases.deactivate(self.source, &self.tenant).await?;
         let previous = state.take();
         drop(state);
         if let Some(previous) = previous {
@@ -190,9 +192,15 @@ impl PersistentComponentSlot {
         }
     }
 
-    async fn invalidate(&self) {
+    async fn invalidate(&self, failed: &Arc<ComponentSlot>) {
         let _update = self.updates.lock().await;
-        *self.state.write().await = None;
+        let mut state = self.state.write().await;
+        if state
+            .as_ref()
+            .is_some_and(|active| Arc::ptr_eq(active, failed))
+        {
+            *state = None;
+        }
     }
 
     async fn prepare(

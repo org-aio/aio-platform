@@ -1,60 +1,30 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, ensure};
-use sqlx::{
-    PgPool, Postgres, Transaction,
-    postgres::{PgConnectOptions, PgPoolOptions},
+
+use crate::{
+    DatabaseBackend, DatabaseRows, DatabaseTransaction, DatabaseValue, ProcessDatabaseConnection,
 };
 
+const DEADLINE: Duration = Duration::from_secs(4);
+
+/// 运行时持有的来源与租户绑定；执行器不接触具体数据库驱动。
 #[derive(Clone)]
 pub struct ScopedDatabase {
-    pool: PgPool,
+    backend: Arc<dyn DatabaseBackend>,
     source: String,
     tenant: String,
 }
 
 impl ScopedDatabase {
-    /// 原生数据库实现使用此入口创建绑定；连接后检查实际角色和 schema 隔离。
-    pub async fn connect_options(
-        options: PgConnectOptions,
-        role: &str,
-        schema: &str,
-        source: &str,
-        tenant: &str,
-    ) -> Result<Self> {
+    /// Provider 完成迁移和数据库层隔离后，绑定不可变的资源归属。
+    pub fn new(backend: Arc<dyn DatabaseBackend>, source: &str, tenant: &str) -> Result<Self> {
         ensure!(
             !source.is_empty() && !tenant.is_empty() && tenant.len() <= 128,
             "数据库归属无效"
         );
-        let pool = PgPoolOptions::new()
-            .max_connections(4)
-            .acquire_timeout(Duration::from_secs(3))
-            .connect_with(options)
-            .await
-            .context("连接插件专属数据库失败")?;
-        let safe: bool = sqlx::query_scalar(
-            "SELECT current_user = $1 AND session_user = $1 AND current_schema() = $2 AND NOT (rolsuper OR rolcreaterole OR rolcreatedb OR rolbypassrls) AND NOT has_schema_privilege(current_user, $2, 'CREATE') FROM pg_roles WHERE rolname = current_user",
-        )
-        .bind(role)
-        .bind(schema)
-        .fetch_one(&pool)
-        .await?;
-        ensure!(safe, "插件数据库角色或 schema 不符合隔离要求");
-        let foreign_schemas: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM pg_namespace WHERE nspname <> $1 AND nspname NOT LIKE 'pg_%' AND nspname <> 'information_schema' AND has_schema_privilege(current_user, oid, 'USAGE')",
-        )
-        .bind(schema)
-        .fetch_one(&pool)
-        .await?;
-        ensure!(foreign_schemas == 0, "插件角色可以访问其他业务 schema");
-        let memberships: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM pg_auth_members WHERE member = (SELECT oid FROM pg_roles WHERE rolname = current_user)",
-        )
-        .fetch_one(&pool)
-        .await?;
-        ensure!(memberships == 0, "插件角色不能继承或切换到其他角色");
         Ok(Self {
-            pool,
+            backend,
             source: source.into(),
             tenant: tenant.into(),
         })
@@ -64,125 +34,131 @@ impl ScopedDatabase {
         self.source == source && self.tenant == tenant
     }
 
-    /// 为 Sidecar 导出已校验连接的相同凭据，不另设可绕过隔离检查的凭据通道。
-    pub fn connection_options(&self) -> PgConnectOptions {
-        self.pool.connect_options().as_ref().clone()
+    #[cfg(feature = "wasm")]
+    pub(crate) fn validate_migrations(&self, migrations: &[(String, String)]) -> Result<()> {
+        ensure!(migrations.len() <= 64, "迁移数超过配额");
+        let mut previous = "";
+        for (name, sql) in migrations {
+            ensure!(
+                name.as_str() > previous && name.len() <= 160 && sql.len() <= 512_000,
+                "迁移必须有序且名称唯一"
+            );
+            previous = name;
+        }
+        self.backend.validate_migrations(migrations)
     }
 
-    /// 供可信原生执行器开启受租户隔离和数据库超时限制的事务。
-    pub async fn begin(&self) -> Result<Transaction<'static, Postgres>> {
-        let mut transaction = self.pool.begin().await.context("开始插件事务失败")?;
-        sqlx::query("SET LOCAL statement_timeout = '3s'")
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query("SET LOCAL lock_timeout = '1s'")
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query("SET LOCAL idle_in_transaction_session_timeout = '5s'")
-            .execute(&mut *transaction)
-            .await?;
-        Ok(transaction)
+    /// 连接只由已绑定后端导出；宿主验证 socket 名称，避免覆盖授权或代理文件。
+    pub fn process_connection(&self) -> Result<ProcessDatabaseConnection> {
+        let connection = self.backend.process_connection()?;
+        let name = &connection.socket_name;
+        ensure!(
+            !name.is_empty()
+                && name.len() <= 64
+                && name != "."
+                && name != ".."
+                && name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte)),
+            "数据库代理 socket 名称无效"
+        );
+        Ok(connection)
+    }
+
+    /// 开始受统一截止时间约束的事务；取消或丢弃后端句柄必须回滚。
+    pub async fn begin(&self) -> Result<ScopedTransaction> {
+        let transaction = tokio::time::timeout(DEADLINE, self.backend.begin())
+            .await
+            .context("开始数据库事务超时")??;
+        Ok(ScopedTransaction {
+            transaction: Some(transaction),
+        })
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// 统一配额、超时和失败关闭语义。请求取消时，正在等待的后端事务会被丢弃，
+/// 当前句柄保持失效；不能继续使用结果不确定的事务。
+pub struct ScopedTransaction {
+    transaction: Option<Box<dyn DatabaseTransaction>>,
+}
 
-    #[tokio::test]
-    #[ignore = "需要独立本机 PostgreSQL"]
-    async fn external_bindings_reject_admin_wrong_schema_and_schema_creation() -> Result<()> {
-        use std::str::FromStr;
-        let url = std::env::var("AIO_TEST_DATABASE_URL")?;
-        let options = PgConnectOptions::from_str(&url)?;
-        let role = options.get_username().to_owned();
-        assert!(
-            ScopedDatabase::connect_options(options, &role, "public", "source", "tenant")
+impl ScopedTransaction {
+    pub async fn query(
+        &mut self,
+        statement: &str,
+        parameters: Vec<DatabaseValue>,
+    ) -> Result<DatabaseRows> {
+        let mut transaction = self.transaction.take().context("事务已经结束或失效")?;
+        let result = async {
+            validate_request(statement, &parameters)?;
+            let rows = tokio::time::timeout(DEADLINE, transaction.query(statement, parameters))
                 .await
-                .is_err()
-        );
-        let provisioner = crate::DatabaseProvisioner::connect(&url).await?;
-        let source = uuid::Uuid::new_v4().to_string();
-        let database = provisioner
-            .create(&source, "tenant", "CREATE TABLE records(id BIGINT)")
-            .await?;
-        let schema: String = sqlx::query_scalar("SELECT current_schema()")
-            .fetch_one(&database.pool)
-            .await?;
-        let options = database.connection_options();
-        let role = options.get_username().to_owned();
-        // SET ROLE 不能把管理员登录伪装成专属角色，否则进程可以 RESET ROLE 提权。
-        let masked = PgConnectOptions::from_str(&url)?
-            .options([("role", role.as_str()), ("search_path", schema.as_str())]);
-        assert!(
-            ScopedDatabase::connect_options(masked, &role, &schema, &source, "tenant")
-                .await
-                .is_err()
-        );
-        assert!(
-            ScopedDatabase::connect_options(options.clone(), &role, "public", &source, "tenant")
-                .await
-                .is_err()
-        );
-        sqlx::query(&format!("GRANT CREATE ON SCHEMA {schema} TO {role}"))
-            .execute(&provisioner.pool)
-            .await?;
-        assert!(
-            ScopedDatabase::connect_options(options.clone(), &role, &schema, &source, "tenant")
-                .await
-                .is_err()
-        );
-        sqlx::query(&format!("REVOKE CREATE ON SCHEMA {schema} FROM {role}"))
-            .execute(&provisioner.pool)
-            .await?;
-        let reopened =
-            ScopedDatabase::connect_options(options, &role, &schema, &source, "tenant").await?;
-        let mut tx = reopened.begin().await?;
-        sqlx::query("INSERT INTO records VALUES (1)")
-            .execute(&mut *tx)
-            .await?;
-        tx.commit().await?;
-        Ok(())
+                .context("数据库请求超时")??;
+            rows.validate()?;
+            Ok(rows)
+        }
+        .await;
+        match result {
+            Ok(rows) => {
+                self.transaction = Some(transaction);
+                Ok(rows)
+            }
+            Err(error) => Err(rollback_failure(transaction, error).await),
+        }
     }
 
-    #[tokio::test]
-    #[ignore = "requires a disposable PostgreSQL database"]
-    async fn database_roles_deny_other_plugin_schemas_without_the_sql_filter() -> Result<()> {
-        let provisioner =
-            crate::DatabaseProvisioner::connect(&std::env::var("AIO_TEST_DATABASE_URL")?).await?;
-        let source = format!(
-            "role-test-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_nanos()
-        );
-        let first = provisioner
-            .create(&source, "first", "CREATE TABLE records(id BIGINT)")
-            .await?;
-        let second = provisioner
-            .create(&source, "second", "CREATE TABLE records(id BIGINT)")
-            .await?;
-        let schema: String = sqlx::query_scalar("SELECT current_schema()")
-            .fetch_one(&first.pool)
-            .await?;
-        assert!(
-            sqlx::query(&format!("SELECT * FROM {schema}.records"))
-                .fetch_all(&second.pool)
+    pub async fn execute(
+        &mut self,
+        statement: &str,
+        parameters: Vec<DatabaseValue>,
+    ) -> Result<u64> {
+        let mut transaction = self.transaction.take().context("事务已经结束或失效")?;
+        let result = async {
+            validate_request(statement, &parameters)?;
+            tokio::time::timeout(DEADLINE, transaction.execute(statement, parameters))
                 .await
-                .is_err()
-        );
-        assert!(
-            sqlx::query("CREATE TABLE unauthorized(id BIGINT)")
-                .execute(&first.pool)
+                .context("数据库请求超时")?
+        }
+        .await;
+        match result {
+            Ok(count) => {
+                self.transaction = Some(transaction);
+                Ok(count)
+            }
+            Err(error) => Err(rollback_failure(transaction, error).await),
+        }
+    }
+
+    pub async fn commit(mut self) -> Result<()> {
+        let transaction = self.transaction.take().context("事务已经结束或失效")?;
+        tokio::time::timeout(DEADLINE, transaction.commit())
+            .await
+            .context("提交数据库事务超时")?
+    }
+
+    pub async fn rollback(mut self) -> Result<()> {
+        if let Some(transaction) = self.transaction.take() {
+            tokio::time::timeout(DEADLINE, transaction.rollback())
                 .await
-                .is_err()
-        );
-        assert!(
-            sqlx::query("SET ROLE aio_test_admin")
-                .execute(&first.pool)
-                .await
-                .is_err()
-        );
+                .context("回滚数据库事务超时")??;
+        }
         Ok(())
+    }
+}
+
+fn validate_request(statement: &str, parameters: &[DatabaseValue]) -> Result<()> {
+    ensure!(statement.len() <= 64 * 1024, "SQL 语句超过配额");
+    ensure!(parameters.len() <= 256, "SQL 参数超过配额");
+    Ok(())
+}
+
+async fn rollback_failure(
+    transaction: Box<dyn DatabaseTransaction>,
+    error: anyhow::Error,
+) -> anyhow::Error {
+    match tokio::time::timeout(DEADLINE, transaction.rollback()).await {
+        Ok(Ok(())) => error,
+        Ok(Err(rollback)) => error.context(format!("回滚失败: {rollback:#}")),
+        Err(_) => error.context("回滚数据库事务超时"),
     }
 }

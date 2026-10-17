@@ -1,4 +1,4 @@
-#![cfg(feature = "wasm")]
+#![cfg(all(feature = "wasm", feature = "postgres"))]
 
 use anyhow::{Context, Result};
 use az_plugin_contract::transport::Request;
