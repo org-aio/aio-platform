@@ -6,7 +6,7 @@ mod bootstrap_document;
 mod capabilities;
 mod component_catalog;
 mod components;
-mod delivery;
+pub mod delivery;
 pub mod development;
 mod enhancements;
 mod execution_availability;

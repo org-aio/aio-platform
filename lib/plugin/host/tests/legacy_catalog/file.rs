@@ -16,6 +16,10 @@ use uuid::Uuid;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub(super) struct Snapshot {
+    #[serde(default)]
+    pub builds: Vec<super::delivery::Build>,
+    #[serde(default)]
+    pub documents: BTreeMap<String, az_plugin_delivery::Documentation>,
     pub packages: Vec<PluginPackage>,
     pub revisions: Vec<Revision>,
     pub bindings: Vec<Binding>,

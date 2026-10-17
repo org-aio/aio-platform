@@ -19,7 +19,8 @@ async fn documentation_images_require_active_trusted_management_and_public_sourc
     let probes: [Arc<Probe>; 2] = Default::default();
     let bundle = manager(root.path(), &git, "1.0.0")?;
     let mut selected = selection(&identity, &probes, &[&bundle]);
-    selected.push(Arc::new(DeliveryPlugin));
+    selected.push(Arc::new(DocumentationPlugin));
+    selected.push(Arc::new(PostgresDocumentationPlugin));
     let mut host = Host::start_selected(root.path(), &database, selected).await?;
     let source: Uuid = success(host.publish(&bundle).await?).await?["data"]["source_id"]
         .as_str()

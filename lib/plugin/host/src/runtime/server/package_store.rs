@@ -34,44 +34,7 @@ impl PluginPackages for PluginStore {
             .await
             .context("等待插件包编码失败")??;
         let mut transaction = self.pool.begin().await?;
-        // 全局配额和版本唯一性在同一事务中串行校验，避免并发上传越过限制。
-        sqlx::query("SELECT pg_advisory_xact_lock(1835626038, 1)")
-            .execute(&mut *transaction)
-            .await?;
-        let existing: Option<String> = sqlx::query_scalar(
-            "SELECT revision FROM plugin_packages WHERE git = $1 AND version = $2",
-        )
-        .bind(&package.git)
-        .bind(&package.version)
-        .fetch_optional(&mut *transaction)
-        .await?;
-        if let Some(revision) = existing {
-            ensure!(
-                revision == package.rev,
-                "同一来源的版本号已发布其他内容，请使用新的版本号"
-            );
-            transaction.commit().await?;
-            return Ok(());
-        }
-        let usage = sqlx::query(
-            "SELECT COUNT(*)::BIGINT AS packages, COALESCE(SUM(octet_length(archive)), 0)::BIGINT AS bytes FROM plugin_packages",
-        ).fetch_one(&mut *transaction).await?;
-        let packages: i64 = usage.try_get("packages")?;
-        let bytes: i64 = usage.try_get("bytes")?;
-        ensure!(
-            packages < quota("AIO_PLUGIN_PACKAGE_MAX_REVISIONS", 1024),
-            "插件中心版本数量超过宿主配额"
-        );
-        ensure!(
-            bytes.saturating_add(i64::try_from(archive.len())?)
-                <= quota("AIO_PLUGIN_PACKAGE_MAX_BYTES", 2 * 1024 * 1024 * 1024),
-            "插件中心二进制存储超过宿主配额"
-        );
-        sqlx::query(
-            "INSERT INTO plugin_packages (revision, git, version, source_revision, manifest_toml, artifact_sha256, archive) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-        ).bind(&package.rev).bind(&package.git).bind(&package.version).bind(&package.source_revision)
-            .bind(&package.manifest_toml).bind(&package.artifact_sha256).bind(&archive)
-            .execute(&mut *transaction).await?;
+        save_package_archive(&mut transaction, package, &archive).await?;
         transaction.commit().await?;
         Ok(())
     }
@@ -162,6 +125,51 @@ fn quota(name: &str, default: i64) -> i64 {
         .and_then(|value| value.parse().ok())
         .filter(|value| *value > 0)
         .unwrap_or(default)
+}
+
+// 正式目录和构建上传共用配额、不可变版本校验，由调用方统一提交包与任务状态。
+pub(super) async fn save_package_archive(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    package: &PluginPackage,
+    archive: &[u8],
+) -> Result<()> {
+    // 全局配额和版本唯一性在同一事务中串行校验，避免并发上传越过限制。
+    sqlx::query("SELECT pg_advisory_xact_lock(1835626038, 1)")
+        .execute(&mut **transaction)
+        .await?;
+    let existing: Option<String> =
+        sqlx::query_scalar("SELECT revision FROM plugin_packages WHERE git = $1 AND version = $2")
+            .bind(&package.git)
+            .bind(&package.version)
+            .fetch_optional(&mut **transaction)
+            .await?;
+    if let Some(revision) = existing {
+        ensure!(
+            revision == package.rev,
+            "同一来源的版本号已发布其他内容，请使用新的版本号"
+        );
+        return Ok(());
+    }
+    let usage = sqlx::query(
+            "SELECT COUNT(*)::BIGINT AS packages, COALESCE(SUM(octet_length(archive)), 0)::BIGINT AS bytes FROM plugin_packages",
+        ).fetch_one(&mut **transaction).await?;
+    let packages: i64 = usage.try_get("packages")?;
+    let bytes: i64 = usage.try_get("bytes")?;
+    ensure!(
+        packages < quota("AIO_PLUGIN_PACKAGE_MAX_REVISIONS", 1024),
+        "插件中心版本数量超过宿主配额"
+    );
+    ensure!(
+        bytes.saturating_add(i64::try_from(archive.len())?)
+            <= quota("AIO_PLUGIN_PACKAGE_MAX_BYTES", 2 * 1024 * 1024 * 1024),
+        "插件中心二进制存储超过宿主配额"
+    );
+    sqlx::query(
+            "INSERT INTO plugin_packages (revision, git, version, source_revision, manifest_toml, artifact_sha256, archive) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        ).bind(&package.rev).bind(&package.git).bind(&package.version).bind(&package.source_revision)
+            .bind(&package.manifest_toml).bind(&package.artifact_sha256).bind(archive)
+            .execute(&mut **transaction).await?;
+    Ok(())
 }
 
 #[cfg(test)]

@@ -1,7 +1,12 @@
+pub use documents::validate_documentation;
+mod contract;
+pub use contract::{DeliveryArtifact, DeliveryService, PluginDocumentation};
 pub(in crate::runtime::server) mod components;
 mod controller;
 mod discovery;
-mod documents;
+pub(crate) mod documents;
+pub(crate) mod postgres;
+pub(crate) mod postgres_documents;
 mod rollout;
 #[cfg(feature = "test-support")]
 mod rollout_tests;

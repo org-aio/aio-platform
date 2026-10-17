@@ -14,15 +14,7 @@ pub(super) async fn upload(state: &RuntimeState, job: &BuildJob, bytes: &[u8]) -
         "构建产物与任务的仓库、源码提交或版本不符"
     );
     let mut tx = state.service::<sqlx::PgPool>()?.begin().await?;
-    // 与发现器共用来源行锁，避免校验租约后较旧上传覆盖新目标。
-    let current: bool = sqlx::query_scalar(
-        "SELECT enabled AND desired_sha=$2 FROM delivery_sources WHERE git=$1 FOR SHARE",
-    )
-    .bind(&job.git)
-    .bind(&job.source_revision)
-    .fetch_one(&mut *tx)
-    .await?;
-    ensure!(current, "构建已被后续源码提交替代");
+    super::store::lock_lease(&mut tx, job).await?;
     let updated = sqlx::query("UPDATE delivery_jobs SET package_revision=$3,state='uploaded',lease_until=now()+interval '5 minutes',updated_at=now() WHERE id=$1 AND lease=$2 AND lease_until>now() AND state IN ('building','uploaded')")
         .bind(job.id).bind(&job.lease).bind(&bundle.digest).execute(&mut *tx).await?.rows_affected();
     ensure!(updated == 1, "构建租约已失效");
@@ -39,6 +31,7 @@ pub(super) async fn complete(
 ) -> Result<bool> {
     ensure!(documentation.readme.len() <= 512 * 1024, "README 超过限制");
     let mut tx = state.service::<sqlx::PgPool>()?.begin().await?;
+    super::store::lock_lease(&mut tx, job).await?;
     let updated = sqlx::query("UPDATE delivery_component_packages SET readme=$2 WHERE job_id=$1")
         .bind(job.id)
         .bind(&documentation.readme)

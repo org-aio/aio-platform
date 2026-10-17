@@ -194,32 +194,8 @@ impl Plugin<RuntimeAssembly> for ComponentsPlugin {
     }
 }
 
-/// 交付插件只在完整恢复成功后启动发现和滚动发布任务。
-#[dill::component]
-#[dill::interface(dyn Plugin<RuntimeAssembly>)]
-pub struct DeliveryPlugin;
-
-impl Plugin<RuntimeAssembly> for DeliveryPlugin {
-    fn dependencies(&self) -> Vec<TypeId> {
-        vec![
-            TypeId::of::<StorePlugin>(),
-            TypeId::of::<ManagementPlugin>(),
-            TypeId::of::<ComponentsPlugin>(),
-        ]
-    }
-    fn build<'a>(&'a self, assembly: &'a mut RuntimeAssembly) -> PluginFuture<'a> {
-        Box::pin(async move {
-            assembly.add_routes(|_| Ok(super::super::delivery::router()));
-            assembly.on_ready::<Self>(|state, tasks| {
-                Box::pin(async move {
-                    super::super::delivery::start(state, tasks)?;
-                    Ok(())
-                })
-            });
-            Ok(())
-        })
-    }
-}
+route_plugin!(DeliveryPlugin, [], [dyn super::super::delivery::DeliveryService, dyn crate::authorization::AuthorizationProvider], |_| super::super::delivery::router());
+route_plugin!(DocumentationPlugin, [], [], optional[dyn super::super::delivery::PluginDocumentation, dyn super::super::delivery::DeliveryService, super::super::components::Components], |_| super::super::delivery::documents::router());
 
 /// 默认平台组合；精简宿主或定制宿主可以从自己的 Dill Catalog 解析其他组合。
 pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
@@ -242,6 +218,8 @@ pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
         .add::<FrontendPlugin>()
         .add::<BootstrapPlugin>()
         .add::<NavigationPlugin>()
+        .add::<super::PostgresDocumentationPlugin>()
+        .add::<DocumentationPlugin>()
         .add::<ToolsPlugin>()
         .add::<WorkersPlugin>()
         .add::<WorkerWebviewsPlugin>()
@@ -276,6 +254,7 @@ pub fn default_plugins() -> Result<Vec<DynPlugin<RuntimeAssembly>>> {
         .add::<ComponentExecutionPlugin>()
         .add::<ComponentResourcesPlugin>()
         .add::<ComponentsPlugin>()
+        .add::<super::PostgresDeliveryPlugin>()
         .add::<DeliveryPlugin>();
     let catalog = catalog.build();
     Ok(catalog

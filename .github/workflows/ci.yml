@@ -111,10 +111,12 @@ jobs:
       - name: 验证可替换整包执行器与 Sidecar 资源生命周期
         run: |
           psql "$AIO_ENHANCEMENT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE component_market_test;'
+          psql "$AIO_ENHANCEMENT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE aio_delivery_test;'
           psql "$AIO_ENHANCEMENT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE wasm_component_market_test;'
           psql "$AIO_COMPONENT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'REVOKE ALL ON SCHEMA public FROM PUBLIC;'
           psql "$AIO_WASM_COMPONENT_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'REVOKE ALL ON SCHEMA public FROM PUBLIC;'
           cargo test -p az-plugin-host --no-default-features --features server --test component_executors -- --include-ignored --test-threads=1
+          cargo test -p az-plugin-host --no-default-features --features server --lib persists_leases_rejects_obsolete -- --ignored
           cargo test -p az-plugin-host --no-default-features --features wasm,sidecar --test component_executors resources:: -- --include-ignored --test-threads=1
           cargo test -p az-plugin-runtime --no-default-features --features wasm --test database_backends -- --include-ignored
           AIO_TEST_DATABASE_URL="$AIO_COMPONENT_TEST_DATABASE_URL" cargo test -p az-plugin-runtime --no-default-features --features wasm,postgres --lib transaction_tests:: -- --include-ignored
@@ -136,10 +138,19 @@ jobs:
         env:
           AIO_TEST_HEALTHY_COMPONENT: ${{ github.workspace }}/target/fixture/healthy/wasm32-wasip2/release/release_fixture.wasm
           AIO_PLUGIN_SUPERVISOR_SOCKET: /tmp/aio-component-executor-absent.sock
+          AIO_DELIVERY_TOKEN: isolated-delivery-ci-test-token-123456789
+          AIO_DELIVERY_TEST_DATABASE_URL: postgresql://postgres:channel-test@127.0.0.1:5432/aio_delivery_test
           AIO_ENHANCEMENT_TEST_DATABASE_URL: postgresql://postgres:channel-test@127.0.0.1:5432/channel_test
           AIO_COMPONENT_TEST_DATABASE_URL: postgresql://postgres:channel-test@127.0.0.1:5432/component_market_test
           AIO_WASM_COMPONENT_TEST_DATABASE_URL: postgresql://postgres:channel-test@127.0.0.1:5432/wasm_component_market_test
       - run: cargo build --manifest-path lib/plugin/runtime/tests/fixture/Cargo.toml --locked --release --target wasm32-wasip2 --features unhealthy --target-dir target/fixture/unhealthy
+      - name: 验证默认整包交付与失败回滚
+        run: cargo test -p az-plugin-host --no-default-features --features wasm --lib delivery_publishes_bundles_and_respects_tenant_choices -- --ignored
+        env:
+          AIO_COMPONENT_TEST_DATABASE_URL: postgresql://postgres:channel-test@127.0.0.1:5432/component_market_test
+          AIO_DELIVERY_TOKEN: isolated-delivery-ci-test-token-123456789
+          AIO_TEST_HEALTHY_COMPONENT: ${{ github.workspace }}/target/fixture/healthy/wasm32-wasip2/release/release_fixture.wasm
+          AIO_TEST_UNHEALTHY_COMPONENT: ${{ github.workspace }}/target/fixture/unhealthy/wasm32-wasip2/release/release_fixture.wasm
       - run: cargo build --manifest-path lib/plugin/runtime/tests/fixture/Cargo.toml --locked --release --target wasm32-wasip2 --features enhancements --target-dir target/fixture/enhancements
       - run: cargo test -p az-plugin-runtime --features wasm --test enhancements -- --ignored
         env:

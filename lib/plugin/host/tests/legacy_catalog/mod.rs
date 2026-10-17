@@ -1,4 +1,7 @@
 //! 真实 HTTP 生命周期使用替代文件目录，数据库配置故意无效。
+mod delivery;
+mod delivery_http;
+mod delivery_postgres;
 mod file;
 mod installations;
 mod publications;

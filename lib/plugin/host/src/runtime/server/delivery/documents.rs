@@ -1,19 +1,28 @@
+use super::super::{RuntimeState, http_error::RuntimeError, request_context::authenticate};
+use super::{DeliveryService, PluginDocumentation};
+use crate::runtime::RuntimeResponse;
 use anyhow::{Result, ensure};
 use axum::{
-    Json,
+    Json, Router,
     body::Body,
     extract::{Path, State},
     http::{HeaderMap, HeaderValue, header},
     response::Response,
+    routing::get,
 };
 use az_plugin_delivery::Documentation;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use sqlx::{PgPool, Row};
 
-use super::super::{RuntimeState, http_error::RuntimeError, request_context::authenticate};
-use crate::runtime::RuntimeResponse;
-
-pub(super) async fn save(pool: &PgPool, revision: &str, doc: &Documentation) -> Result<()> {
+pub(crate) fn router() -> Router<RuntimeState> {
+    Router::new()
+        .route("/api/runtime/marketplace/{revision}/details", get(details))
+        .route(
+            "/api/runtime/marketplace/{revision}/images/{*path}",
+            get(image),
+        )
+}
+/// 供交付提供者在保存文档前复用路径、格式与大小校验；不产生持久化副作用。
+pub fn validate_documentation(doc: &Documentation) -> Result<()> {
     ensure!(
         doc.readme.len() <= 512 * 1024 && doc.images.len() <= 64,
         "文档超过限额"
@@ -35,61 +44,52 @@ pub(super) async fn save(pool: &PgPool, revision: &str, doc: &Documentation) -> 
         ensure!(content.len() <= remaining, "文档图片超过限额");
         remaining -= content.len();
     }
-    sqlx::query("INSERT INTO plugin_documents(revision,readme,images) VALUES($1,$2,$3) ON CONFLICT(revision) DO NOTHING")
-        .bind(revision).bind(&doc.readme).bind(serde_json::to_value(&doc.images)?).execute(pool).await?;
     Ok(())
 }
-
-pub(super) async fn details(
+async fn details(
     State(state): State<RuntimeState>,
     headers: HeaderMap,
     Path(revision): Path<String>,
 ) -> Result<Json<RuntimeResponse<serde_json::Value>>, RuntimeError> {
     let session = authenticate(&state, &headers).await?;
-    if let Some(components) =
-        state.optional_service::<crate::runtime::server::components::Components>()?
+    if let Some(components) = state.optional_service::<super::super::components::Components>()?
         && let Some(data) = components.catalog.details(&revision).await?
     {
         return Ok(Json(RuntimeResponse { data }));
     }
-    let package = sqlx::query("SELECT p.git,p.version,p.source_revision,p.created_at::TEXT,d.readme FROM plugin_packages p LEFT JOIN plugin_documents d ON d.revision=p.revision WHERE p.revision=$1 AND EXISTS(SELECT 1 FROM plugin_revisions r WHERE r.revision=p.revision)")
-        .bind(&revision).fetch_optional(state.service::<sqlx::PgPool>()?.as_ref()).await?;
-    let Some(package) = package else {
-        return Ok(Json(RuntimeResponse {
-            data: serde_json::json!({"readme":"", "versions":[], "builds":[]}),
-        }));
-    };
-    let git: String = package.try_get("git")?;
-    let versions = sqlx::query("SELECT p.revision,p.version,p.source_revision,p.created_at::TEXT FROM plugin_packages p WHERE git=$1 AND EXISTS(SELECT 1 FROM plugin_revisions r WHERE r.revision=p.revision) ORDER BY p.created_at DESC LIMIT 20").bind(&git).fetch_all(state.service::<sqlx::PgPool>()?.as_ref()).await?;
-    let versions = versions.into_iter().map(|r| Ok::<_,sqlx::Error>(serde_json::json!({"revision":r.try_get::<String,_>("revision")?,"version":r.try_get::<String,_>("version")?,"source_revision":r.try_get::<Option<String>,_>("source_revision")?,"created_at":r.try_get::<String,_>("created_at")?}))).collect::<Result<Vec<_>,_>>()?;
-    let builds = if session
+    let mut data = match state.optional_service::<dyn PluginDocumentation>()? {
+        Some(documents) => documents.details(&revision).await?,
+        None => None,
+    }
+    .unwrap_or_else(|| serde_json::json!({"readme":"", "versions":[]}));
+    let mut builds = vec![];
+    if session
         .permissions
         .iter()
         .any(|p| p == "plugin:manage" || p == "*")
+        && let Some(git) = data.get("git").and_then(|v| v.as_str())
+        && let Some(delivery) = state.optional_service::<dyn DeliveryService>()?
     {
-        sqlx::query("SELECT id,source_revision,state,error,updated_at::TEXT FROM delivery_jobs WHERE git=$1 ORDER BY id DESC LIMIT 10").bind(&git).fetch_all(state.service::<sqlx::PgPool>()?.as_ref()).await?
-            .into_iter().map(|r| Ok::<_,sqlx::Error>(serde_json::json!({"id":r.try_get::<i64,_>("id")?,"source_revision":r.try_get::<String,_>("source_revision")?,"state":r.try_get::<String,_>("state")?,"error":r.try_get::<Option<String>,_>("error")?,"updated_at":r.try_get::<String,_>("updated_at")?}))).collect::<Result<Vec<_>,_>>()?
-    } else {
-        vec![]
-    };
-    Ok(Json(RuntimeResponse {
-        data: serde_json::json!({
-            "readme":package.try_get::<Option<String>,_>("readme")?.unwrap_or_default(),
-            "version":package.try_get::<String,_>("version")?, "source_revision":package.try_get::<Option<String>,_>("source_revision")?,
-            "git":git,"versions":versions,"builds":builds
-        }),
-    }))
+        builds = delivery.builds(git).await?;
+    }
+    data.as_object_mut()
+        .ok_or_else(|| RuntimeError::bad_request("文档提供者返回无效对象"))?
+        .insert("builds".into(), serde_json::to_value(builds)?);
+    Ok(Json(RuntimeResponse { data }))
 }
-
-pub(super) async fn image(
+async fn image(
     State(state): State<RuntimeState>,
     headers: HeaderMap,
     Path((revision, path)): Path<(String, String)>,
 ) -> Result<Response, RuntimeError> {
     authenticate(&state, &headers).await?;
-    let value: Option<serde_json::Value> = sqlx::query_scalar("SELECT d.images->$2 FROM plugin_documents d WHERE d.revision=$1 AND EXISTS(SELECT 1 FROM plugin_revisions r WHERE r.revision=d.revision)").bind(&revision).bind(path).fetch_optional(state.service::<sqlx::PgPool>()?.as_ref()).await?.flatten();
-    let image: az_plugin_delivery::DocumentImage =
-        serde_json::from_value(value.ok_or_else(|| RuntimeError::not_found("文档图片不存在"))?)?;
+    let documents = state
+        .optional_service::<dyn PluginDocumentation>()?
+        .ok_or_else(|| RuntimeError::not_found("文档图片不存在"))?;
+    let image = documents
+        .image(&revision, &path)
+        .await?
+        .ok_or_else(|| RuntimeError::not_found("文档图片不存在"))?;
     let mut response = Response::new(Body::from(STANDARD.decode(image.content_base64)?));
     response.headers_mut().insert(
         header::CONTENT_TYPE,

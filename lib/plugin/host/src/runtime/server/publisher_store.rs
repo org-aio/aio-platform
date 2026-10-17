@@ -62,7 +62,7 @@ pub(super) async fn migrate(pool: &PgPool) -> Result<()> {
     Ok(())
 }
 
-async fn lock_publication_source(
+pub(super) async fn lock_publication_source(
     transaction: &mut Transaction<'_, Postgres>,
     tenant_id: &str,
     git: &str,
@@ -156,23 +156,19 @@ impl PluginPublications for PluginStore {
         runtime: PluginRuntime,
         page_count: usize,
     ) -> Result<PublishJob> {
-        let id = uuid::Uuid::new_v4().to_string();
         let mut transaction = self.pool.begin().await?;
-        lock_publication_source(&mut transaction, tenant_id, git).await?;
-        let row = sqlx::query(
-            "INSERT INTO plugin_publish_jobs (id, tenant_id, source_id, git, revision, runtime, page_count, state, detail) VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', '已持久化 artifact，等待后台验证') ON CONFLICT (tenant_id, git, revision) DO UPDATE SET source_id = CASE WHEN plugin_publish_jobs.state = 'running' THEN plugin_publish_jobs.source_id ELSE EXCLUDED.source_id END, runtime = CASE WHEN plugin_publish_jobs.state = 'running' THEN plugin_publish_jobs.runtime ELSE EXCLUDED.runtime END, page_count = CASE WHEN plugin_publish_jobs.state = 'running' THEN plugin_publish_jobs.page_count ELSE EXCLUDED.page_count END, state = CASE WHEN plugin_publish_jobs.state = 'running' THEN 'running' ELSE 'queued' END, detail = CASE WHEN plugin_publish_jobs.state = 'running' THEN plugin_publish_jobs.detail ELSE '已持久化 artifact，等待后台验证' END, request_order = nextval('plugin_publish_requests_seq'), updated_at = now() RETURNING id, tenant_id, source_id, git, revision, runtime, page_count, state, detail",
+        let job = queue_publish_job(
+            &mut transaction,
+            tenant_id,
+            source_id,
+            git,
+            revision,
+            runtime,
+            page_count,
         )
-        .bind(id)
-        .bind(tenant_id)
-        .bind(source_id)
-        .bind(git)
-        .bind(revision)
-        .bind(super::store::runtime_name(runtime))
-        .bind(i32::try_from(page_count).context("发布页面数量超过数据库范围")?)
-        .fetch_one(&mut *transaction)
         .await?;
         transaction.commit().await?;
-        publish_job(row)
+        Ok(job)
     }
 
     async fn claim_publish_job(&self, job_id: &str) -> Result<bool> {
@@ -276,4 +272,31 @@ fn parse_publish_state(value: String) -> Result<PublishState> {
 
 fn token_hash(token: &str) -> String {
     format!("{:x}", Sha256::digest(token.as_bytes()))
+}
+
+// 默认目录与交付队列共用同一插入逻辑，调用方决定事务的原子提交边界。
+pub(super) async fn queue_publish_job(
+    transaction: &mut Transaction<'_, Postgres>,
+    tenant_id: &str,
+    source_id: &str,
+    git: &str,
+    revision: &str,
+    runtime: PluginRuntime,
+    page_count: usize,
+) -> Result<PublishJob> {
+    let id = uuid::Uuid::new_v4().to_string();
+    lock_publication_source(transaction, tenant_id, git).await?;
+    let row = sqlx::query(
+            "INSERT INTO plugin_publish_jobs (id, tenant_id, source_id, git, revision, runtime, page_count, state, detail) VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', '已持久化 artifact，等待后台验证') ON CONFLICT (tenant_id, git, revision) DO UPDATE SET source_id = CASE WHEN plugin_publish_jobs.state = 'running' THEN plugin_publish_jobs.source_id ELSE EXCLUDED.source_id END, runtime = CASE WHEN plugin_publish_jobs.state = 'running' THEN plugin_publish_jobs.runtime ELSE EXCLUDED.runtime END, page_count = CASE WHEN plugin_publish_jobs.state = 'running' THEN plugin_publish_jobs.page_count ELSE EXCLUDED.page_count END, state = CASE WHEN plugin_publish_jobs.state = 'running' THEN 'running' ELSE 'queued' END, detail = CASE WHEN plugin_publish_jobs.state = 'running' THEN plugin_publish_jobs.detail ELSE '已持久化 artifact，等待后台验证' END, request_order = nextval('plugin_publish_requests_seq'), updated_at = now() RETURNING id, tenant_id, source_id, git, revision, runtime, page_count, state, detail",
+        )
+        .bind(id)
+        .bind(tenant_id)
+        .bind(source_id)
+        .bind(git)
+        .bind(revision)
+        .bind(super::store::runtime_name(runtime))
+        .bind(i32::try_from(page_count).context("发布页面数量超过数据库范围")?)
+        .fetch_one(&mut **transaction)
+        .await?;
+    publish_job(row)
 }

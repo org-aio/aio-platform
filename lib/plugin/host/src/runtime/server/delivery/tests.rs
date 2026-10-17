@@ -3,7 +3,10 @@ use anyhow::Result;
 use az_plugin_delivery::Documentation;
 use sqlx::postgres::PgPoolOptions;
 
-use super::{documents, store};
+use super::{
+    DeliveryService, PluginDocumentation, postgres::PostgresDelivery,
+    postgres_documents::PostgresDocumentation, store,
+};
 
 #[tokio::test]
 #[ignore = "需要独立本机 AIO_DELIVERY_TEST_DATABASE_URL"]
@@ -27,6 +30,27 @@ async fn persists_leases_rejects_obsolete_builds_and_preserves_document_versions
         .await?;
     let plugin_store = super::super::store::PluginStore::new(pool.clone());
     plugin_store.migrate().await?;
+    let catalog = dill::Catalog::builder()
+        .add_value(pool.clone())
+        .add::<PostgresDocumentation>()
+        .build();
+    let documents = catalog.get_one::<dyn PluginDocumentation>()?;
+    let root = tempfile::tempdir()?;
+    let state = super::super::RuntimeState::initialize(
+        crate::configuration::HostConfig {
+            database_url: "invalid".into(),
+            cache_root: root.path().into(),
+            public_origin: "http://localhost".into(),
+            remote_capabilities: None,
+            component_storage: None,
+            default_plugins: vec![],
+            delivery: None,
+            development: None,
+        },
+        vec![std::sync::Arc::new(TestPool(pool.clone()))],
+    )
+    .await?;
+    let delivery = PostgresDelivery::new(&state)?;
     let git = "https://github.com/example/plugin.git";
     let first = "a".repeat(40);
     let next = "b".repeat(40);
@@ -41,14 +65,20 @@ async fn persists_leases_rejects_obsolete_builds_and_preserves_document_versions
         .bind(serde_json::json!({"environment":"typescript","command":["sh","scripts/build.sh"]}))
         .execute(&pool)
         .await?;
-    let job = store::claim(&pool).await?.expect("必须领取任务");
-    assert!(store::claim(&pool).await?.is_none(), "有效租约不得重复领取");
+    let job = delivery
+        .claim()
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("必须领取任务"))?;
+    assert!(delivery.claim().await?.is_none(), "有效租约不得重复领取");
     assert!(store::check_lease(&pool, job.id, "wrong").await.is_err());
     sqlx::query("UPDATE delivery_jobs SET lease_until=now()-interval '1 second' WHERE id=$1")
         .bind(job.id)
         .execute(&pool)
         .await?;
-    let resumed = store::claim(&pool).await?.expect("过期任务必须恢复");
+    let resumed = delivery
+        .claim()
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("过期任务必须恢复"))?;
     assert_eq!(resumed.version, job.version);
     assert_ne!(resumed.lease, job.lease);
     assert!(store::check_lease(&pool, job.id, &job.lease).await.is_err());
@@ -65,32 +95,46 @@ async fn persists_leases_rejects_obsolete_builds_and_preserves_document_versions
     );
     let package = az_plugin_package::PluginPackage::new(git.into(),"0.0.0-dev.1".into(),Some(first),"[plugin.runtime]\nkind='page-definition'\nartifact='pages.json'\n[plugin.marketplace]\ntitle='Test'\nsummary='Test'\nlicense='MIT'\ntags=['test']\n".into(),b"[]",Default::default())?;
     plugin_store.save_package(&package).await?;
-    documents::save(
-        &pool,
-        &package.rev,
-        &Documentation {
-            readme: "# First".into(),
-            images: Default::default(),
-        },
-    )
-    .await?;
-    documents::save(
-        &pool,
-        &package.rev,
-        &Documentation {
-            readme: "# Changed".into(),
-            images: Default::default(),
-        },
-    )
-    .await?;
+    documents
+        .save(
+            &package.rev,
+            &Documentation {
+                readme: "# First".into(),
+                images: Default::default(),
+            },
+        )
+        .await?;
+    documents
+        .save(
+            &package.rev,
+            &Documentation {
+                readme: "# Changed".into(),
+                images: Default::default(),
+            },
+        )
+        .await?;
     let stored: String =
         sqlx::query_scalar("SELECT readme FROM plugin_documents WHERE revision=$1")
             .bind(&package.rev)
             .fetch_one(&pool)
             .await?;
     assert_eq!(stored, "# First", "已保存的版本文档不能被覆盖");
+    state.shutdown().await?;
     sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
         .execute(&pool)
         .await?;
     Ok(())
+}
+
+struct TestPool(sqlx::PgPool);
+impl az_plugin_core::Plugin<super::super::plugins::RuntimeAssembly> for TestPool {
+    fn build<'a>(
+        &'a self,
+        assembly: &'a mut super::super::plugins::RuntimeAssembly,
+    ) -> az_plugin_core::PluginFuture<'a> {
+        Box::pin(async move {
+            assembly.services.add_value(self.0.clone());
+            Ok(())
+        })
+    }
 }
