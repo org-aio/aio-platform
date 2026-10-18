@@ -204,6 +204,7 @@ impl Plugin<RuntimeAssembly> for ComponentResourcesPlugin {
             #[cfg(feature = "sidecar")]
             assembly.require_service::<dyn crate::identity::IdentityProvider>();
             assembly.optional_service::<super::super::enhancements::Enhancements>();
+            assembly.optional_service::<dyn crate::identity::AccessControlProvider>();
             assembly.optional_service::<super::ManagementAccess>();
             assembly.observe_catalog();
             assembly.declare_resource::<Components>()?;
@@ -218,8 +219,13 @@ impl Plugin<RuntimeAssembly> for ComponentResourcesPlugin {
                         state.service::<dyn super::ComponentCatalog>()?,
                         storage,
                         state.service::<Keyring>()?,
-                        #[cfg(feature = "sidecar")]
-                        state.service::<dyn crate::identity::IdentityProvider>()?,
+                        super::super::components::Providers {
+                            #[cfg(feature = "sidecar")]
+                            identity: state.service::<dyn crate::identity::IdentityProvider>()?,
+                            #[cfg(feature = "sidecar")]
+                            access_control: state
+                                .optional_service::<dyn crate::identity::AccessControlProvider>()?,
+                        },
                         state.extensions.services.weak_ref(),
                         state.optional_service::<super::super::enhancements::Enhancements>()?,
                         state.service::<ComponentExecutors>()?,

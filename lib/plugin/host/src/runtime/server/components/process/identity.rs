@@ -27,6 +27,8 @@ use super::model::Gateway;
 const ACCOUNT_PERMISSION: &str = "rbac:manage";
 /// 创建或重命名租户属于租户管理；列出租户和切换租户只需有效成员关系。
 const TENANT_PERMISSION: &str = "tenant:manage";
+/// 权限读写全部要求 `rbac:manage`。
+const RBAC_PERMISSION: &str = "rbac:manage";
 
 /// 把宿主租户视图转成契约形状；两者字段一致，转换只做字段搬运。
 fn to_view(tenant: crate::identity::TenantView) -> az_plugin_contract::process::IdentityTenant {
@@ -35,6 +37,18 @@ fn to_view(tenant: crate::identity::TenantView) -> az_plugin_contract::process::
         label: tenant.label,
         current: tenant.current,
     }
+}
+
+/// 取受控权限提供者；未装配时任何 `rbac_provider` 调用一律拒绝。
+fn access_control<'a>(
+    gateway: &Gateway,
+    components: &'a super::super::Components,
+) -> Result<&'a Arc<dyn crate::identity::AccessControlProvider>> {
+    ensure!(gateway.rbac_provider, "process 未获权限管理能力");
+    components
+        .access_control
+        .as_ref()
+        .context("宿主未装配权限管理提供者")
 }
 
 /// 权限判据：列出所需权限或宿主明确授予的通配权限即通过。
@@ -109,6 +123,7 @@ async fn invoke_inner(
                 user_id: Some(user_id),
                 session: None,
                 tenants: Vec::new(),
+                access_control: None,
             })
         }
         IdentityOperation::ResetPassword {
@@ -136,6 +151,7 @@ async fn invoke_inner(
                 user_id: Some(user_id),
                 session: None,
                 tenants: Vec::new(),
+                access_control: None,
             })
         }
         IdentityOperation::ListTenants => {
@@ -146,6 +162,7 @@ async fn invoke_inner(
                 user_id: None,
                 session: None,
                 tenants: tenants.into_iter().map(to_view).collect(),
+                access_control: None,
             })
         }
         IdentityOperation::CreateTenant { label } => {
@@ -159,6 +176,7 @@ async fn invoke_inner(
                 user_id: None,
                 session: None,
                 tenants: vec![to_view(tenant)],
+                access_control: None,
             })
         }
         IdentityOperation::RenameTenant { label } => {
@@ -175,6 +193,7 @@ async fn invoke_inner(
                 user_id: None,
                 session: None,
                 tenants: vec![to_view(tenant)],
+                access_control: None,
             })
         }
         IdentityOperation::SwitchTenant { tenant_id } => {
@@ -197,9 +216,165 @@ async fn invoke_inner(
                     permissions: switched.permissions,
                 }),
                 tenants: Vec::new(),
+                access_control: None,
             })
         }
+        IdentityOperation::AccessControlView => {
+            let access = access_control(gateway, &components)?;
+            ensure!(
+                authorized(&session, RBAC_PERMISSION),
+                "当前角色没有权限管理权限"
+            );
+            let view = access.access_control_view(&session).await?;
+            Ok(IdentityResponse {
+                user_id: None,
+                session: None,
+                tenants: Vec::new(),
+                access_control: Some(to_access_view(view)),
+            })
+        }
+        IdentityOperation::SaveRole {
+            role_id,
+            permissions,
+            create,
+        } => {
+            let access = access_control(gateway, &components)?;
+            ensure!(
+                authorized(&session, RBAC_PERMISSION),
+                "当前角色没有权限管理权限"
+            );
+            access
+                .save_role(&session, &role_id, &permissions, create)
+                .await?;
+            Ok(IdentityResponse::empty())
+        }
+        IdentityOperation::DeleteRole { role_id } => {
+            let access = access_control(gateway, &components)?;
+            ensure!(
+                authorized(&session, RBAC_PERMISSION),
+                "当前角色没有权限管理权限"
+            );
+            access.delete_role(&session, &role_id).await?;
+            Ok(IdentityResponse::empty())
+        }
+        IdentityOperation::UpdateMember {
+            user_id,
+            display_name,
+        } => {
+            let access = access_control(gateway, &components)?;
+            ensure!(
+                authorized(&session, RBAC_PERMISSION),
+                "当前角色没有权限管理权限"
+            );
+            access
+                .update_member(&session, &user_id, &display_name)
+                .await?;
+            Ok(IdentityResponse::empty())
+        }
+        IdentityOperation::SetMemberRoles { user_id, roles } => {
+            let access = access_control(gateway, &components)?;
+            ensure!(
+                authorized(&session, RBAC_PERMISSION),
+                "当前角色没有权限管理权限"
+            );
+            access.set_member_roles(&session, &user_id, &roles).await?;
+            Ok(IdentityResponse::empty())
+        }
+        IdentityOperation::RemoveMember { user_id } => {
+            let access = access_control(gateway, &components)?;
+            ensure!(
+                authorized(&session, RBAC_PERMISSION),
+                "当前角色没有权限管理权限"
+            );
+            access.remove_member(&session, &user_id).await?;
+            Ok(IdentityResponse::empty())
+        }
+        IdentityOperation::AuthorizeMemberPasswordReset { user_id } => {
+            let access = access_control(gateway, &components)?;
+            ensure!(
+                authorized(&session, RBAC_PERMISSION),
+                "当前角色没有权限管理权限"
+            );
+            // 只做权限裁决；实际密码写入由插件随后调用 `ResetPassword` 完成。
+            access
+                .authorize_member_password_reset(&session, &user_id)
+                .await?;
+            Ok(IdentityResponse::empty())
+        }
+        IdentityOperation::SaveDepartment { department } => {
+            let access = access_control(gateway, &components)?;
+            ensure!(
+                authorized(&session, RBAC_PERMISSION),
+                "当前角色没有权限管理权限"
+            );
+            access.save_department(&session, department).await?;
+            Ok(IdentityResponse::empty())
+        }
+        IdentityOperation::DeleteDepartment { id } => {
+            let access = access_control(gateway, &components)?;
+            ensure!(
+                authorized(&session, RBAC_PERMISSION),
+                "当前角色没有权限管理权限"
+            );
+            access.delete_department(&session, &id).await?;
+            Ok(IdentityResponse::empty())
+        }
+        IdentityOperation::SavePost { post } => {
+            let access = access_control(gateway, &components)?;
+            ensure!(
+                authorized(&session, RBAC_PERMISSION),
+                "当前角色没有权限管理权限"
+            );
+            access.save_post(&session, post).await?;
+            Ok(IdentityResponse::empty())
+        }
+        IdentityOperation::DeletePost { id } => {
+            let access = access_control(gateway, &components)?;
+            ensure!(
+                authorized(&session, RBAC_PERMISSION),
+                "当前角色没有权限管理权限"
+            );
+            access.delete_post(&session, &id).await?;
+            Ok(IdentityResponse::empty())
+        }
     }
+}
+
+/// 权限视图在宿主与契约间共用同一形状，转换仅做类型搬运。
+fn to_access_view(
+    view: crate::identity::AccessControlView,
+) -> az_plugin_contract::process::AccessControlView {
+    az_plugin_contract::process::AccessControlView {
+        users: view
+            .users
+            .into_iter()
+            .map(|user| az_plugin_contract::process::AccessControlUser {
+                id: user.id,
+                account: user.account,
+                display_name: user.display_name,
+                roles: user.roles,
+            })
+            .collect(),
+        roles: view
+            .roles
+            .into_iter()
+            .map(|role| az_plugin_contract::process::AccessControlRole {
+                id: role.id,
+                permissions: role.permissions,
+                member_count: role.member_count,
+            })
+            .collect(),
+        departments: view.departments.into_iter().map(to_org).collect(),
+        posts: view.posts.into_iter().map(to_org).collect(),
+        current_user_id: view.current_user_id,
+        grantable_permissions: view.grantable_permissions,
+    }
+}
+
+fn to_org(
+    item: az_plugin_contract::process::AccessControlOrganization,
+) -> az_plugin_contract::process::AccessControlOrganization {
+    item
 }
 
 #[cfg(test)]

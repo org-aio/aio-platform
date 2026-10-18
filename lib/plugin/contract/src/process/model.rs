@@ -16,6 +16,9 @@ pub struct Configuration {
     /// 当前版本是否被授予租户目录/管理能力；每次调用仍按会话权限复核。
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub tenant_provider: bool,
+    /// 当前版本是否被授予权限管理能力；每次调用仍按会话权限复核。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rbac_provider: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub public_routes: Vec<crate::public::PublicRoute>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -76,6 +79,61 @@ pub enum IdentityOperation {
     CreateTenant { label: String },
     /// 重命名当前租户；需要宿主账号管理权限，且只能改会话所在租户。
     RenameTenant { label: String },
+    /// 读取当前租户的用户、角色、部门、岗位与可授予权限；只读。
+    AccessControlView,
+    /// 创建或更新角色；权限列表由宿主复核不得超出调用者自身授权。
+    SaveRole {
+        role_id: String,
+        permissions: Vec<String>,
+        create: bool,
+    },
+    /// 删除角色；仍被分配的角色由宿主拒绝删除。
+    DeleteRole { role_id: String },
+    /// 更新成员显示名称。
+    UpdateMember {
+        user_id: String,
+        display_name: String,
+    },
+    /// 覆盖成员的角色分配。
+    SetMemberRoles { user_id: String, roles: Vec<String> },
+    /// 把成员移出当前租户；最后一个管理员与自身由宿主拒绝。
+    RemoveMember { user_id: String },
+    /// 校验当前管理员是否有权重置该成员密码；实际密码写入由宿主完成。
+    AuthorizeMemberPasswordReset { user_id: String },
+    /// 写入或更新部门。
+    SaveDepartment { department: AccessControlDepartment },
+    /// 删除部门；存在下级部门时由宿主拒绝。
+    DeleteDepartment { id: String },
+    /// 写入或更新岗位。
+    SavePost { post: AccessControlPost },
+    /// 删除岗位。
+    DeletePost { id: String },
+}
+
+/// 部门入参；`id` 为空表示新建，由宿主生成稳定 ID。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccessControlDepartment {
+    pub id: Option<String>,
+    pub parent_id: Option<String>,
+    pub name: String,
+    pub leader: String,
+    pub phone: String,
+    pub email: String,
+    pub sort_order: i32,
+    pub status: String,
+}
+
+/// 岗位入参；`id` 为空表示新建。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccessControlPost {
+    pub id: Option<String>,
+    pub code: String,
+    pub name: String,
+    pub sort_order: i32,
+    pub status: String,
+    pub remark: String,
 }
 
 /// 身份操作结果；`session` 只在需要返回新会话的操作里出现。
@@ -88,6 +146,64 @@ pub struct IdentityResponse {
     pub session: Option<IdentitySession>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tenants: Vec<IdentityTenant>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_control: Option<AccessControlView>,
+}
+
+/// 权限视图；字段与权限插件模型一致，便于插件直接渲染。
+impl IdentityResponse {
+    /// 无返回数据的确认响应。
+    pub fn empty() -> Self {
+        Self {
+            user_id: None,
+            session: None,
+            tenants: Vec::new(),
+            access_control: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccessControlView {
+    pub users: Vec<AccessControlUser>,
+    pub roles: Vec<AccessControlRole>,
+    pub departments: Vec<AccessControlOrganization>,
+    pub posts: Vec<AccessControlOrganization>,
+    pub current_user_id: String,
+    pub grantable_permissions: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccessControlUser {
+    pub id: String,
+    pub account: String,
+    pub display_name: String,
+    pub roles: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccessControlRole {
+    pub id: String,
+    pub permissions: Vec<String>,
+    pub member_count: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccessControlOrganization {
+    pub id: String,
+    pub code: String,
+    pub name: String,
+    pub parent_id: Option<String>,
+    pub leader: String,
+    pub phone: String,
+    pub email: String,
+    pub sort_order: i32,
+    pub status: String,
+    pub remark: String,
 }
 
 /// 租户视图；字段与租户插件模型一致，便于插件直接消费。

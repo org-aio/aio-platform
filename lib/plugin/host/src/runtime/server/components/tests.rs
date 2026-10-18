@@ -133,8 +133,12 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
             root: temp.path().into(),
         },
         Arc::new(super::load_keyring(&temp.path().join("keys.json"))?),
-        #[cfg(feature = "sidecar")]
-        identity.clone(),
+        super::super::Providers {
+            #[cfg(feature = "sidecar")]
+            identity: identity.clone(),
+            #[cfg(feature = "sidecar")]
+            access_control: None,
+        },
         resource_catalog.weak_ref(),
         None,
         super::tests::default_executors()?,
@@ -216,8 +220,12 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
             root: temp.path().into(),
         },
         Arc::new(super::load_keyring(&temp.path().join("keys.json"))?),
-        #[cfg(feature = "sidecar")]
-        identity.clone(),
+        super::super::Providers {
+            #[cfg(feature = "sidecar")]
+            identity: identity.clone(),
+            #[cfg(feature = "sidecar")]
+            access_control: None,
+        },
         resource_catalog.weak_ref(),
         None,
         super::tests::default_executors()?,

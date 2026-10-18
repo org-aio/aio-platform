@@ -166,7 +166,12 @@ async fn verify_sidecar(metering: bool) -> Result<()> {
         Arc::new(crate::runtime::server::components::load_keyring(
             &root.path().join("keys.json"),
         )?),
-        identity.clone(),
+        crate::runtime::server::components::Providers {
+            #[cfg(feature = "sidecar")]
+            identity: identity.clone(),
+            #[cfg(feature = "sidecar")]
+            access_control: None,
+        },
         resource_catalog.weak_ref(),
         Some(enhancements.clone()),
         crate::runtime::server::components::tests::default_executors()?,
@@ -253,6 +258,7 @@ async fn verify_sidecar(metering: bool) -> Result<()> {
             management: false,
             identity_provider: false,
             tenant_provider: false,
+            rbac_provider: false,
             storage: None,
             storage_gate: Default::default(),
             stopped: Default::default(),

@@ -58,6 +58,14 @@ pub(super) use frontend::device_view_grant;
 pub(super) use frontend::mount;
 pub(super) use resources::load_keyring;
 
+/// 宿主注入组件的身份与权限提供者；分组传入，避免打开组件环境时参数过多。
+pub(super) struct Providers {
+    #[cfg(feature = "sidecar")]
+    pub identity: Arc<dyn crate::identity::IdentityProvider>,
+    #[cfg(feature = "sidecar")]
+    pub access_control: Option<Arc<dyn crate::identity::AccessControlProvider>>,
+}
+
 pub(super) struct Components {
     #[cfg(feature = "sidecar")]
     pub(super) enhancements: Option<Arc<super::enhancements::Enhancements>>,
@@ -68,6 +76,10 @@ pub(super) struct Components {
     services: Arc<services::Services>,
     #[cfg(feature = "sidecar")]
     identity: Arc<dyn crate::identity::IdentityProvider>,
+    /// 受控权限管理；产品未提供时整包声明的 `rbac_provider` 一律拒绝。
+    #[cfg(feature = "sidecar")]
+    pub(super) access_control: Option<Arc<dyn crate::identity::AccessControlProvider>>,
+
     runtime_services: dill::CatalogWeakRef,
     executors: Arc<ComponentExecutors>,
     active: RwLock<HashMap<(Uuid, String), ActiveExecution>>,

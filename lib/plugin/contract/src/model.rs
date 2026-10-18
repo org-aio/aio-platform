@@ -30,6 +30,8 @@ pub struct CapabilityGrants {
     pub identity_provider: bool,
     /// 租户目录与租户管理动作；写操作仍由宿主按会话权限逐次复核。
     pub tenant_provider: bool,
+    /// 权限管理读写动作；每次调用仍由宿主按会话权限逐次复核。
+    pub rbac_provider: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

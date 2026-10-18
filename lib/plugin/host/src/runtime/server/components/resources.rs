@@ -7,7 +7,7 @@ use futures_util::FutureExt;
 use uuid::Uuid;
 
 use super::{
-    Components,
+    Components, Providers,
     execution::{ComponentExecutors, ExecutionContext},
     services,
 };
@@ -17,7 +17,7 @@ impl Components {
         catalog: Arc<dyn super::super::component_catalog::ComponentCatalog>,
         storage: &crate::configuration::ComponentStorage,
         keyring: Arc<Keyring>,
-        #[cfg(feature = "sidecar")] identity: Arc<dyn crate::identity::IdentityProvider>,
+        #[allow(unused_variables)] providers: Providers,
         runtime_services: dill::CatalogWeakRef,
         enhancements: Option<Arc<super::super::enhancements::Enhancements>>,
         executors: Arc<ComponentExecutors>,
@@ -35,7 +35,9 @@ impl Components {
             keyring,
             services,
             #[cfg(feature = "sidecar")]
-            identity,
+            identity: providers.identity,
+            #[cfg(feature = "sidecar")]
+            access_control: providers.access_control,
             runtime_services,
             executors,
             active: Default::default(),

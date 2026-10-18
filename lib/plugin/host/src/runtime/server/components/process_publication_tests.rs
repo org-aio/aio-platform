@@ -145,7 +145,12 @@ async fn publication_preserves_running_singleton_process() -> Result<()> {
             root: root.path().into(),
         },
         Arc::new(super::load_keyring(&root.path().join("keys.json"))?),
-        Arc::new(super::tests::TestIdentity),
+        super::Providers {
+            #[cfg(feature = "sidecar")]
+            identity: Arc::new(super::tests::TestIdentity),
+            #[cfg(feature = "sidecar")]
+            access_control: None,
+        },
         resource_catalog.weak_ref(),
         None,
         super::tests::default_executors()?,

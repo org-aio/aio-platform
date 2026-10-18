@@ -59,6 +59,8 @@ pub(super) struct Gateway {
     pub identity_provider: bool,
     /// 该版本是否声明租户目录/管理能力；写操作仍按会话权限复核。
     pub tenant_provider: bool,
+    /// 该版本是否声明权限管理能力；写操作仍按会话权限复核。
+    pub rbac_provider: bool,
     pub storage: Option<az_plugin_runtime::ObjectStore>,
     pub storage_gate: tokio::sync::Mutex<()>,
     pub stopped: tokio_util::sync::CancellationToken,

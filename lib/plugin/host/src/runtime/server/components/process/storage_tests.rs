@@ -65,7 +65,12 @@ impl Fixture {
                 root: root.path().into(),
             },
             Arc::new(super::super::load_keyring(&root.path().join("key.json"))?),
-            Arc::new(super::super::tests::TestIdentity),
+            crate::runtime::server::components::Providers {
+                #[cfg(feature = "sidecar")]
+                identity: Arc::new(super::super::tests::TestIdentity),
+                #[cfg(feature = "sidecar")]
+                access_control: None,
+            },
             services.weak_ref(),
             None,
             super::super::tests::default_executors()?,
