@@ -175,3 +175,39 @@ async fn permissions_cannot_cross_plugin_or_host_boundaries() -> Result<()> {
     );
     Ok(())
 }
+
+/// 权限快照必须同时出现在上下文与授权校验中：Sidecar 读到的就是宿主判定的那份。
+#[tokio::test]
+async fn permission_snapshot_is_visible_to_the_caller_and_authorization() -> Result<()> {
+    let services = Arc::new(Services::with_enhancements(None));
+    let request = services.enter(&session(), "first")?;
+    let expected: Vec<String> = session().permissions;
+
+    // 交互上下文直接携带权限快照，Sidecar 入口据此判定，无需再查询数据库。
+    assert_eq!(request.context.permissions, expected);
+    assert!(
+        services
+            .authorize(&scope(&request.context, "first"), "read")
+            .await?
+    );
+    assert!(
+        !services
+            .authorize(&scope(&request.context, "first"), "missing")
+            .await?
+    );
+
+    // 跨插件派生调用继承同一份权限，且派生上下文与该目标自身的授权一致。
+    let delegated = services.delegate(&request.context, "first", "second")?;
+    assert_eq!(delegated.context.permissions, expected);
+    assert!(
+        services
+            .authorize(&scope(&delegated.context, "second"), "read")
+            .await?
+    );
+    assert!(
+        !services
+            .authorize(&scope(&delegated.context, "second"), "missing")
+            .await?
+    );
+    Ok(())
+}

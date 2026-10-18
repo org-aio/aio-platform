@@ -139,3 +139,62 @@ async fn public_ingress_has_only_the_bound_tenant_and_no_user_authority() -> Res
     );
     Ok(())
 }
+
+/// 权限快照只来自宿主入口，必须逐项可判定，格式异常或重复一律拒绝。
+#[tokio::test]
+async fn exposes_host_issued_permissions_and_rejects_malformed_values() -> Result<()> {
+    let host = Host::from_bytes(&serde_json::to_vec(&config())?, "/tmp/service.sock".into())?;
+    let router = host.protect(Router::new().route(
+        "/",
+        get(|Extension(caller): Extension<Caller>| async move {
+            format!(
+                "{}:{}",
+                caller.has_permission("tenant:manage"),
+                caller.permissions.len()
+            )
+        }),
+    ));
+    async fn call(router: &Router, permissions: Option<&str>) -> Result<axum::response::Response> {
+        let mut request = Request::builder()
+            .uri("/")
+            .header("x-aio-token", "a".repeat(32))
+            .header("x-aio-tenant-id", "tenant-a")
+            .header("x-aio-user-id", "user")
+            .header("x-aio-context", "context");
+        if let Some(value) = permissions {
+            request = request.header("x-aio-permissions", value);
+        }
+        Ok(router.clone().oneshot(request.body(Body::empty())?).await?)
+    }
+
+    // 宿主下发 tenant:manage：插件可判定为已授权。
+    let response = call(&router, Some("tenant:manage,file:manage")).await?;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        axum::body::to_bytes(response.into_body(), 1024)
+            .await?
+            .as_ref(),
+        b"true:2"
+    );
+
+    // 缺少权限头等价于空集：插件不能据此获得任何能力。
+    let response = call(&router, None).await?;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        axum::body::to_bytes(response.into_body(), 1024)
+            .await?
+            .as_ref(),
+        b"false:0"
+    );
+
+    // 格式错误、空项与重复项都必须拒绝，避免解释歧义被用来放大权限。
+    for value in [
+        "tenant:manage,,file:manage",
+        "tenant:manage,tenant:manage",
+        ",tenant:manage",
+    ] {
+        let response = call(&router, Some(value)).await?;
+        assert_eq!(response.status(), 401, "必须拒绝: {value}");
+    }
+    Ok(())
+}

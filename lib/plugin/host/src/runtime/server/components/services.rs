@@ -138,6 +138,7 @@ impl Services {
             user_id: Some(user.into()),
             session_id: Some(format!("service:{caller}")),
             request_id: uuid::Uuid::new_v4().to_string(),
+            permissions: permissions.clone(),
         };
         self.register(context, target, permissions, None, None, true)
     }
@@ -152,6 +153,7 @@ impl Services {
             user_id: Some(session.user_id.clone()),
             session_id: Some(session.session_id.clone()),
             request_id: uuid::Uuid::new_v4().to_string(),
+            permissions: session.permissions.clone(),
         };
         self.register(
             context,
@@ -207,7 +209,7 @@ impl Services {
 
     fn register(
         self: &Arc<Self>,
-        context: RequestContext,
+        mut context: RequestContext,
         source: &str,
         permissions: Vec<String>,
         parent: Option<String>,
@@ -220,6 +222,11 @@ impl Services {
             .map_err(|_| anyhow::anyhow!("请求权限锁损坏"))?;
         if let Some(parent) = &parent {
             active_request(&requests, parent)?;
+        }
+        // 权限快照由宿主在此唯一登记点写入：Sidecar 通过上下文读取它，授权校验也
+        // 比较同一字段，两边不会出现“入口放行、执行拒绝”或相反的分歧。
+        if context.permissions != permissions {
+            context.permissions.clone_from(&permissions);
         }
         let request = RequestAuthorization {
             context: context.clone(),

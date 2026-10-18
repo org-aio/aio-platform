@@ -587,6 +587,7 @@ async fn wasm_uses_replacement_storage_database_and_persistent_releases() -> Res
     let caller = az_plugin_contract::RequestContext {
         tenant_id: Some(tenant.clone()),
         request_id: "resources".into(),
+        permissions: Vec::new(),
         ..Default::default()
     };
     let request = |path: &str| ComponentRequest {

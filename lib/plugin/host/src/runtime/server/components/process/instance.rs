@@ -271,6 +271,8 @@ impl Processes {
             .header("x-aio-tenant-id", tenant)
             .header("x-aio-user-id", user)
             .header("x-aio-context", context.request_id)
+            // 会话权限以逗号分隔随请求下发；权限名本身不含逗号，缺少该头即为空集。
+            .header("x-aio-permissions", context.permissions.join(","))
             .body(request.body);
         for header in request.headers {
             if ["content-type", "accept"].contains(&header.name.to_ascii_lowercase().as_str()) {

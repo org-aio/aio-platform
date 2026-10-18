@@ -85,6 +85,7 @@ pub fn scope() -> InvocationScope {
             user_id: Some("user".into()),
             session_id: Some("session".into()),
             request_id: "request".into(),
+            permissions: Vec::new(),
         },
         grants: CapabilityGrants {
             runtime: vec![PATH.into()],

@@ -139,6 +139,8 @@ async fn invoke(
         user_id: Some(identity.user),
         session_id: None,
         request_id: format!("worker:{}", identity.id),
+        // 设备调用不携带用户会话权限：它只凭插件声明的设备能力被路由到目标入口。
+        permissions: Vec::new(),
     };
     let request = super::model::Request {
         method: "POST".into(),
