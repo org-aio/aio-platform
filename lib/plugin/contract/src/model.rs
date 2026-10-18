@@ -28,6 +28,8 @@ pub struct CapabilityGrants {
     pub storage: bool,
     pub management: bool,
     pub identity_provider: bool,
+    /// 租户目录与租户管理动作；写操作仍由宿主按会话权限逐次复核。
+    pub tenant_provider: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

@@ -252,6 +252,7 @@ async fn verify_sidecar(metering: bool) -> Result<()> {
             runtime_capabilities,
             management: false,
             identity_provider: false,
+            tenant_provider: false,
             storage: None,
             storage_gate: Default::default(),
             stopped: Default::default(),

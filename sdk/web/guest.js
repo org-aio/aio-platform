@@ -162,5 +162,13 @@
   const fileDrag = () => {
     if (fileDrop) { window.parent.postMessage({ protocol: "aio:plugin@2", kind: "file-drag", id: fileDrop.id }, "*"); }
   };
-  Object.defineProperty(window, "aioPlugin", { value: Object.freeze({ request, manage, json, copy, download, downloadFrom, downloadPackage, openSettings, installTool, managementImage, navigate, onNavigationChange, deviceView, onFileDrop, fileDrag }), writable: false, configurable: false });
+  // 会话租户或目录变化后请求宿主重启应用；不返回任何会话字段。
+  const refreshCatalog = () => new Promise((resolve, reject) => {
+    if (pending.size >= 16) return reject(new Error("Too many pending requests"));
+    const id = createId();
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error("Catalog refresh timed out")); }, 15000);
+    pending.set(id, { resolve: () => resolve(true), reject, timer });
+    window.parent.postMessage({ protocol: "aio:plugin@2", kind: "catalog-refresh", id }, "*");
+  });
+  Object.defineProperty(window, "aioPlugin", { value: Object.freeze({ request, manage, json, copy, download, downloadFrom, downloadPackage, openSettings, installTool, managementImage, navigate, onNavigationChange, refreshCatalog, deviceView, onFileDrop, fileDrag }), writable: false, configurable: false });
 })();

@@ -159,6 +159,7 @@ impl Processes {
             encryption_key,
             storage: resources.storage.is_some(),
             identity_provider: manifest.capabilities.identity_provider,
+            tenant_provider: manifest.capabilities.tenant_provider,
             public_routes: manifest.public_routes.clone(),
             public_base: if manifest.public_routes.is_empty() {
                 None
@@ -207,6 +208,7 @@ impl Processes {
             runtime_capabilities: manifest.capabilities.runtime.clone(),
             management: manifest.capabilities.management,
             identity_provider: manifest.capabilities.identity_provider,
+            tenant_provider: manifest.capabilities.tenant_provider,
             storage: resources.storage,
             storage_gate: Default::default(),
             stopped: Default::default(),

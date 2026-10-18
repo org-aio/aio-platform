@@ -13,6 +13,9 @@ pub struct Configuration {
     /// 当前版本是否被授予身份提供能力；每次调用仍由宿主的会话与权限复核。
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub identity_provider: bool,
+    /// 当前版本是否被授予租户目录/管理能力；每次调用仍按会话权限复核。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tenant_provider: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub public_routes: Vec<crate::public::PublicRoute>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -47,8 +50,7 @@ pub struct ServiceRequest {
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct IdentityRequest {
-    /// 当前会话标识；宿主用它把请求绑定到真实登录会话。
-    pub session_id: String,
+    /// 会话由宿主从交互上下文读取，插件不能提交或伪造会话标识。
     pub operation: IdentityOperation,
 }
 

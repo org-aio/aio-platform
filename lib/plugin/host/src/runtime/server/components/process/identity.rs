@@ -1,11 +1,12 @@
 //! 受控身份服务：进程插件不能直连身份库，只能提交固定动作。
 //!
-//! 三重门控缺一不可：
-//! 1. 该版本在清单里声明 `identity_provider` 能力；
-//! 2. 调用绑定到宿主登记的**真实交互会话**（后台与跨插件派生调用被拒绝）；
-//! 3. 会话持有该动作要求的宿主权限。
+//! 门控分两层：
+//! 1. 版本在清单里声明对应能力：账号管理用 `identity_provider`，租户目录与
+//!    租户写操作用 `tenant_provider`；
+//! 2. 调用必须绑定宿主登记的**真实交互会话**，并按动作复核会话权限。
 //!
-//! 会话与会话权限都由宿主自己读取，插件提交的任何身份字段都不作数。
+//! 会话与会话权限都由宿主自己读取；插件提交的任何身份字段都不作数，因此请求
+//! 里没有会话标识，也不存在“插件拿不到会话 ID 就无法调用”的自举问题。
 
 use std::sync::Arc;
 
@@ -22,8 +23,10 @@ use az_plugin_contract::process::{
 
 use super::model::Gateway;
 
-/// 创建账号与重置密码属于账号管理；切换租户只需要有效会话与成员关系。
+/// 创建账号与重置密码属于账号管理。
 const ACCOUNT_PERMISSION: &str = "rbac:manage";
+/// 创建或重命名租户属于租户管理；列出租户和切换租户只需有效成员关系。
+const TENANT_PERMISSION: &str = "tenant:manage";
 
 /// 把宿主租户视图转成契约形状；两者字段一致，转换只做字段搬运。
 fn to_view(tenant: crate::identity::TenantView) -> az_plugin_contract::process::IdentityTenant {
@@ -69,9 +72,8 @@ async fn invoke_inner(
         .try_acquire()
         .context("process 调用并发已满")?;
     let components = super::broker::active(gateway, headers).await?;
-    ensure!(gateway.identity_provider, "process 未获身份提供能力");
 
-    // 只接受宿主自己登记的交互上下文；插件无法用伪造的会话标识绕过登记表。
+    // 只接受宿主自己登记的交互上下文；会话由宿主从登记表读取。
     let id = headers
         .get("x-aio-context")
         .context("身份调用缺少交互上下文")?
@@ -84,17 +86,9 @@ async fn invoke_inner(
         source_id: source,
         revision: gateway.start.revision.clone(),
         context,
-        grants: az_plugin_contract::CapabilityGrants {
-            identity_provider: true,
-            ..Default::default()
-        },
+        grants: az_plugin_contract::CapabilityGrants::default(),
     };
-    // 会话来自宿主，插件提交的 sessionId 必须与它一致，不能借旧票据操作他人会话。
     let (session, _) = components.services.management_session(&scope)?;
-    ensure!(
-        session.session_id == request.session_id,
-        "身份调用会话与宿主登记不一致"
-    );
 
     match request.operation {
         IdentityOperation::CreateUser {
@@ -102,6 +96,7 @@ async fn invoke_inner(
             display_name,
             password,
         } => {
+            ensure!(gateway.identity_provider, "process 未获身份提供能力");
             ensure!(
                 authorized(&session, ACCOUNT_PERMISSION),
                 "当前角色没有账号管理权限"
@@ -120,6 +115,7 @@ async fn invoke_inner(
             user_id,
             new_password,
         } => {
+            ensure!(gateway.identity_provider, "process 未获身份提供能力");
             ensure!(
                 authorized(&session, ACCOUNT_PERMISSION),
                 "当前角色没有账号管理权限"
@@ -143,23 +139,20 @@ async fn invoke_inner(
             })
         }
         IdentityOperation::ListTenants => {
+            ensure!(gateway.tenant_provider, "process 未获租户提供能力");
             // 只读且限定在调用者自己的成员关系内，无需额外权限位。
             let tenants = components.identity.list_tenants(&session).await?;
             Ok(IdentityResponse {
                 user_id: None,
                 session: None,
-                tenants: tenants
-                    .into_iter()
-                    .map(|tenant| {
-                        crate::runtime::server::components::process::identity::to_view(tenant)
-                    })
-                    .collect(),
+                tenants: tenants.into_iter().map(to_view).collect(),
             })
         }
         IdentityOperation::CreateTenant { label } => {
+            ensure!(gateway.tenant_provider, "process 未获租户提供能力");
             ensure!(
-                authorized(&session, ACCOUNT_PERMISSION),
-                "当前角色没有账号管理权限"
+                authorized(&session, TENANT_PERMISSION),
+                "当前角色没有租户管理权限"
             );
             let tenant = components.identity.create_tenant(&session, &label).await?;
             Ok(IdentityResponse {
@@ -169,9 +162,10 @@ async fn invoke_inner(
             })
         }
         IdentityOperation::RenameTenant { label } => {
+            ensure!(gateway.tenant_provider, "process 未获租户提供能力");
             ensure!(
-                authorized(&session, ACCOUNT_PERMISSION),
-                "当前角色没有账号管理权限"
+                authorized(&session, TENANT_PERMISSION),
+                "当前角色没有租户管理权限"
             );
             let tenant = components
                 .identity
@@ -184,6 +178,7 @@ async fn invoke_inner(
             })
         }
         IdentityOperation::SwitchTenant { tenant_id } => {
+            ensure!(gateway.tenant_provider, "process 未获租户提供能力");
             // 切换后仍保持同一用户：提供者校验成员关系，宿主无需额外权限位。
             let switched = components
                 .identity
@@ -209,7 +204,7 @@ async fn invoke_inner(
 
 #[cfg(test)]
 mod tests {
-    use super::{ACCOUNT_PERMISSION, authorized};
+    use super::{ACCOUNT_PERMISSION, TENANT_PERMISSION, authorized};
 
     fn session(permissions: &[&str]) -> crate::identity::SessionContext {
         crate::identity::SessionContext {
@@ -224,20 +219,18 @@ mod tests {
     }
 
     #[test]
-    fn tenant_writes_require_the_account_permission() {
-        // 写操作与账号管理共用同一判据：没有该权限就不能创建或重命名租户。
+    fn tenant_writes_require_the_tenant_permission() {
+        assert!(!authorized(&session(&[]), TENANT_PERMISSION));
         assert!(!authorized(
-            &session(&["tenant:manage"]),
-            ACCOUNT_PERMISSION
-        ));
-        assert!(authorized(
             &session(&[ACCOUNT_PERMISSION]),
-            ACCOUNT_PERMISSION
+            TENANT_PERMISSION
         ));
+        assert!(authorized(&session(&["tenant:manage"]), TENANT_PERMISSION));
+        assert!(authorized(&session(&["*"]), TENANT_PERMISSION));
     }
 
     #[test]
-    fn account_permission_is_required_but_wildcard_is_honoured() {
+    fn account_writes_require_the_account_permission() {
         assert!(!authorized(&session(&[]), ACCOUNT_PERMISSION));
         assert!(!authorized(
             &session(&["tenant:manage"]),

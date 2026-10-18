@@ -34,7 +34,7 @@
 - 宿主生命周期包含部分启动失败补偿、协作取消、后台任务等待、请求关闭和反序资源释放；停止保留安装记录与活动版本，清理错误会汇总返回。
 - `aio-idea` 已使用 `RuntimeHost` 在线组合，部署方文件可启停 Rhai、TypeScript、Wasm、Sidecar、MCP、gRPC、演进控制及文件、权限、租户服务，重建真实身份服务和数据库。系统 Service、Controller 与运行时使用同一个 Dill 容器；每代按依赖初始化，停用关闭连接池并移除路由，重新启用创建新实例并保留数据。身份重启会重建依赖它的系统服务及适配器，会话保持有效。字典和市场已移除宿主编译依赖；其余系统实现和 UI 仍静态装配。
 - 每代重新装配业务路由与首页快照，应用请求一起排空；初始化、路由返回错误或 panic 都进入补偿和恢复，旧代已关闭资源不能被复用。恢复失败停止监听并交回外部监督器。产品真实 PostgreSQL/HTTP 已验证文件数据保留、旧引用返回 `PoolClosed`、身份依赖重建、MCP 工具目录和正式 gRPC 客户端连续调用，验收入口见 [产品运行时测试](https://github.com/org-aio/aio-idea/blob/main/tests/runtime/README.md)。
-- Sidecar 现在可以通过宿主执行受控身份操作：broker 新增 `/identity/invoke`，只接受创建账号、重置密码、切换租户三种固定动作，不接受任意 SQL 或上游路径。三重门控缺一不可——版本声明 `identity_provider`、调用绑定宿主登记的真实交互会话、会话持有 `rbac:manage`（切换租户只需有效会话与成员关系）；插件提交的会话标识必须与宿主登记一致，重置密码还会复核目标属于当前租户。声明该能力的整包必须要求宿主 `rbac:manage`，缺少门槛的包会被拒绝发布。SDK 通过 `Host::identity()` 暴露这组动作。租户与权限插件据此可以脱离静态组合，剩余工作是它们自身的整包化与真实产品验收。
+- Sidecar 可以通过宿主执行受控身份与租户操作：broker 的 `/identity/invoke` 只接受创建账号、重置密码、列出/创建/重命名/切换租户等固定动作，不接受任意 SQL 或上游路径。调用必须绑定宿主登记的真实交互会话；会话由宿主从登记表读取，插件请求里没有会话标识，因此不存在“插件拿不到会话 ID 就无法调用”的自举问题。账号写操作要求 `identity_provider` 与 `rbac:manage`，租户写操作要求 `tenant_provider` 与 `tenant:manage`，列出租户和切换租户只要求有效成员关系。声明 `identity_provider` 的整包仍必须要求宿主 `rbac:manage`；`tenant_provider` 由每次调用的会话权限判定，避免把普通成员的租户切换能力一并锁死。SDK 通过 `Host::identity()` 暴露这组动作。租户插件据此可以脱离静态组合，剩余工作是整包化与真实产品验收。
 
 - Sidecar 调用现在带回会话权限：`RequestContext` 增加带默认值的 `permissions`，宿主在唯一的请求登记点写入，交互与跨插件派生调用共用同一份集合，授权校验与插件读到的内容完全一致。Sidecar SDK 的 `Caller` 暴露 `permissions` 与 `has_permission`，空项、重复项、超长与控制字符一律 401；设备 worker 通道不携带用户会话权限。Wasm 组件继续使用既有 `authorize(permission)` 查询通道，不改 WIT 记录。这是让权限、租户等系统服务脱离静态编译的前置能力；它们仍缺一个受控的宿主身份服务通道（创建用户、重置密码、切换会话），因此尚未迁出静态组合。
 

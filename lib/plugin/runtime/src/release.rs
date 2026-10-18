@@ -93,7 +93,8 @@ impl ComponentSlot {
                     .runtime
                     .iter()
                     .all(|path| grants.runtime.contains(path))
-                && (!requested.identity_provider || grants.identity_provider),
+                && (!requested.identity_provider || grants.identity_provider)
+                && (!requested.tenant_provider || grants.tenant_provider),
             "宿主未授予插件申请的全部能力"
         );
         ensure!(

@@ -23,6 +23,8 @@ declare global {
       managementImage(url: string): Promise<Response>;
       navigate(fragment: string, options?: { replace?: boolean }): Promise<string>;
       onNavigationChange(listener: (fragment: string) => void): () => void;
+      /** 会话租户变化后请求宿主重新读取会话、权限和插件目录。 */
+      refreshCatalog(): Promise<boolean>;
     };
   }
 }

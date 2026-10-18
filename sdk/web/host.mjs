@@ -4,7 +4,7 @@ export function mountBridge(frame, invoke, options = {}) {
   let inflight = 0;
   const listener = async (event) => {
     const message = event.data;
-    if (!active || event.source !== frame.contentWindow || event.origin !== "null" || message?.protocol !== "aio:plugin@2" || !["request", "manage", "clipboard", "download", "download-request", "management-action", "management-image"].includes(message.kind)) return;
+    if (!active || event.source !== frame.contentWindow || event.origin !== "null" || message?.protocol !== "aio:plugin@2" || !["request", "manage", "clipboard", "download", "download-request", "management-action", "management-image", "catalog-refresh"].includes(message.kind)) return;
     if (typeof message.id !== "string" || message.id.length > 80) return;
     const source = event.source;
     const reply = { protocol: "aio:plugin@2", kind: "response", id: message.id };
@@ -51,6 +51,10 @@ export function mountBridge(frame, invoke, options = {}) {
         } else if (message.kind === "manage") {
           if (!options.manage) throw new Error("Management access unavailable");
           reply.response = await options.manage(message.request);
+        } else if (message.kind === "catalog-refresh") {
+          if (!options.refreshCatalog) throw new Error("Catalog refresh unavailable");
+          await options.refreshCatalog();
+          reply.response = { status: 204, headers: [], body: [] };
         } else reply.response = await invoke(message.request);
       }
       finally { inflight--; }

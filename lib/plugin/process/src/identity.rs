@@ -1,7 +1,7 @@
 //! 宿主身份服务客户端：插件不能直连身份库，只能提交固定动作。
 //!
-//! 调用必须携带当前登录会话的标识；宿主会用它核对真实交互会话、租户与权限。
-//! 客户端不缓存会话，也不接受调用方自造的身份字段。
+//! 调用只携带宿主登记的交互上下文；真实会话、租户与权限全部由宿主读取。
+//! 客户端不接触会话标识，也不接受调用方自造的身份字段。
 
 use std::time::Duration;
 
@@ -23,11 +23,11 @@ pub struct IdentityService {
 }
 
 impl Host {
-    /// 创建身份客户端；插件须在清单声明 `identity_provider`，权限仍由宿主逐次复核。
+    /// 创建身份客户端；插件须在清单声明身份或租户提供能力，权限仍由宿主逐次复核。
     pub fn identity(&self) -> Result<IdentityService> {
         ensure!(
-            self.configuration.identity_provider,
-            "宿主未授予身份提供能力"
+            self.configuration.identity_provider || self.configuration.tenant_provider,
+            "宿主未授予身份或租户提供能力"
         );
         let mut headers = reqwest::header::HeaderMap::new();
         let mut token = reqwest::header::HeaderValue::from_str(&self.configuration.ingress_token)?;
@@ -46,19 +46,14 @@ impl Host {
 }
 
 impl IdentityService {
-    /// 提交一次身份操作；`context_id` 是宿主登记的交互上下文，不是会话标识本身。
+    /// 提交一次身份操作；`context_id` 是宿主登记的交互上下文，会话由宿主解析。
     async fn invoke(
         &self,
         context_id: &str,
-        session_id: &str,
         operation: IdentityOperation,
     ) -> Result<IdentityResponse> {
         ensure!(!context_id.is_empty(), "身份调用缺少交互上下文");
-        ensure!(!session_id.is_empty(), "身份调用缺少会话");
-        let request = IdentityRequest {
-            session_id: session_id.to_owned(),
-            operation,
-        };
+        let request = IdentityRequest { operation };
         let url = Url::parse("http://localhost/identity/invoke")?;
         let body = serde_json::to_vec(&request).context("序列化身份请求失败")?;
         let response = self
@@ -92,7 +87,6 @@ impl IdentityService {
     pub async fn create_user(
         &self,
         context_id: &str,
-        session_id: &str,
         account: &str,
         display_name: &str,
         password: &str,
@@ -100,7 +94,6 @@ impl IdentityService {
         let response = self
             .invoke(
                 context_id,
-                session_id,
                 IdentityOperation::CreateUser {
                     account: account.to_owned(),
                     display_name: display_name.to_owned(),
@@ -115,13 +108,11 @@ impl IdentityService {
     pub async fn reset_password(
         &self,
         context_id: &str,
-        session_id: &str,
         user_id: &str,
         new_password: &str,
     ) -> Result<()> {
         self.invoke(
             context_id,
-            session_id,
             IdentityOperation::ResetPassword {
                 user_id: user_id.to_owned(),
                 new_password: new_password.to_owned(),
@@ -135,13 +126,11 @@ impl IdentityService {
     pub async fn switch_tenant(
         &self,
         context_id: &str,
-        session_id: &str,
         tenant_id: &str,
     ) -> Result<IdentitySession> {
         let response = self
             .invoke(
                 context_id,
-                session_id,
                 IdentityOperation::SwitchTenant {
                     tenant_id: tenant_id.to_owned(),
                 },
@@ -151,28 +140,18 @@ impl IdentityService {
     }
 
     /// 列出当前用户加入的租户。
-    pub async fn list_tenants(
-        &self,
-        context_id: &str,
-        session_id: &str,
-    ) -> Result<Vec<IdentityTenant>> {
+    pub async fn list_tenants(&self, context_id: &str) -> Result<Vec<IdentityTenant>> {
         let response = self
-            .invoke(context_id, session_id, IdentityOperation::ListTenants)
+            .invoke(context_id, IdentityOperation::ListTenants)
             .await?;
         Ok(response.tenants)
     }
 
     /// 创建租户并返回它；宿主会把调用者设为管理员。
-    pub async fn create_tenant(
-        &self,
-        context_id: &str,
-        session_id: &str,
-        label: &str,
-    ) -> Result<IdentityTenant> {
+    pub async fn create_tenant(&self, context_id: &str, label: &str) -> Result<IdentityTenant> {
         let response = self
             .invoke(
                 context_id,
-                session_id,
                 IdentityOperation::CreateTenant {
                     label: label.to_owned(),
                 },
@@ -189,13 +168,11 @@ impl IdentityService {
     pub async fn rename_current_tenant(
         &self,
         context_id: &str,
-        session_id: &str,
         label: &str,
     ) -> Result<IdentityTenant> {
         let response = self
             .invoke(
                 context_id,
-                session_id,
                 IdentityOperation::RenameTenant {
                     label: label.to_owned(),
                 },

@@ -303,3 +303,29 @@ test('文档图片通过独立消息读取并默认拒绝未开放宿主', async
     await assert.rejects(guest.aioPlugin.managementImage('x'.repeat(4097)), /Invalid image/);
   } finally { delete globalThis.window; }
 });
+
+test('会话租户变化后只通过显式宿主操作刷新目录', async () => {
+  let listener, reply, received, sent, calls = 0;
+  globalThis.window = { addEventListener: (_, fn) => { listener = fn; }, removeEventListener: () => {} };
+  const child = { postMessage: message => { reply = message; } };
+  const parent = { postMessage: message => { sent = message; } };
+  const guest = { parent, addEventListener: (_, fn) => { received = fn; } };
+  vm.runInContext(readFileSync(new URL('./guest.js', import.meta.url), 'utf8'), guestContext(guest));
+  try {
+    const waiting = guest.aioPlugin.refreshCatalog();
+    assert.equal(sent.kind, 'catalog-refresh');
+    const event = { source: child, origin: 'null', data: sent };
+    let unmount = mountBridge({ contentWindow: child }, () => assert.fail('目录刷新进入业务执行器'));
+    await listener(event);
+    assert.match(reply.error, /Catalog refresh unavailable/);
+    unmount();
+    unmount = mountBridge({ contentWindow: child }, () => assert.fail('目录刷新进入业务执行器'), {
+      refreshCatalog: async () => { calls++; },
+    });
+    await listener(event);
+    assert.equal(calls, 1);
+    received({ source: parent, data: reply });
+    assert.equal(await waiting, true);
+    unmount();
+  } finally { delete globalThis.window; }
+});
