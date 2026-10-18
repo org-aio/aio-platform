@@ -60,25 +60,32 @@ impl IdentityService {
             operation,
         };
         let url = Url::parse("http://localhost/identity/invoke")?;
+        let body = serde_json::to_vec(&request).context("序列化身份请求失败")?;
         let response = self
             .client
             .post(url)
             .header("x-aio-context", context_id)
-            .json(&request)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body)
             .send()
             .await
             .context("身份服务调用失败")?;
         let status = response.status();
+        let bytes = response.bytes().await.context("读取身份响应失败")?;
         if !status.is_success() {
             // 保留宿主给出的原因，但不把凭据或整段响应写入日志。
-            let detail: serde_json::Value = response.json().await.unwrap_or_default();
-            let message = detail
-                .get("error")
-                .and_then(|value| value.as_str())
-                .unwrap_or("身份操作被宿主机拒绝");
+            let message = serde_json::from_slice::<serde_json::Value>(&bytes)
+                .ok()
+                .and_then(|detail| {
+                    detail
+                        .get("error")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_owned)
+                })
+                .unwrap_or_else(|| "身份操作被宿主机拒绝".to_owned());
             anyhow::bail!("{message}");
         }
-        response.json().await.context("身份服务响应无效")
+        serde_json::from_slice(&bytes).context("身份服务响应无效")
     }
 
     /// 在当前租户下创建账号，返回新用户 ID。
