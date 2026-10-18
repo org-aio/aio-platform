@@ -19,6 +19,8 @@ use axum::Router;
 use az_plugin_contract::{ABI_VERSION, process::Configuration};
 
 pub use ingress::Caller;
+// 插件实现受控通道回调时需要构造契约类型，直接复用平台契约而不是复制一份。
+pub use az_plugin_contract;
 
 /// 由 Sidecar 运行时发放的配置；业务从配置获取受限资源，通过路由入口接收可信调用。
 pub struct Host {
