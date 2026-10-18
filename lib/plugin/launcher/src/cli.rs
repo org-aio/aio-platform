@@ -18,6 +18,7 @@ pub async fn run_cli() -> Result<()> {
         ["boot"] => boot(&layout, &supervisor).await,
         ["activate", revision] => run_activate(&layout, &supervisor, revision).await,
         ["repair"] => run_repair(&layout, &supervisor).await,
+        ["adopt", revision] => run_adopt(&layout, revision).await,
         _ => bail!(
             "用法: aio-launcher [boot | activate <40 位 Git SHA> | repair]\n\
              环境: AIO_LAUNCHER_ROOT、AIO_LAUNCHER_BINARY、AIO_LAUNCHER_HEALTH_URL"
@@ -62,6 +63,20 @@ async fn run_activate(
     let candidate = layout.release(revision);
     let outcome = activate(layout, supervisor, SwitchRequest { candidate }).await?;
     println!("{outcome:?}");
+    Ok(())
+}
+
+/// 为协议迁移前的既有发布补生成清单；部署侧一次性调用。
+async fn run_adopt(layout: &Layout, revision: &str) -> Result<()> {
+    let directory = layout.release(revision);
+    layout.ensure_managed(&directory).await?;
+    let manifest = ReleaseManifest::adopt(&directory, revision).await?;
+    manifest.verify(&directory).await?;
+    let bytes = serde_json::to_vec_pretty(&manifest).context("序列化发布清单失败")?;
+    tokio::fs::write(directory.join(crate::RELEASE_MANIFEST), bytes)
+        .await
+        .context("写入发布清单失败")?;
+    println!("已补写发布清单: {revision}");
     Ok(())
 }
 

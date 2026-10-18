@@ -112,6 +112,8 @@ pub async fn repair(
         bail!("首次发布未确认完成且无可回滚版本，请人工确认 {revision}");
     };
     layout.ensure_managed(&previous).await?;
+    // 旧发布可能先于启动器协议存在，缺少清单不构成拒绝回滚的理由：回滚只要求
+    // 目标可被承载并健康，清单校验只属于切换前的候选检查。
     layout.point_current(&previous).await?;
     restart_and_check(supervisor, &previous).await?;
     Journal {
@@ -167,7 +169,10 @@ pub async fn settle(
     }
 }
 
-/// 重启承载服务并等待候选健康；任一步失败都返回原因供上层回滚。
+/// 重启承载服务并等待目标发布健康；任一步失败都返回原因供上层回滚。
+///
+/// 该函数刻意不校验发布清单：回滚目标可能是没有 `release-manifest.json` 的旧发布，
+/// 而回滚的可用性优先于协议一致性。清单校验只发生在候选进入切换之前。
 async fn restart_and_check(supervisor: &dyn HostSupervisor, release: &Path) -> Result<()> {
     supervisor.restart(release).await?;
     supervisor.wait_healthy(release).await

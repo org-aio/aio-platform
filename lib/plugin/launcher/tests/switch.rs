@@ -344,3 +344,40 @@ async fn boot_waits_for_in_flight_activation_instead_of_competing() -> Result<()
     assert_eq!(layout.current_target().await?, Some(previous));
     Ok(())
 }
+
+#[tokio::test]
+async fn adopts_legacy_release_then_boot_stays_strict() -> Result<()> {
+    let temporary = tempfile::tempdir()?;
+    let layout = Layout::new(temporary.path());
+    // 协议迁移前的既有发布：有二进制与前端，但没有 release-manifest.json。
+    let legacy = layout.release(&"9".repeat(40));
+    tokio::fs::create_dir_all(legacy.join("web")).await?;
+    tokio::fs::write(legacy.join("aio-idea"), b"legacy-host").await?;
+    tokio::fs::write(legacy.join("web/index.html"), b"<html>legacy</html>").await?;
+    tokio::fs::write(legacy.join("aio.toml"), b"plugins = []\n").await?;
+    assert!(
+        ReleaseManifest::read(&legacy).await.is_err(),
+        "旧发布没有清单"
+    );
+
+    let manifest = ReleaseManifest::adopt(&legacy, &"9".repeat(40)).await?;
+    manifest.verify(&legacy).await?;
+    tokio::fs::write(
+        legacy.join(RELEASE_MANIFEST),
+        serde_json::to_vec(&manifest)?,
+    )
+    .await?;
+    // 补写后必须能被严格读取与校验，boot 不需要任何弱化路径。
+    let reloaded = ReleaseManifest::read(&legacy).await?;
+    reloaded.verify(&legacy).await?;
+    assert_eq!(reloaded.revision, "9".repeat(40));
+    assert_eq!(
+        reloaded.host_sha256,
+        format!("{:x}", Sha256::digest(b"legacy-host"))
+    );
+
+    // 篡改后仍会被严格拒绝。
+    tokio::fs::write(legacy.join("aio-idea"), b"tampered").await?;
+    assert!(reloaded.verify(&legacy).await.is_err());
+    Ok(())
+}

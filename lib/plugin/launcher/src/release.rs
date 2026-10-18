@@ -70,6 +70,30 @@ impl ReleaseManifest {
         Ok(())
     }
 
+    /// 为不包含清单的既有发布生成描述。
+    ///
+    /// 这是协议迁移的一次性步骤：只有部署侧显式调用 `adopt` 才会写入，之后
+    /// `boot` 对每个发布都保持严格校验，不会出现“缺清单也放行”的弱化路径。
+    pub async fn adopt(directory: &Path, revision: &str) -> Result<Self> {
+        ensure!(
+            revision.len() == 40 && revision.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "发布 revision 必须是 40 位十六进制"
+        );
+        let host_binary = "aio-idea".to_owned();
+        let web_index = "web/index.html".to_owned();
+        let mut extra_files = BTreeMap::new();
+        for relative in [&web_index, &"aio.toml".to_owned()] {
+            extra_files.insert(relative.clone(), digest_file(directory, relative).await?);
+        }
+        Ok(Self {
+            revision: revision.to_owned(),
+            host_sha256: digest_file(directory, &host_binary).await?,
+            host_binary,
+            web_index,
+            extra_files,
+        })
+    }
+
     /// 声明文件按路径排序，便于稳定的错误顺序与测试断言。
     pub fn declared_files(&self) -> BTreeMap<String, String> {
         let mut files = self.extra_files.clone();
@@ -89,4 +113,13 @@ pub fn safe_join(root: &Path, relative: &str) -> Result<PathBuf> {
         "发布路径必须是普通相对路径: {relative}"
     );
     Ok(root.join(candidate))
+}
+
+/// 计算发布目录内一个相对路径的 SHA-256。
+async fn digest_file(directory: &Path, relative: &str) -> Result<String> {
+    let path = safe_join(directory, relative)?;
+    let bytes = tokio::fs::read(&path)
+        .await
+        .with_context(|| format!("读取发布文件失败: {}", path.display()))?;
+    Ok(format!("{:x}", Sha256::digest(&bytes)))
 }
