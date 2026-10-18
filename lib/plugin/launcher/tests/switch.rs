@@ -254,7 +254,7 @@ async fn corrupt_journal_is_rejected_instead_of_treated_as_first_start() -> Resu
 }
 
 #[tokio::test]
-async fn boot_waits_for_in_flight_activation_instead_of_competing() -> Result<()> {
+async fn boot_starts_the_switched_candidate_while_activation_is_in_flight() -> Result<()> {
     let temporary = tempfile::tempdir()?;
     let layout = Layout::new(temporary.path());
     let previous = candidate(&layout, &"2".repeat(40), "<html>old</html>").await?;
@@ -273,20 +273,18 @@ async fn boot_waits_for_in_flight_activation_instead_of_competing() -> Result<()
     let recorder = Arc::new(Recorder::default());
     let supervisor = FakeSupervisor(Arc::clone(&recorder));
 
-    // 持有者活跃：boot 必须沉默，既不回滚也不提交。
+    // 持有者活跃且 current 已指向候选：boot 必须启动候选，否则 activate 的
+    // 健康检查会与 boot 的等待互相死锁。
     let active = Journal {
         holder: Some(current_holder()?),
         ..Journal::read(&layout.journal()).await?.expect("日志")
     };
     active.write(&layout.journal()).await?;
-    let settlement = tokio::time::timeout(
-        std::time::Duration::from_millis(400),
-        settle(&layout, &supervisor, std::time::Duration::from_millis(50)),
-    )
-    .await;
     assert!(
-        settlement.is_err(),
-        "持有者活跃时 settle 必须继续等待而不是抢占"
+        settle(&layout, &supervisor, std::time::Duration::from_millis(50))
+            .await?
+            .is_none(),
+        "切换已落盘后 boot 必须启动候选"
     );
     assert_eq!(
         Journal::read(&layout.journal()).await?.expect("日志").phase,

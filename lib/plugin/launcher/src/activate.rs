@@ -151,7 +151,17 @@ pub async fn settle(
         }
         let alive = journal.holder.as_ref().is_some_and(holder_alive);
         if alive {
-            // 持有者仍活跃：重新计时，等它自己提交或回滚。
+            // 部署侧 activate 已经切换 current 并重启本服务；此时 boot 必须启动
+            // 目标发布，否则双方互相等待健康检查而永久挂起。current 仍指向
+            // 候选或上一发布都说明切换已落盘，启动是安全的；失败由 activate
+            // 的健康检查触发回滚。
+            let target = layout.current_target().await?;
+            let switched = target.as_deref() == Some(journal.current.as_path())
+                || journal.previous.as_deref() == target.as_deref();
+            if switched {
+                return Ok(None);
+            }
+            // 其他情况持有者仍活跃：重新计时，等它自己提交或回滚。
             orphaned = None;
             tokio::time::sleep(Duration::from_millis(200)).await;
             continue;
