@@ -1,6 +1,7 @@
 use anyhow::Result;
 use axum::{Extension, Router, body::Body, http::Request, routing::get};
 use serde_json::json;
+use std::os::unix::fs::PermissionsExt;
 use tower::ServiceExt;
 
 use super::{Caller, Host};
@@ -196,5 +197,18 @@ async fn exposes_host_issued_permissions_and_rejects_malformed_values() -> Resul
         let response = call(&router, Some(value)).await?;
         assert_eq!(response.status(), 401, "必须拒绝: {value}");
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn exposes_the_unix_socket_to_the_host_user() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let socket = root.path().join("service.sock");
+    let listener = super::bind_socket(&socket)?;
+    assert_eq!(
+        std::fs::metadata(&socket)?.permissions().mode() & 0o777,
+        0o666
+    );
+    drop(listener);
     Ok(())
 }

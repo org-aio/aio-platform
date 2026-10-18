@@ -12,7 +12,12 @@ pub use identity::IdentityService;
 #[cfg(unix)]
 pub use storage::ObjectStorage;
 
-use std::{io::Read, path::PathBuf};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+use std::{
+    io::Read,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result, ensure};
 use axum::Router;
@@ -75,8 +80,7 @@ impl Host {
 
         let mut terminate = signal(SignalKind::terminate())?;
         let mut interrupt = signal(SignalKind::interrupt())?;
-        let listener =
-            tokio::net::UnixListener::bind(&self.socket).context("绑定插件 Unix socket 失败")?;
+        let listener = bind_socket(&self.socket)?;
         axum::serve(listener, router)
             .with_graceful_shutdown(async move {
                 tokio::select! {
@@ -87,6 +91,15 @@ impl Host {
             .await
             .context("插件 HTTP 服务失败")
     }
+}
+
+/// 宿主与插件使用不同 uid；监听文件默认受 umask 影响，必须显式允许宿主连接。
+#[cfg(unix)]
+fn bind_socket(path: &Path) -> Result<tokio::net::UnixListener> {
+    let listener = tokio::net::UnixListener::bind(path).context("绑定插件 Unix socket 失败")?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o666))
+        .context("设置插件 Unix socket 权限失败")?;
+    Ok(listener)
 }
 
 #[cfg(test)]
