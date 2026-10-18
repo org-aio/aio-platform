@@ -118,7 +118,12 @@ pub(in crate::runtime::server) async fn mount(
     Ok(MountResponse {
         development: state.config.development.is_some(),
         device_views: permits_device_views(state, bundle.manifest())?,
-        src: format!("/api/runtime/components/assets/{token}/{entry}"),
+        // 整包可能贡献多个页面；把页面 ID 随入口 URL 传给前端，避免同一入口
+        // 无法区分用户、角色、部门等视图。
+        src: format!(
+            "/api/runtime/components/assets/{token}/{entry}?page={}",
+            urlencoding::encode(id)
+        ),
         token,
         revision,
         generation,

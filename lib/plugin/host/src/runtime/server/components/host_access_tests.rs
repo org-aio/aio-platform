@@ -463,7 +463,13 @@ async fn protected_wasm_and_sidecar_require_live_interaction_through_the_broker(
             .await
             .is_err()
         );
-        super::frontend::mount(&state, &cookie, &admin, &format!("{prefix}fixture")).await?;
+        let mounted =
+            super::frontend::mount(&state, &cookie, &admin, &format!("{prefix}fixture")).await?;
+        assert!(
+            mounted.src.contains("?page="),
+            "页面 ID 必须随入口 URL 下发: {}",
+            mounted.src
+        );
         if bundle.digest != wasm.digest {
             let authorization = components.services.enter(&admin, &target.to_string())?;
             assert!(
