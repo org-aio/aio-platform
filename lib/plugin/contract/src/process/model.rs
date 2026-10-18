@@ -68,6 +68,12 @@ pub enum IdentityOperation {
     },
     /// 把当前会话切换到目标租户；宿主校验成员关系后返回新会话。
     SwitchTenant { tenant_id: String },
+    /// 列出当前用户加入的租户；`current` 标记会话当前所在租户。
+    ListTenants,
+    /// 创建租户并把调用者设为管理员；需要宿主账号管理权限。
+    CreateTenant { label: String },
+    /// 重命名当前租户；需要宿主账号管理权限，且只能改会话所在租户。
+    RenameTenant { label: String },
 }
 
 /// 身份操作结果；`session` 只在需要返回新会话的操作里出现。
@@ -78,6 +84,17 @@ pub struct IdentityResponse {
     pub user_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<IdentitySession>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tenants: Vec<IdentityTenant>,
+}
+
+/// 租户视图；字段与租户插件模型一致，便于插件直接消费。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct IdentityTenant {
+    pub id: String,
+    pub label: String,
+    pub current: bool,
 }
 
 /// 宿主回传的会话视图；字段与宿主 `SessionContext` 一致，便于插件重建上下文。

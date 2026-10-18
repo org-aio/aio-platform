@@ -51,4 +51,36 @@ pub trait IdentityProvider: std::any::Any + Send + Sync {
     ) -> anyhow::Result<Option<SessionContext>> {
         anyhow::bail!("当前身份提供者不支持切换租户")
     }
+
+    /// 列出该用户加入的租户，并标记会话当前所在租户。
+    async fn list_tenants(&self, _session: &SessionContext) -> anyhow::Result<Vec<TenantView>> {
+        anyhow::bail!("当前身份提供者不支持租户列表")
+    }
+
+    /// 创建租户并把调用者设为管理员，返回新租户。
+    async fn create_tenant(
+        &self,
+        _session: &SessionContext,
+        _label: &str,
+    ) -> anyhow::Result<TenantView> {
+        anyhow::bail!("当前身份提供者不支持创建租户")
+    }
+
+    /// 重命名会话当前所在租户。
+    async fn rename_current_tenant(
+        &self,
+        _session: &SessionContext,
+        _label: &str,
+    ) -> anyhow::Result<TenantView> {
+        anyhow::bail!("当前身份提供者不支持重命名租户")
+    }
+}
+
+/// 租户视图；宿主与插件共用，避免插件自行定义第二套形状。
+#[cfg(feature = "server")]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct TenantView {
+    pub id: String,
+    pub label: String,
+    pub current: bool,
 }

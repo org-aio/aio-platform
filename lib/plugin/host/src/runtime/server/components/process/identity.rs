@@ -25,6 +25,15 @@ use super::model::Gateway;
 /// 创建账号与重置密码属于账号管理；切换租户只需要有效会话与成员关系。
 const ACCOUNT_PERMISSION: &str = "rbac:manage";
 
+/// 把宿主租户视图转成契约形状；两者字段一致，转换只做字段搬运。
+fn to_view(tenant: crate::identity::TenantView) -> az_plugin_contract::process::IdentityTenant {
+    az_plugin_contract::process::IdentityTenant {
+        id: tenant.id,
+        label: tenant.label,
+        current: tenant.current,
+    }
+}
+
 /// 权限判据：列出所需权限或宿主明确授予的通配权限即通过。
 ///
 /// 端点与测试共用同一个函数，避免“测试通过但执行放宽”这类漂移。
@@ -104,6 +113,7 @@ async fn invoke_inner(
             Ok(IdentityResponse {
                 user_id: Some(user_id),
                 session: None,
+                tenants: Vec::new(),
             })
         }
         IdentityOperation::ResetPassword {
@@ -129,6 +139,48 @@ async fn invoke_inner(
             Ok(IdentityResponse {
                 user_id: Some(user_id),
                 session: None,
+                tenants: Vec::new(),
+            })
+        }
+        IdentityOperation::ListTenants => {
+            // 只读且限定在调用者自己的成员关系内，无需额外权限位。
+            let tenants = components.identity.list_tenants(&session).await?;
+            Ok(IdentityResponse {
+                user_id: None,
+                session: None,
+                tenants: tenants
+                    .into_iter()
+                    .map(|tenant| {
+                        crate::runtime::server::components::process::identity::to_view(tenant)
+                    })
+                    .collect(),
+            })
+        }
+        IdentityOperation::CreateTenant { label } => {
+            ensure!(
+                authorized(&session, ACCOUNT_PERMISSION),
+                "当前角色没有账号管理权限"
+            );
+            let tenant = components.identity.create_tenant(&session, &label).await?;
+            Ok(IdentityResponse {
+                user_id: None,
+                session: None,
+                tenants: vec![to_view(tenant)],
+            })
+        }
+        IdentityOperation::RenameTenant { label } => {
+            ensure!(
+                authorized(&session, ACCOUNT_PERMISSION),
+                "当前角色没有账号管理权限"
+            );
+            let tenant = components
+                .identity
+                .rename_current_tenant(&session, &label)
+                .await?;
+            Ok(IdentityResponse {
+                user_id: None,
+                session: None,
+                tenants: vec![to_view(tenant)],
             })
         }
         IdentityOperation::SwitchTenant { tenant_id } => {
@@ -149,6 +201,7 @@ async fn invoke_inner(
                     tenant_label: switched.tenant_label,
                     permissions: switched.permissions,
                 }),
+                tenants: Vec::new(),
             })
         }
     }
@@ -168,6 +221,19 @@ mod tests {
             tenant_label: "Tenant".into(),
             permissions: permissions.iter().map(|p| (*p).to_owned()).collect(),
         }
+    }
+
+    #[test]
+    fn tenant_writes_require_the_account_permission() {
+        // 写操作与账号管理共用同一判据：没有该权限就不能创建或重命名租户。
+        assert!(!authorized(
+            &session(&["tenant:manage"]),
+            ACCOUNT_PERMISSION
+        ));
+        assert!(authorized(
+            &session(&[ACCOUNT_PERMISSION]),
+            ACCOUNT_PERMISSION
+        ));
     }
 
     #[test]

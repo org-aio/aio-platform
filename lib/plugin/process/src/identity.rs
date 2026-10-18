@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result, ensure};
 use az_plugin_contract::process::{
-    IdentityOperation, IdentityRequest, IdentityResponse, IdentitySession,
+    IdentityOperation, IdentityRequest, IdentityResponse, IdentitySession, IdentityTenant,
 };
 use reqwest::{Client, Url};
 
@@ -148,5 +148,63 @@ impl IdentityService {
             )
             .await?;
         response.session.context("身份服务未返回新会话")
+    }
+
+    /// 列出当前用户加入的租户。
+    pub async fn list_tenants(
+        &self,
+        context_id: &str,
+        session_id: &str,
+    ) -> Result<Vec<IdentityTenant>> {
+        let response = self
+            .invoke(context_id, session_id, IdentityOperation::ListTenants)
+            .await?;
+        Ok(response.tenants)
+    }
+
+    /// 创建租户并返回它；宿主会把调用者设为管理员。
+    pub async fn create_tenant(
+        &self,
+        context_id: &str,
+        session_id: &str,
+        label: &str,
+    ) -> Result<IdentityTenant> {
+        let response = self
+            .invoke(
+                context_id,
+                session_id,
+                IdentityOperation::CreateTenant {
+                    label: label.to_owned(),
+                },
+            )
+            .await?;
+        response
+            .tenants
+            .into_iter()
+            .next()
+            .context("身份服务未返回新租户")
+    }
+
+    /// 重命名当前租户并返回更新后的视图。
+    pub async fn rename_current_tenant(
+        &self,
+        context_id: &str,
+        session_id: &str,
+        label: &str,
+    ) -> Result<IdentityTenant> {
+        let response = self
+            .invoke(
+                context_id,
+                session_id,
+                IdentityOperation::RenameTenant {
+                    label: label.to_owned(),
+                },
+            )
+            .await?;
+        response
+            .tenants
+            .into_iter()
+            .next()
+            .context("身份服务未返回租户")
     }
 }
