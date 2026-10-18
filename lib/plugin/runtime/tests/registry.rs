@@ -216,6 +216,7 @@ fn context(tenant: &str) -> RequestContext {
     RequestContext {
         tenant_id: Some(tenant.into()),
         request_id: "registry-test".into(),
+        permissions: Vec::new(),
         ..Default::default()
     }
 }

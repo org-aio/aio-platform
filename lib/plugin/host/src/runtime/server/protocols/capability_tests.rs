@@ -291,6 +291,7 @@ async fn exercise(fixture: &Fixture) -> Result<()> {
             user_id: Some(owner.user_id.clone()),
             session_id: Some(owner.session_id.clone()),
             request_id: uuid::Uuid::new_v4().to_string(),
+            permissions: Vec::new(),
         },
         grants: CapabilityGrants {
             enhancements: vec![ROOT.into(), CHILD.into()],

@@ -47,6 +47,7 @@ async fn main() -> Result<()> {
         user_id: Some("developer".into()),
         session_id: None,
         request_id: "preview".into(),
+        permissions: Vec::new(),
     };
     let engine = ComponentEngine::new()?;
     let component = engine.compile(&component).await?;

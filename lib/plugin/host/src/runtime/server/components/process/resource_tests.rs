@@ -108,6 +108,7 @@ async fn sidecar_resources_keep_public_and_authenticated_ingress_separate() -> R
     assert_eq!(count, 104857600);
     let context = RequestContext {
         request_id: "resource-context".into(),
+        permissions: Vec::new(),
         session_id: Some("resource-session".into()),
         tenant_id: Some("resource-tenant".into()),
         user_id: Some("resource-user".into()),

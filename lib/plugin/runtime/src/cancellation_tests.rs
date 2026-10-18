@@ -38,6 +38,7 @@ async fn cancelled_calls_release_connections_without_dropping_the_instance_handl
         user_id: Some("tester".into()),
         session_id: None,
         request_id: "cancellation".into(),
+        permissions: Vec::new(),
     };
     let scope = InvocationScope {
         source_id: source,

@@ -14,6 +14,7 @@ fn context(tenant: &str) -> RequestContext {
         user_id: Some("test-user".into()),
         session_id: None,
         request_id: "integration".into(),
+        permissions: Vec::new(),
     }
 }
 

@@ -84,6 +84,7 @@ fn context() -> RequestContext {
     RequestContext {
         tenant_id: Some("tenant".into()),
         request_id: "release-test".into(),
+        permissions: Vec::new(),
         ..Default::default()
     }
 }
@@ -290,6 +291,7 @@ async fn engine_neutral_transport_survives_guest_and_host_wit_boundaries() -> Re
         tenant_id: Some("tenant".into()),
         user_id: Some("user".into()),
         request_id: "transport".into(),
+        permissions: Vec::new(),
         ..Default::default()
     };
     let scope = InvocationScope {

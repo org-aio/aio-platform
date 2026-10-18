@@ -120,6 +120,8 @@ fn scope(session: &SessionContext) -> InvocationScope {
             user_id: Some(session.user_id.clone()),
             session_id: Some(session.session_id.clone()),
             request_id: uuid::Uuid::new_v4().to_string(),
+            // 协议入口代表真实用户会话，权限必须透传，否则能力判定会误判为无权。
+            permissions: session.permissions.clone(),
         },
         grants: CapabilityGrants {
             runtime: session

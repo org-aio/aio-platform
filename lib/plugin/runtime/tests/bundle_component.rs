@@ -13,6 +13,7 @@ fn context(tenant: &str) -> RequestContext {
         tenant_id: Some(tenant.into()),
         user_id: Some("tester".into()),
         request_id: "bundle-test".into(),
+        permissions: Vec::new(),
         ..Default::default()
     }
 }

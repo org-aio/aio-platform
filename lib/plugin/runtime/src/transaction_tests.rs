@@ -11,6 +11,7 @@ fn context() -> RequestContext {
         user_id: Some("test".into()),
         session_id: None,
         request_id: "test".into(),
+        permissions: Vec::new(),
     }
 }
 
