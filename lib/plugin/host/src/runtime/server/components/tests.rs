@@ -133,7 +133,7 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
             root: temp.path().into(),
         },
         Arc::new(super::load_keyring(&temp.path().join("keys.json"))?),
-        super::super::Providers {
+        Providers {
             #[cfg(feature = "sidecar")]
             identity: identity.clone(),
             #[cfg(feature = "sidecar")]
@@ -220,7 +220,7 @@ async fn published_components_install_optionally_and_restore() -> Result<()> {
             root: temp.path().into(),
         },
         Arc::new(super::load_keyring(&temp.path().join("keys.json"))?),
-        super::super::Providers {
+        Providers {
             #[cfg(feature = "sidecar")]
             identity: identity.clone(),
             #[cfg(feature = "sidecar")]
