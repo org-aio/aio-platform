@@ -79,11 +79,11 @@ impl HostSupervisor for SystemdSupervisor {
             .restart_command
             .split_first()
             .context("重启命令缺少程序名")?;
-        // 目标发布目录作为最后一个参数传给部署方的重启命令；命令自身不再维护
-        // 版本选择逻辑，启动器是唯一的发布选择者。
+        // `activate` 已把 `current` 原子指向目标发布；重启命令只负责让 systemd
+        // 重新执行 `boot`。不要把发布路径追加给 `systemctl` 等不接受额外参数的
+        // 命令，否则重启会被当成未知单元而失败。
         let status = Command::new(program)
             .args(arguments)
-            .arg(release)
             .status()
             .with_context(|| format!("执行重启命令失败: {program}"))?;
         ensure!(status.success(), "重启命令返回失败: {status}");
