@@ -1,0 +1,32 @@
+[package]
+name = "az-plugin-launcher"
+version = "2026.5.10"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "固定启动器：校验、切换并回滚宿主发布物"
+
+[lib]
+name = "az_plugin_launcher"
+path = "src/lib.rs"
+
+[[bin]]
+name = "aio-launcher"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+reqwest = { workspace = true, features = ["rustls-tls"] }
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+
+[dev-dependencies]
+tempfile = "3.23.0"
+
+[lints]
+workspace = true

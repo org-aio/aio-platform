@@ -682,6 +682,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "az-plugin-launcher"
+version = "2026.5.10"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "reqwest",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "az-plugin-manifest"
 version = "2026.5.10"
 dependencies = [
