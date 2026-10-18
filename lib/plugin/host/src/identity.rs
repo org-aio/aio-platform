@@ -24,4 +24,31 @@ pub trait IdentityProvider: std::any::Any + Send + Sync {
 
     async fn session_active(&self, session: &str, tenant: &str, user: &str)
     -> anyhow::Result<bool>;
+
+    /// 在指定租户下创建账号，返回新用户 ID。
+    ///
+    /// 只有真实身份提供者能实现。默认拒绝，避免开发替身在产品路径上放行创建。
+    async fn create_user(
+        &self,
+        _tenant: &str,
+        _account: &str,
+        _display_name: &str,
+        _password: &str,
+    ) -> anyhow::Result<String> {
+        anyhow::bail!("当前身份提供者不支持创建账号")
+    }
+
+    /// 重置指定用户密码；提供者负责校验目标存在与密码策略。
+    async fn reset_password(&self, _user_id: &str, _new_password: &str) -> anyhow::Result<()> {
+        anyhow::bail!("当前身份提供者不支持重置密码")
+    }
+
+    /// 把会话切换到目标租户，并返回切换后的会话；成员关系由提供者校验。
+    async fn switch_tenant(
+        &self,
+        _session: &SessionContext,
+        _tenant_id: &str,
+    ) -> anyhow::Result<Option<SessionContext>> {
+        anyhow::bail!("当前身份提供者不支持切换租户")
+    }
 }

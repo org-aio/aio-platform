@@ -55,6 +55,8 @@ pub(super) struct Gateway {
     pub enhancements: Vec<String>,
     pub runtime_capabilities: Vec<String>,
     pub management: bool,
+    /// 该版本是否声明身份提供能力；声明后仍由每次调用的会话权限决定能否执行。
+    pub identity_provider: bool,
     pub storage: Option<az_plugin_runtime::ObjectStore>,
     pub storage_gate: tokio::sync::Mutex<()>,
     pub stopped: tokio_util::sync::CancellationToken,

@@ -557,6 +557,7 @@ async fn verify_bridge(state: &RuntimeState, worker: &str) -> Result<()> {
         enhancements: vec![],
         runtime_capabilities: vec![],
         management: false,
+        identity_provider: false,
         storage: None,
         storage_gate: Default::default(),
         stopped: Default::default(),

@@ -34,6 +34,7 @@ pub(super) struct Processes {
 
 mod enhancements;
 mod http_egress;
+mod identity;
 
 #[cfg(all(test, feature = "postgres"))]
 mod storage_probe_tests;

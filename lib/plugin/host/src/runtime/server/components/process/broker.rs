@@ -29,6 +29,7 @@ pub(super) fn router(gateway: Arc<Gateway>) -> Router {
         .route("/invoke", post(invoke))
         .route("/enhancements/invoke", post(super::enhancements::invoke))
         .route("/management/invoke", post(super::management::invoke))
+        .route("/identity/invoke", post(super::identity::invoke))
         .route("/workers", post(super::workers::invoke))
         .route("/egress", post(egress))
         .route("/egress/responses", post(responses))

@@ -249,7 +249,18 @@ impl Components {
 // 发布与部署引导共用执行器之外的准入校验，缺少执行器也不能掩盖越权声明。
 pub(super) fn validate_manifest(verified: &VerifiedBundle) -> Result<()> {
     let grants = &verified.manifest().plugin.capabilities;
-    ensure!(!grants.identity_provider, "当前发布入口未开放身份提供能力");
+    // 身份提供包能代表宿主创建账号与会话，因此必须显式要求宿主权限门槛；
+    // 缺少门槛的包一律拒绝，避免安装即获得身份管理能力。
+    ensure!(
+        !grants.identity_provider
+            || verified
+                .manifest()
+                .plugin
+                .required_permissions
+                .iter()
+                .any(|p| p == "rbac:manage"),
+        "身份提供整包必须要求宿主 rbac:manage 权限"
+    );
     ensure!(
         !grants.management
             || verified

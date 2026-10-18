@@ -4,7 +4,11 @@ mod ingress;
 mod public;
 pub use public::PublicCaller;
 #[cfg(unix)]
+mod identity;
+#[cfg(unix)]
 mod storage;
+#[cfg(unix)]
+pub use identity::IdentityService;
 #[cfg(unix)]
 pub use storage::ObjectStorage;
 

@@ -35,10 +35,6 @@ impl Processes {
             .process
             .as_ref()
             .context("不是 process 包")?;
-        ensure!(
-            !manifest.capabilities.identity_provider,
-            "process 未开放身份提供能力"
-        );
         let approved = std::env::var("AIO_PROCESS_ENDPOINTS").unwrap_or_default();
         ensure!(
             local
@@ -162,6 +158,7 @@ impl Processes {
             database_url,
             encryption_key,
             storage: resources.storage.is_some(),
+            identity_provider: manifest.capabilities.identity_provider,
             public_routes: manifest.public_routes.clone(),
             public_base: if manifest.public_routes.is_empty() {
                 None
@@ -209,6 +206,7 @@ impl Processes {
             enhancements: manifest.capabilities.enhancements.clone(),
             runtime_capabilities: manifest.capabilities.runtime.clone(),
             management: manifest.capabilities.management,
+            identity_provider: manifest.capabilities.identity_provider,
             storage: resources.storage,
             storage_gate: Default::default(),
             stopped: Default::default(),
