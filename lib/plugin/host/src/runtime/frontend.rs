@@ -83,6 +83,18 @@ fn MountedFrontend(
 ) -> Element {
     let mut bridge = use_signal(|| None::<document::Eval>);
     let frame_ready = use_signal(|| false);
+    // 资源缺失或链路中断时 iframe 不会回报 ready；超时后给出可重试的失败态而不是永久转圈。
+    use_future(move || async move {
+        if document::eval("await new Promise(resolve => setTimeout(resolve, 60000)); return true;")
+            .await
+            .is_err()
+        {
+            return;
+        }
+        if !frame_ready() {
+            on_error.call("插件页面加载超时，请重新打开".into());
+        }
+    });
     let frame_id = format!("aio-frontend-{}", mount.token);
     let config = serde_json::json!({ "host_version": env!("CARGO_PKG_VERSION"), "development": mount.development, "abi": mount.abi, "id": frame_id, "page_id": page_id, "token": mount.token, "src": mount.src, "revision": mount.revision, "generation": mount.generation, "session_context": mount.session_context, "context": mount.context, "assets": mount.assets });
     use_drop(move || {
