@@ -87,27 +87,28 @@ pub(in crate::runtime::server) async fn apply(
     tenant: &str,
     catalog: &mut RuntimeCatalog,
 ) -> Result<()> {
-    let hidden = state.store()?.hidden_sources(tenant).await?;
-    if hidden.is_empty() {
-        return Ok(());
+    let store = state.store()?;
+    // 隐藏菜单与显示名覆盖是彼此独立的租户偏好：没有隐藏项时仍必须应用标签。
+    let hidden = store.hidden_sources(tenant).await?;
+    if !hidden.is_empty() {
+        // 只提供导航偏好，完整页面目录继续用于挂载与服务授权。
+        for source in &hidden {
+            let prefix = format!("component:{source}:");
+            catalog.hidden_pages.extend(
+                catalog
+                    .pages
+                    .iter()
+                    .filter(|page| page.id.starts_with(&prefix))
+                    .map(|page| page.id.clone()),
+            );
+        }
+        catalog
+            .hidden_pages
+            .extend(store.hidden_page_ids(tenant, &hidden).await?);
+        catalog.hidden_pages.sort();
+        catalog.hidden_pages.dedup();
     }
-    // 只提供导航偏好，完整页面目录继续用于挂载与服务授权。
-    for source in &hidden {
-        let prefix = format!("component:{source}:");
-        catalog.hidden_pages.extend(
-            catalog
-                .pages
-                .iter()
-                .filter(|page| page.id.starts_with(&prefix))
-                .map(|page| page.id.clone()),
-        );
-    }
-    catalog
-        .hidden_pages
-        .extend(state.store()?.hidden_page_ids(tenant, &hidden).await?);
-    catalog.hidden_pages.sort();
-    catalog.hidden_pages.dedup();
-    let labels = state.store()?.navigation_labels(tenant).await?;
+    let labels = store.navigation_labels(tenant).await?;
     apply_labels(catalog, &labels);
     catalog.navigation_labels = labels
         .iter()
