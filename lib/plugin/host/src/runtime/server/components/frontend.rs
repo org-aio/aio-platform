@@ -294,9 +294,15 @@ pub(super) async fn asset(
         header::ACCESS_CONTROL_ALLOW_ORIGIN,
         HeaderValue::from_static("*"),
     );
+    // 入口每次校验（票据与版本可能变化）；其余资源在固定票据下内容不变，允许浏览器长期缓存。
+    let cache_control = if path == grant.entry || state.config.development.is_some() {
+        "private, no-cache, no-transform"
+    } else {
+        "private, max-age=31536000, immutable"
+    };
     headers.insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("private, no-cache, no-transform"),
+        HeaderValue::from_static(cache_control),
     );
     headers.insert(
         header::X_CONTENT_TYPE_OPTIONS,

@@ -52,14 +52,32 @@ fn grants_expire_revoke_and_evict_the_oldest_over_quota_grant() -> anyhow::Resul
     let expired_token = access.issue(expired)?;
     assert!(access.get(&expired_token).is_err());
     let mut oldest = grant();
+    oldest.page_id = "oldest".to_owned();
     oldest.issued = Instant::now() - Duration::from_secs(60);
     let oldest_token = access.issue(oldest)?;
-    for _ in 0..15 {
-        access.issue(grant())?;
+    for index in 0..15 {
+        let mut distinct = grant();
+        distinct.page_id = format!("page-{index}");
+        access.issue(distinct)?;
     }
-    let replacement_token = access.issue(grant())?;
+    let mut replacement = grant();
+    replacement.page_id = "replacement".to_owned();
+    let replacement_token = access.issue(replacement)?;
     assert!(access.get(&oldest_token).is_err());
     assert!(access.get(&replacement_token).is_ok());
+    Ok(())
+}
+
+#[test]
+fn identical_mounts_share_one_token_so_asset_urls_stay_stable() -> anyhow::Result<()> {
+    let access = FrontendAccess::new("http://127.0.0.1:8080")?;
+    let first = access.issue(grant())?;
+    let refreshed = access.issue(grant())?;
+    assert_eq!(refreshed, first, "同一挂载身份必须复用票据");
+    assert!(access.get(&first)?.issued.elapsed() < Duration::from_secs(1));
+    let mut upgraded = grant();
+    upgraded.revision = "b".repeat(64);
+    assert_ne!(access.issue(upgraded)?, first, "插件升级必须换取新票据");
     Ok(())
 }
 
