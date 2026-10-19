@@ -30,6 +30,9 @@ pub(super) struct Snapshot {
     pub jobs: Vec<Job>,
     pub credentials: Vec<Credential>,
     pub hidden: BTreeMap<String, BTreeSet<String>>,
+    /// 夹具里的导航标签覆盖：租户 -> (类别, 键) -> 显示名。
+    #[serde(default)]
+    pub labels: BTreeMap<String, BTreeMap<(String, String), String>>,
     pub removed: BTreeSet<String>,
     pub pages: Vec<SavedPage>,
     pub events: Vec<(String, String, PluginLifecycleEvent)>,

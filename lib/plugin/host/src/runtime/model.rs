@@ -23,11 +23,22 @@ pub struct RuntimeCatalog {
     pub pages: Vec<PageDefinition>,
     #[serde(default)]
     pub hidden_pages: Vec<String>,
+    /// 租户已经生效的导航标签覆盖，供管理界面回显与恢复默认。
+    #[serde(default)]
+    pub navigation_labels: Vec<NavigationLabelView>,
     #[serde(default)]
     pub plugin_settings: Vec<PluginSettingsPage>,
     #[serde(default)]
     pub account_items: Vec<RuntimeAccountItem>,
     pub plugins: Vec<InstalledPluginView>,
+}
+
+/// 一条生效中的导航标签覆盖；键是稳定标识，可据此恢复默认显示名。
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct NavigationLabelView {
+    pub kind: String,
+    pub key: String,
+    pub label: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

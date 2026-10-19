@@ -231,6 +231,120 @@ async fn tenant_installation_grants_members_and_menu_visibility_preserves_runtim
             .is_empty()
     );
 
+    // 导航标签覆盖：只有管理身份能改，改写显示名而不动标识、权限或挂载入口。
+    let labels = format!("{base}/api/runtime/navigation/labels");
+    let page_id = format!("component:{source}:fixture");
+    let before_rename: Value = bootstrap("member", &tenant).send().await?.json().await?;
+    let before_page = before_rename["data"]["catalog"]["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|page| page["id"] == Value::String(page_id.clone()))
+        .cloned()
+        .unwrap();
+    let rename = serde_json::json!({"kind":"page","key":page_id,"label":"成员账号"});
+    assert_eq!(
+        client.post(&labels).json(&rename).send().await?.status(),
+        401
+    );
+    assert_eq!(
+        client
+            .post(&labels)
+            .json(&rename)
+            .header("x-test-user", "member")
+            .header("x-test-tenant", &tenant)
+            .send()
+            .await?
+            .status(),
+        403
+    );
+    assert_eq!(
+        client
+            .post(&labels)
+            .json(&serde_json::json!({"kind":"page","key":page_id,"label":"   "}))
+            .header("x-test-user", "manager")
+            .header("x-test-tenant", &tenant)
+            .send()
+            .await?
+            .status(),
+        400
+    );
+    assert_eq!(
+        client
+            .post(&labels)
+            .json(
+                &serde_json::json!({"kind":"page","key":"component:missing:page","label":"不存在"})
+            )
+            .header("x-test-user", "manager")
+            .header("x-test-tenant", &tenant)
+            .send()
+            .await?
+            .status(),
+        404
+    );
+    client
+        .post(&labels)
+        .json(&rename)
+        .header("x-test-user", "manager")
+        .header("x-test-tenant", &tenant)
+        .send()
+        .await?
+        .error_for_status()?;
+    let renamed: Value = bootstrap("member", &tenant).send().await?.json().await?;
+    let renamed_page = renamed["data"]["catalog"]["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|page| page["id"] == Value::String(page_id.clone()))
+        .cloned()
+        .unwrap();
+    assert_eq!(renamed_page["label"], "成员账号");
+    for field in ["id", "scene", "menu_path", "required_permission", "body"] {
+        assert_eq!(
+            renamed_page[field], before_page[field],
+            "覆盖不得改写 {field}"
+        );
+    }
+    assert_eq!(
+        renamed["data"]["catalog"]["navigation_labels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|entry| entry["key"] == Value::String(page_id.clone()))
+            .count(),
+        1
+    );
+    // 其他租户是独立的导航偏好。
+    let other_tenant: Value = bootstrap("manager", "other-tenant")
+        .send()
+        .await?
+        .json()
+        .await?;
+    assert!(
+        other_tenant["data"]["catalog"]["navigation_labels"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    // 恢复默认后回到整包声明的显示名。
+    client
+        .delete(&labels)
+        .json(&serde_json::json!({"kind":"page","key":page_id}))
+        .header("x-test-user", "manager")
+        .header("x-test-tenant", &tenant)
+        .send()
+        .await?
+        .error_for_status()?;
+    let restored: Value = bootstrap("member", &tenant).send().await?.json().await?;
+    let restored_page = restored["data"]["catalog"]["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|page| page["id"] == Value::String(page_id.clone()))
+        .cloned()
+        .unwrap();
+    assert_eq!(restored_page["label"], before_page["label"]);
+
     // 旧版本元数据回填不依赖角色或当前成员。
     sqlx::query("UPDATE component_versions SET permissions=NULL WHERE digest=$1")
         .bind(&first.digest)

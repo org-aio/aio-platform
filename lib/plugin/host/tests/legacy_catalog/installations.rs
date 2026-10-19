@@ -70,6 +70,7 @@ impl PluginInstallations for FileCatalog {
             plugins: vec![],
             page_versions: Default::default(),
             hidden_pages: vec![],
+            navigation_labels: vec![],
             account_items: vec![],
             plugin_settings: vec![],
             session_context: String::new(),

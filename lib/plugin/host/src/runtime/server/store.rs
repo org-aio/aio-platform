@@ -214,6 +214,7 @@ impl PluginInstallations for PluginStore {
             user,
             pages,
             hidden_pages: Vec::new(),
+            navigation_labels: Vec::new(),
             account_items,
             plugins,
         })

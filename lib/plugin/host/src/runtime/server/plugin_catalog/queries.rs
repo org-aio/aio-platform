@@ -16,5 +16,23 @@ pub trait PluginCatalogQueries: Any + Send + Sync {
     async fn set_menu_hidden(&self, tenant: &str, source: &str, hidden: bool) -> Result<()>;
     async fn hidden_sources(&self, tenant: &str) -> Result<Vec<String>>;
     async fn hidden_page_ids(&self, tenant: &str, sources: &[String]) -> Result<Vec<String>>;
+    /// 租户对场景页签、菜单分组与页面标签的显示名覆盖；查询失败不应阻断目录。
+    async fn navigation_labels(
+        &self,
+        tenant: &str,
+    ) -> Result<Vec<super::super::navigation::NavigationLabelOverride>>;
+    async fn set_navigation_label(
+        &self,
+        tenant: &str,
+        kind: super::super::navigation::NavigationLabelKind,
+        key: &str,
+        label: &str,
+    ) -> Result<()>;
+    async fn clear_navigation_label(
+        &self,
+        tenant: &str,
+        kind: super::super::navigation::NavigationLabelKind,
+        key: &str,
+    ) -> Result<()>;
     async fn releases(&self, git: &str) -> Result<Vec<PublishedRelease>>;
 }

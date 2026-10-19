@@ -7,6 +7,7 @@ mod postgres_queries;
 mod queries;
 
 pub use super::execution_availability::ExecutionAvailability;
+pub use super::navigation::{NavigationLabelKind, NavigationLabelOverride};
 pub use super::plugins::ProcessInstance;
 pub use super::repository::DiscoveredPlugin;
 #[cfg(feature = "postgres")]

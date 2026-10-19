@@ -92,6 +92,60 @@ impl PluginCatalogQueries for FileCatalog {
         }
         Ok(pages)
     }
+    async fn navigation_labels(
+        &self,
+        tenant: &str,
+    ) -> Result<Vec<az_plugin_host::runtime::server::plugin_catalog::NavigationLabelOverride>> {
+        let data = self.read().await?;
+        Ok(data
+            .labels
+            .get(tenant)
+            .into_iter()
+            .flat_map(|entries| entries.iter())
+            .filter_map(|((kind, key), label)| {
+                Some(
+                    az_plugin_host::runtime::server::plugin_catalog::NavigationLabelOverride {
+                        kind:
+                            az_plugin_host::runtime::server::plugin_catalog::NavigationLabelKind::parse(
+                                kind,
+                            )?,
+                        key: key.clone(),
+                        label: label.clone(),
+                    },
+                )
+            })
+            .collect())
+    }
+    async fn set_navigation_label(
+        &self,
+        tenant: &str,
+        kind: az_plugin_host::runtime::server::plugin_catalog::NavigationLabelKind,
+        key: &str,
+        label: &str,
+    ) -> Result<()> {
+        self.change(|data| {
+            data.labels
+                .entry(tenant.into())
+                .or_default()
+                .insert((kind.as_str().into(), key.into()), label.into());
+            Ok(())
+        })
+        .await
+    }
+    async fn clear_navigation_label(
+        &self,
+        tenant: &str,
+        kind: az_plugin_host::runtime::server::plugin_catalog::NavigationLabelKind,
+        key: &str,
+    ) -> Result<()> {
+        self.change(|data| {
+            if let Some(entries) = data.labels.get_mut(tenant) {
+                entries.remove(&(kind.as_str().into(), key.into()));
+            }
+            Ok(())
+        })
+        .await
+    }
     async fn releases(&self, git: &str) -> Result<Vec<PublishedRelease>> {
         let data = self.read().await?;
         let mut releases = vec![];
