@@ -35,6 +35,15 @@ fn run(arguments: Vec<String>) -> Result<()> {
             &arguments[1..],
             "请通过 @zjarlin/aio 安装设备助手，或在 AIO 插件市场安装 aio-plugin-device",
         ),
+        "tunnel" => {
+            let mut forwarded = vec!["tunnel".to_owned()];
+            forwarded.extend_from_slice(&arguments[1..]);
+            run_plugin_cli(
+                "aio-device",
+                &forwarded,
+                "请先安装 @zjarlin/aio-device，并完成控制端配对",
+            )
+        }
         "memory" => {
             let mut forwarded = vec!["memory".to_owned()];
             forwarded.extend_from_slice(&arguments[1..]);
