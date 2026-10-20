@@ -24,6 +24,13 @@ pub trait WorkerService: Any + Send + Sync {
     /// 原子选定用户的归档密钥密文；并发请求必须返回同一密文，不覆盖已有值。
     async fn archive_key(&self, device: &DeviceIdentity, candidate: Vec<u8>) -> Result<Vec<u8>>;
     async fn list(&self, session: &SessionContext) -> Result<Vec<Worker>>;
+    /// 仅设备所属账号可改展示名，不改设备身份、凭据、能力或任务。
+    async fn update_label(
+        &self,
+        session: &SessionContext,
+        id: &str,
+        request: UpdateLabelRequest,
+    ) -> Result<Worker>;
     async fn revoke(&self, session: &SessionContext, id: &str) -> Result<()>;
     async fn enqueue(&self, session: &SessionContext, request: SubmitTask) -> Result<Task>;
     async fn tasks(&self, session: &SessionContext) -> Result<Vec<Task>>;

@@ -11,6 +11,12 @@ pub struct PairRequest {
     #[serde(default)]
     pub machine_id: Option<String>,
 }
+/// 用户可改的设备显示名只覆盖 label；设备 ID、凭据、系统名与能力保持不变。
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateLabelRequest {
+    pub label: String,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Pairing {
     pub device_id: String,
