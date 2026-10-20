@@ -27,6 +27,8 @@ content_types = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 max_bytes = 104857600
 ```
 
+只读笔记页或静态展板可以声明静态 `text/html` 并设置 `inline = true`，让浏览器直接渲染而不是下载。内联只允许静态 HTML 或图片；宿主仍发送无脚本沙箱 CSP（`default-src 'none'`、仅内联样式和 `data:` 图片），页面不能加载脚本、外部请求或取得同源权限。不要内联由用户输入直接拼接的 HTML。
+
 最多 16 个完整路径模式；禁止通配前缀、重叠路由、重复参数和重复类型。运行时公共入口为 `/api/runtime/components/public/{source}/{tenant}/i/{token}`。升级沿用来源、租户和业务 token；可读性仍由当前已激活整包及它的清单决定。业务负责生成不可猜测的分享 token 和按租户查找对象；不能把匿名入口挂到列举、修改或管理路由。
 
 进程启动配置提供 `public_routes` 和 `public_base`。`Host::protect_public(router)` 校验启动时固定的入口令牌、租户、公开标记和声明路径，注入只有租户字段的 `PublicCaller`；用户、会话、交互上下文和浏览器 Cookie 不会转入匿名调用。公开入口不记录用户，也不能凭匿名请求调用受交互授权保护的宿主能力。

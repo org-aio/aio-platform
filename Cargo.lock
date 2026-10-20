@@ -616,7 +616,7 @@ dependencies = [
 
 [[package]]
 name = "az-plugin-host"
-version = "2026.10.17"
+version = "2026.10.20"
 dependencies = [
  "anyhow",
  "arc-swap",

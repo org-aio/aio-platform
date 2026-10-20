@@ -158,15 +158,20 @@ async fn prepare(
         .header("content-type", content_type)
         .header("cache-control", "no-store")
         .header("x-content-type-options", "nosniff")
+        // 内联页面仍使用无脚本沙箱：只允许缩进样式和包内图片，不授予同源或网络能力。
         .header(
             "content-security-policy",
-            "sandbox; default-src 'none'; img-src data:; frame-ancestors 'none'",
+            if route.inline {
+                "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'; frame-ancestors 'none'"
+            } else {
+                "sandbox; default-src 'none'; img-src data:; frame-ancestors 'none'"
+            },
         )
         .header("referrer-policy", "no-referrer")
         .header("cross-origin-resource-policy", "cross-origin")
         .header(
             "content-disposition",
-            if content_type.starts_with("image/") {
+            if route.inline || content_type.starts_with("image/") {
                 "inline"
             } else {
                 "attachment"

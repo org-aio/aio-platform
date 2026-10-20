@@ -12,6 +12,9 @@ pub struct PublicRoute {
     pub path: String,
     pub content_types: Vec<String>,
     pub max_bytes: u64,
+    /// 浏览器内联展示；只对静态 `text/html` 或图片开放，脚本仍由沙箱 CSP 禁止。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub inline: bool,
 }
 
 fn parameter(segment: &str) -> Option<&str> {
@@ -89,6 +92,15 @@ pub fn validate_routes(routes: &[PublicRoute]) -> Result<()> {
                 "公开资源类型无效或重复"
             );
         }
+        if route.inline {
+            ensure!(
+                route
+                    .content_types
+                    .iter()
+                    .all(|mime| mime == "text/html" || mime.starts_with("image/")),
+                "内联公开资源只允许静态 HTML 或图片"
+            );
+        }
         for previous in &routes[..index] {
             let overlaps = previous.path.split('/').count() == route.path.split('/').count()
                 && previous
@@ -111,6 +123,7 @@ mod tests {
             path: path.into(),
             content_types: vec!["image/png".into()],
             max_bytes: MAX_PUBLIC_BYTES,
+            inline: false,
         }
     }
 
@@ -158,6 +171,23 @@ mod tests {
         invalid.content_types = vec!["image/png".into()];
         invalid.max_bytes = MAX_PUBLIC_BYTES + 1;
         assert!(validate_routes(&[invalid]).is_err());
+
+        // 内联只对静态 HTML 或图片开放；脚本仍由宿主沙箱 CSP 禁止。
+        let mut page = route("/s/{token}");
+        page.inline = true;
+        page.content_types = vec!["text/html".into()];
+        assert!(validate_routes(&[page.clone()]).is_ok());
+        page.content_types = vec!["image/png".into()];
+        assert!(validate_routes(&[page.clone()]).is_ok());
+        for mime in [
+            "text/javascript",
+            "application/json",
+            "text/css",
+            "application/octet-stream",
+        ] {
+            page.content_types = vec![mime.into()];
+            assert!(validate_routes(&[page.clone()]).is_err(), "{mime}");
+        }
         Ok(())
     }
 }
