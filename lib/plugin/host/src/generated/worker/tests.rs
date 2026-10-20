@@ -1,7 +1,7 @@
 use super::*;
 use crate::generated::worker::WorkerService as RuntimeWorkerService;
 use crate::{
-    generated::worker::model::PairRequest,
+    generated::worker::model::{PairRequest, SubmitTask},
     identity::{IdentityProvider, SessionContext},
     runtime::server::RuntimeState,
 };
@@ -202,107 +202,6 @@ async fn post(
     }
     .send()
     .await?)
-}
-#[tokio::test]
-#[ignore = "需要隔离 PostgreSQL，设置 AIO_TEST_DATABASE_URL"]
-async fn device_alias_is_owner_scoped_persistent_and_keeps_identity() -> Result<()> {
-    let root = tempfile::tempdir()?;
-    let database = std::env::var("AIO_TEST_DATABASE_URL")?;
-    let admin = sqlx::PgPool::connect(&database).await?;
-    let schema = format!("worker_alias_{}", uuid::Uuid::new_v4().simple());
-    sqlx::query(&format!("CREATE SCHEMA {schema}"))
-        .execute(&admin)
-        .await?;
-    let mut isolated = reqwest::Url::parse(&database)?;
-    isolated
-        .query_pairs_mut()
-        .append_pair("options", &format!("-c search_path={schema}"));
-    let state = RuntimeState::isolated_admin_test(
-        Arc::new(Identity),
-        isolated.as_ref(),
-        "http://127.0.0.1:1",
-        root.path(),
-    )
-    .await?;
-    let workers = state.service::<dyn RuntimeWorkerService>()?;
-    let owner = SessionContext {
-        session_id: "owner".into(),
-        user_id: "owner".into(),
-        account: "owner".into(),
-        display_name: "owner".into(),
-        tenant_id: "test".into(),
-        tenant_label: "test".into(),
-        permissions: vec![],
-    };
-    let pairing = workers
-        .pair(PairRequest {
-            label: "OKM-UINO · local".into(),
-            platform: "linux".into(),
-            capabilities: vec!["space.scan".into()],
-            machine_id: None,
-        })
-        .await?;
-    workers.approve(&owner, &pairing.code).await?;
-    let renamed = workers
-        .update_label(
-            &owner,
-            &pairing.device_id,
-            super::model::UpdateLabelRequest {
-                label: "  工作主机  ".into(),
-            },
-        )
-        .await?;
-    assert_eq!(renamed.label, "工作主机");
-    assert_eq!(renamed.id, pairing.device_id);
-    assert_eq!(workers.list(&owner).await?[0].label, "工作主机");
-    let stored: String = sqlx::query_scalar("SELECT label FROM worker_devices WHERE id=$1")
-        .bind(&pairing.device_id)
-        .fetch_one(state.service::<sqlx::PgPool>()?.as_ref())
-        .await?;
-    assert_eq!(stored, "工作主机");
-    for invalid in ["", "   ", &"标".repeat(121)] {
-        assert!(
-            workers
-                .update_label(
-                    &owner,
-                    &pairing.device_id,
-                    super::model::UpdateLabelRequest {
-                        label: invalid.to_owned()
-                    }
-                )
-                .await
-                .is_err()
-        );
-    }
-    for session in [
-        SessionContext {
-            user_id: "other".into(),
-            account: "other".into(),
-            ..owner.clone()
-        },
-        SessionContext {
-            tenant_id: "other-tenant".into(),
-            ..owner.clone()
-        },
-    ] {
-        assert!(
-            workers
-                .update_label(
-                    &session,
-                    &pairing.device_id,
-                    super::model::UpdateLabelRequest {
-                        label: "越权".into()
-                    }
-                )
-                .await
-                .is_err()
-        );
-    }
-    state.service::<sqlx::PgPool>()?.close().await;
-    sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
-        .execute(&admin)
-        .await?;
-    Ok(())
 }
 #[tokio::test]
 #[ignore = "需要隔离 PostgreSQL、restic 和已构建的空间 worker，设置 AIO_TEST_DATABASE_URL / AIO_SPACE_TEST_CLI"]
@@ -785,3 +684,5 @@ async fn worker_pairing_tasks_archives_and_revocation_end_to_end() -> Result<()>
         .await?;
     Ok(())
 }
+
+mod pairing;
