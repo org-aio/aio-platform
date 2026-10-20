@@ -1,7 +1,9 @@
 use super::model::Worker;
 use az_ui_components::{
+    admin::{AsyncResult, EditorDialog},
     button::{Button, ButtonSize, ButtonVariant},
     dialog::{Dialog, DialogTitle},
+    input::TextInput,
 };
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{RefreshCw, Trash2, X};
@@ -63,6 +65,8 @@ pub(crate) fn WorkerPanel(pairing: Signal<Option<String>>, on_close: EventHandle
     let mut error = use_signal(|| None::<String>);
     let mut busy = use_signal(|| false);
     let mut revoke = use_signal(|| None::<Worker>);
+    let mut rename = use_signal(|| None::<Worker>);
+    let mut alias = use_signal(String::new);
     let code = pairing;
     let mut notice = use_signal(|| None::<String>);
     let mut copied = use_signal(|| None::<String>);
@@ -172,7 +176,10 @@ pub(crate) fn WorkerPanel(pairing: Signal<Option<String>>, on_close: EventHandle
                                     small{class:"break-all text-muted-foreground","{worker.platform} · {worker.id}"}
                                 }
                                 if worker.status!="revoked"{
-                                    Button{variant:ButtonVariant::Outline,disabled:busy(),onclick:{let worker=worker.clone();move |_|revoke.set(Some(worker.clone()))},Trash2{}"删除设备"}
+                                    div{class:"flex flex-wrap items-center gap-2",
+                                        Button{variant:ButtonVariant::Ghost,disabled:busy(),onclick:{let worker=worker.clone();move |_|{alias.set(worker.label.clone());rename.set(Some(worker.clone()));}},"改别名"}
+                                        Button{variant:ButtonVariant::Outline,disabled:busy(),onclick:{let worker=worker.clone();move |_|revoke.set(Some(worker.clone()))},Trash2{}"删除设备"}
+                                    }
                                 }
                             }
                         }
@@ -180,6 +187,23 @@ pub(crate) fn WorkerPanel(pairing: Signal<Option<String>>, on_close: EventHandle
                     Some(Err(e))=>rsx!{p{role:"alert","{e}"}},None=>rsx!{p{"正在加载设备…"}}
                 }
             }
+        }
+        if let Some(worker)=rename(){
+            if true {
+            EditorDialog{title:"修改设备别名",description:worker.label.clone()+" · "+&worker.platform+"；只改显示名称，设备 ID、凭据、同步和授权保持不变。",
+                save: {let id=worker.id.clone();move |_| -> AsyncResult<()> {
+                    let id=id.clone();let value=alias().trim().to_owned();
+                    Box::pin(async move {
+                        if value.is_empty(){return Err("设备别名不能为空".into());}
+                        if value.chars().count()>120{return Err("设备别名最多 120 个字符".into());}
+                        request::<Worker>("PATCH",&format!("/api/runtime/workers/{id}"),Some(&serde_json::json!({"label":value}))).await?;
+                        Ok(())
+                    })
+                }},
+                on_saved: move |_|{rename.set(None);notice.set(Some("设备别名已更新".into()));workers.restart();},
+                on_close: move |_|rename.set(None),
+                TextInput{label:"设备别名".to_string(),value:alias(),on_change:move |value:String|alias.set(value),placeholder:"例如：工作笔记本".to_string()}
+            }}
         }
         if let Some(worker)=revoke(){
             Dialog{open:true,on_open_change:move|open:bool|if !open && !busy(){revoke.set(None)},DialogTitle{"删除设备"}
